@@ -77,8 +77,8 @@ rely on them.
 **Decision.** k3s directly on Ubuntu, Argo CD app-of-apps, and one shared Postgres through
 CloudNativePG. Components arrive just in time, with the change that first needs them.
 **Consequence.** Estimated ~12–14 GB for the full platform. Running LLMs locally is out of
-scope, and models are remote. Bootstrap is a chicken-and-egg problem: Argo CD starts from an
-external or local repo and moves to Gitea once Gitea is up.
+scope, and models are remote. Bootstrap is a chicken-and-egg problem, because Argo CD needs a
+git server that it deploys itself. D12 solves it.
 
 ### D9. Keycloak where SSO is free
 
@@ -97,12 +97,63 @@ Step 1 is the spec loop with Plane as the only channel.
 **Consequence.** Mattermost, Loki, Langfuse and Keycloak arrive later. The spec loop can
 improve itself once it runs.
 
+### D11. One repository for platform, orchestrator and apps
+
+**Context.** A separate platform repository would mirror enterprise ownership boundaries more
+closely.
+**Decision.** A monorepo: `platform/`, `orchestrator/` and `apps/` side by side under one
+OpenSpec root.
+**Consequence.** One history, and specs for infrastructure and for the loop live next to each
+other. Splitting later is a `git filter-repo` away.
+
+### D12. Bootstrap from the local clone, then Argo CD adopts
+
+**Context.** Argo CD needs a git server, but the git server (Gitea) runs inside the cluster
+that Argo CD manages. Rebuilding the cluster would destroy the repository with it.
+**Decision.** The local clone is the seed. An idempotent `platform/bootstrap.sh` installs only
+k3s, Postgres, Gitea and Argo CD, pushes the clone into Gitea, and points Argo CD at it. Argo CD
+then adopts those components, using the same Helm values files and release names.
+**Consequence.** A rebuild needs only the clone and the secrets directory, with no external
+service involved. The script and Argo CD must render identical manifests, or adoption causes
+churn. Application data is not restored (backups are a separate change). Specified in
+change `platform-core`.
+
+### D13. `sdlc.internal`, resolved twice, and a CA that outlives the cluster
+
+**Context.** Service names must work the same from the host browser and from pods, offline and
+across Wi-Fi changes. `.local` is taken by mDNS on Ubuntu.
+**Decision.** Zone `sdlc.internal`. The host maps names to `127.0.0.1` in a managed
+`/etc/hosts` block, and pods get a CoreDNS rewrite to Traefik's Service. TLS starts on day one:
+a local root CA kept outside the cluster, plus one wildcard certificate as Traefik's default.
+**Consequence.** The host trusts the CA once, and rebuilds don't break that trust. Adding a
+service is one line in `platform/hosts.txt`. CA trust inside pods is deferred to Keycloak.
+
+### D14. Secrets live outside the repository; no Vault for now
+
+**Context.** `main` may be mirrored publicly, and coding agents read the working tree. The
+platform needs database passwords, session keys and a few API tokens, and the values must
+survive rebuilds.
+**Decision.** Values live in `~/.config/ai-native-sdlc/secrets.env` (outside the working
+tree). The repository holds only a manifest of secret names. The bootstrap generates missing
+values and applies them as plain Kubernetes Secrets. SOPS, Sealed Secrets and Vault/OpenBao
+were rejected for now.
+**Consequence.** Nothing secret can leak through git or reach an agent's context. The secrets
+directory is the one thing to back up, for example in a password manager. Vault/OpenBao stays
+the candidate if agent Jobs need short-lived, audited credentials.
+
+### D15. Gitea becomes `origin`; GitHub is an optional mirror of `main`
+
+**Context.** The GitHub repository was created as a public showcase. The loop's pull requests,
+reviews and branch protection belong on the self-hosted git server.
+**Decision.** The bootstrap moves `origin` to Gitea and keeps the old remote as `github`. A
+Gitea Actions workflow force-pushes `main` only to GitHub. Gitea's built-in push mirror is not
+used, because it mirrors every ref.
+**Consequence.** Agent branches never become public. Deleting one workflow file switches the
+mirror off, and the GitHub repository can be removed without affecting anything else.
+
 ---
 
 ### Open
 
-- **Monorepo or separate platform repo.** We lean towards a monorepo (`platform/` next to
-  `orchestrator/`, one OpenSpec root). A separate repo would mirror enterprise ownership
-  boundaries more closely.
 - **Free model viability.** Long OpenSpec workflows may exceed what free models handle
   reliably. Langfuse traces of harness runs will decide.

@@ -18,6 +18,46 @@ schema: spec-driven
 #       - Always state what is out of scope
 #     tasks:
 #       - Break tasks into chunks of max 2 hours
+rules:
+  proposal:
+    - >-
+      Right under the title, add a "> **TL;DR**" blockquote: 3-5 short
+      plain-language bullets (what changes, why now, what is out of scope)
+      for a reader who reads nothing else.
+    - &intro-last >-
+      Write the intro last, as a separate step: first save the complete
+      document without it, then re-read the saved file from disk and insert
+      the intro with a separate edit, summarizing only what the document
+      actually says.
+    - &intro-sync >-
+      Whenever the document is edited later, re-read the intro and update it
+      in the same edit if it no longer matches the body.
+  design:
+    - >-
+      Right under the title, add a "> **TL;DR**" blockquote: the 3-5
+      decisions that matter most (one line each) and the biggest risk.
+    - *intro-last
+    - *intro-sync
+  specs:
+    - >-
+      Write "## Purpose" as a plain-language intro (2-3 sentences, no
+      jargon): what the capability guarantees and why it exists.
+    - >-
+      Write Purpose last: save the spec with a one-line placeholder under
+      "## Purpose" and all requirements and scenarios complete, then re-read
+      the saved file from disk and replace the placeholder with a separate
+      edit. Never leave the placeholder in a finished spec.
+    - *intro-sync
+    - >-
+      Add no other sections and no text outside "## Purpose" and the delta
+      sections: archive drops it and validate --strict warns.
+  tasks:
+    - >-
+      Right under the title, add a "> **TL;DR**" blockquote: the task
+      groups, what is verified at the end, and every step that needs manual
+      action from the operator (sudo, tokens, browser setup).
+    - *intro-last
+    - *intro-sync
 
 # Per-operation guidance (optional)
 # Add advisory guidance for how apply and archive work should be conducted.
