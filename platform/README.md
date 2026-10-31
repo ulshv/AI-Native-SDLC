@@ -52,8 +52,10 @@ that runs in the repository (agents included) can read it, and nothing can be co
 goes in the cluster. [`secrets.env.example`](secrets.env.example) lists the names with a
 description of each.
 
-**Generated or external.** `generated` values are random and created by the bootstrap when
-they are missing, so you never type them. `external` values come from somewhere else, and you
+**Generated or external.** `password` and `key` values are random base58 strings that the
+bootstrap creates when they are missing, so you never type them. A `password` (22 characters,
+128 bits) is only hashed or compared; a `key` (44 characters, 256 bits) is turned into an
+encryption or signing key by the app. `external` values come from somewhere else, and you
 put them into `secrets.env` yourself: `PLANE_ADMIN_EMAIL` always, `GITHUB_MIRROR_TOKEN` only for
 the public mirror. Values persist across rebuilds, so services keep the same credentials.
 

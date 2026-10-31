@@ -47,7 +47,7 @@
 ## 5. Shared database
 
 - [ ] 5.1 Write `platform/apps/cloudnative-pg/` values (the operator), and in `platform/apps/databases/` the `platform-pg` Cluster with `managed.roles` for `gitea` and `plane` (passwords from the seeded Secrets), plus `Database` resources owned by those roles. Pin the Postgres image with `imageName`, so an operator upgrade cannot change the Postgres version
-- [ ] 5.2 Add the wave -1 SQL Job that revokes `CONNECT` from `PUBLIC` on each service database
+- [ ] 5.2 Add `pg_hba` rules to the `platform-pg` Cluster: each service role may connect only to its own database, and every other network connection is rejected
 - [ ] 5.3 Implement bootstrap phase 3 for the CNPG operator and cluster with Helm and `kubectl`, reading the same files, and verify the cluster reports healthy
 - [ ] 5.4 Add a smoke check: the `gitea` credentials can open the `gitea` database and are refused on `plane`. Verify it passes
 

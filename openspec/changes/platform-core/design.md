@@ -83,6 +83,13 @@ existing Applications and skip them. This satisfies the hand-over requirement.
 
 - **Alternative:** bootstrap Argo CD from the public GitHub repository. That is simpler, but a
   rebuild would then depend on an external service that may be removed.
+- **Alternative:** Terraform. It has no real providers for the host steps (k3s, `/etc/hosts`,
+  CA trust), which would become `local-exec` shell anyway. Helm releases created by Terraform
+  would get two owners once Argo CD adopts them. And its state file keeps secret values in
+  plain text. Ansible fits the host steps better, but is not worth a Python toolchain for
+  about 150 lines of check-then-act shell. Revisit Ansible for several hosts, and Terraform
+  for a cloud move; the GitOps layer stays the same either way. Nomad is not an alternative
+  here: it would replace Kubernetes, not the bootstrap.
 
 ### 3. Argo CD: app-of-apps, sync waves, automated sync
 
@@ -146,7 +153,8 @@ through the Gitea API.
 ### 6. Secrets: a file outside the repo, a manifest inside it
 
 - **`platform/secrets.manifest`** (tracked) has two kinds of lines. A `value` line names a
-  secret, its kind (`generated` or `external`), whether it is required, and what it is for.
+  secret, its kind (`password`, `key` or `external`), whether it is required, and what it is
+  for.
   A `put` line says where a value goes in the cluster: namespace, Secret, key, and a template
   in which `${NAME}` is replaced by that value. Templates exist because charts want more
   than one bare value per key: one value often goes to several Secrets (a role password for
@@ -154,11 +162,18 @@ through the Gitea API.
   connection string (Plane's `DATABASE_URL`). The manifest holds names and templates only,
   never values. This is the contract the spec calls "the list of required secret names".
   `platform/secrets.env.example` is derived from it for humans.
-- **`~/.config/ai-native-sdlc/secrets.env`** (mode 0600) holds the values. When a `generated`
-  value is missing, the bootstrap creates it (`openssl rand`) and appends it. When a
-  `required` `external` value is missing, preflight fails.
-- **Secrets are applied** with `kubectl create secret ... --dry-run=client -o yaml | kubectl
-  apply -f -`, so re-running is safe and rotation is just editing the file and re-running.
+- **`~/.config/ai-native-sdlc/secrets.env`** (mode 0600) holds the values. When a `password`
+  or `key` value is missing, the bootstrap generates it and appends it. When a `required`
+  `external` value is missing, preflight fails.
+- **Generated values are random base58** (letters and digits without `0 O I l`), so they are
+  safe inside URLs and connection strings. A `password` is only hashed or compared and gets
+  22 characters (128 bits). A `key` is turned into an encryption or signing key by the app
+  (Gitea and Plane hash their `SECRET_KEY` into an AES key) and gets 44 characters (256 bits).
+  A raw key with a fixed format, such as 64 hex characters, gets its own kind when the first
+  one appears.
+- **Secrets are applied** with `kubectl apply --server-side` from a list rendered out of the
+  manifest, so re-running is safe and rotation is just editing the file and re-running.
+  Server-side apply keeps no `last-applied` annotation, so values are not copied into metadata.
   The Secrets are not in git, and charts reference them through `existingSecret`-style
   values. Argo CD ignores objects it does not own.
 - **`.gitignore`** gets `secrets.env`, `*.key` and `.secrets/` as a second line of defense.
@@ -167,7 +182,8 @@ through the Gitea API.
   also protect only the operator's clone, because agent Jobs work in fresh clones without it.
 - **In this change:** Gitea admin password, Gitea secret key and internal token, the Postgres
   role passwords for `gitea` and `plane`, Plane's `SECRET_KEY` and `LIVE_SERVER_SECRET_KEY`,
-  Plane's MinIO and RabbitMQ passwords and `PLANE_ADMIN_PASSWORD` are `generated`.
+  Plane's MinIO and RabbitMQ passwords and `PLANE_ADMIN_PASSWORD` are generated; the three
+  secret keys are of kind `key`, the rest `password`.
   `PLANE_ADMIN_EMAIL` is `external` and required. `GITHUB_MIRROR_TOKEN` is `external` and
   required only when the mirror is enabled. Tokens that only make sense for one cluster (the Gitea runner
   registration token, and the Argo CD and git-push tokens) are created by the bootstrap
@@ -185,9 +201,16 @@ through the Gitea API.
 - **Databases** `gitea` and `plane` are declared with CNPG's `Database` resources, each owned
   by its role.
 - **Isolation needs one extra step.** Postgres grants `CONNECT` to `PUBLIC` on every new
-  database, so without it any role can open any database. We revoke `CONNECT ... FROM PUBLIC`
-  on each service database through a small SQL Job in wave -1 (after the databases exist).
-  This is what makes the spec's "connection is refused" scenario true.
+  database, so without it any role can open any database. The Cluster's `pg_hba` rules close
+  that: each service role may connect only to its own database, and a final
+  `host all all all reject` refuses every other network connection before the password is
+  checked. This is what makes the spec's "connection is refused" scenario true. The operator
+  is not affected, because its own connections use the local socket and the certificate rule
+  for replication, which come before user rules. A new service adds one line next to its
+  `Database`.
+- **Alternative:** a SQL Job that runs `REVOKE CONNECT ... FROM PUBLIC` after the databases
+  exist. It needs a psql image, retries and hook ordering to wait for the operator, where
+  `pg_hba` is three declarative lines that hold from the cluster's first start.
 
 ### 8. Gitea and its Actions runner
 
