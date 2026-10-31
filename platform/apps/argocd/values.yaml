@@ -7,6 +7,9 @@ configs:
   params:
     # TLS ends at Traefik, which forwards plain HTTP to the server.
     server.insecure: true
+    # Compare through a server-side dry run, so fields that admission webhooks default (such
+    # as CloudNativePG's role settings) do not show as drift.
+    controller.diff.server.side: "true"
   cm:
     # Argo CD does not assess a child Application's health by default, so sync waves in the
     # root Application would not wait for a component to become healthy. This restores it.
