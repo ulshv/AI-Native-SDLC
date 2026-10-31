@@ -1,0 +1,18 @@
+# App-of-apps: renders one child Application per platform/apps/<component>/app.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
+    targetRevision: main
+    path: platform/apps
+    directory:
+      recurse: true
+      include: '*/app.yaml'

@@ -201,6 +201,29 @@ stateDiagram-v2
 
 LLM удалённые, локальные модели поверх всего этого не влезут.
 
+### Что нужно на хосте
+
+Пример для Ubuntu 26.04 LTS — машины автора. `platform/bootstrap.sh` проверяет всё это до
+того, как что-либо менять, и называет то, чего не хватает.
+
+```bash
+# обычно уже стоят
+sudo apt install git openssl jq curl
+
+# certutil: добавляет локальный CA в хранилище сертификатов Chrome
+sudo apt install libnss3-tools
+
+# yq v4 от Mike Farah (`yq` из apt — другая Python-утилита с другим синтаксисом)
+sudo snap install yq
+
+# Helm, пакетный менеджер Kubernetes
+sudo snap install helm --classic
+```
+
+`kubectl` отдельно ставить не нужно: он идёт вместе с k3s, которую ставит бутстрап. Ещё
+нужны права `sudo` и свободные порты 80 и 443. Перед бутстрапом останови Docker Desktop
+или что-то ещё, что их слушает.
+
 ## Роадмап
 
 Каждый шаг — один change в OpenSpec: сначала спека, потом реализация.

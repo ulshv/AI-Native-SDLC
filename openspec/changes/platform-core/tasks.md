@@ -15,11 +15,11 @@
 
 ## 1. Scaffolding
 
-- [ ] 1.1 Create the `platform/` layout from design decision 11 (`argocd/`, `apps/<component>/` for every component) and verify the tree matches the design
-- [ ] 1.2 Add `.gitignore` rules for `secrets.env`, `*.key` and `.secrets/`, and verify with `git check-ignore` that a test `secrets.env` and `ca.key` placed in the working tree are ignored
-- [ ] 1.3 Pin the latest stable versions of k3s and of the Argo CD, cert-manager, CloudNativePG, Traefik, Gitea and Plane CE charts in the components' `app.yaml` files, and verify no `targetRevision` is a moving tag such as `latest` or `*`
-- [ ] 1.4 Create `platform/smoke.sh`, which runs named checks and exits non-zero on the first failure, and verify it runs cleanly with no checks registered
-- [ ] 1.5 Create `platform/README.md` with prerequisites, the run command and empty sections for later groups, and verify every command it lists exists in the repo or on the host
+- [x] 1.1 Create the `platform/` layout from design decision 11 (`argocd/`, `apps/<component>/` for every component) and verify the tree matches the design
+- [x] 1.2 Add `.gitignore` rules for `secrets.env`, `*.key` and `.secrets/`, and verify with `git check-ignore` that a test `secrets.env` and `ca.key` placed in the working tree are ignored
+- [x] 1.3 Pin the latest stable versions of k3s and of the Argo CD, cert-manager, CloudNativePG, Traefik, Gitea and Plane CE charts in the components' `app.yaml` files, and verify no `targetRevision` is a moving tag such as `latest` or `*`
+- [x] 1.4 Create `platform/smoke.sh`, which runs named checks and exits non-zero on the first failure, and verify it runs cleanly with no checks registered
+- [x] 1.5 Create `platform/README.md` with the run command, a link to "Host prerequisites" in the root `README.md` (the single place that lists packages to install), and empty sections for later groups. Verify every command it lists exists in the repo or on the host
 
 ## 2. Bootstrap skeleton and preflight
 
@@ -32,28 +32,28 @@
 - [ ] 3.1 Write `platform/secrets.manifest` with every secret from design decision 6 (name, `generated` or `external`, required flag, target namespace, Secret and key), and generate `platform/secrets.env.example` from it. Verify the example lists every name and contains no values
 - [ ] 3.2 Implement secret loading and generation into `~/.config/ai-native-sdlc/secrets.env` (mode 0600). Verify that a fresh directory gets every generatable value, that a second run leaves the file's checksum unchanged, and that a missing `PLANE_ADMIN_EMAIL` fails preflight
 - [ ] 3.3 Implement root CA generation (1-year validity) into `~/.config/ai-native-sdlc/ca.{key,crt}` when missing, and verify with `openssl x509 -enddate` that the expiry is one year out
-- [ ] 3.4 Implement applying every manifest entry as a Kubernetes Secret through `kubectl apply` with dry-run output (namespaces created first). Verify each target Secret exists, and that changing a value and re-running updates it (rotation)
-- [ ] 3.5 Add smoke checks: no value from `secrets.env` appears in any tracked file, and the working tree holds no secret material. Verify both pass, and that the first one fails when a value is planted in a tracked test file
-- [ ] 3.6 Document `secrets.env`, generated versus external values, rotation and backing up the secrets directory in `platform/README.md`
+- [ ] 3.4 Add smoke checks: no value from `secrets.env` appears in any tracked file, and the working tree holds no secret material. Verify both pass, and that the first one fails when a value is planted in a tracked test file
+- [ ] 3.5 Document `secrets.env`, generated versus external values, rotation and backing up the secrets directory in `platform/README.md`
 
 ## 4. Host and cluster
 
 - [ ] 4.1 Implement k3s installation with `--disable traefik` (ServiceLB and local-path kept) and kubeconfig access for the operator. Verify `kubectl get nodes` shows the node Ready, and that a re-run does not reinstall k3s
-- [ ] 4.2 Create `platform/hosts.txt` (`gitea`, `plane`, `argocd`) and implement the managed `/etc/hosts` block. Verify `getent hosts gitea.sdlc.internal` returns `127.0.0.1`, and that a re-run leaves `/etc/hosts` byte-identical
-- [ ] 4.3 Implement host CA trust: the system store via `update-ca-certificates`, `~/.pki/nssdb` via `certutil`, and a Firefox policy for enterprise roots. Verify the CA appears in all three
-- [ ] 4.4 Implement CA rotation when fewer than 30 days remain: a new CA, trust added for it, trust removed for the old one, and the Secret updated. Verify by temporarily swapping in a CA valid for 10 days (after backing up the real one), re-running, and checking that the new CA is trusted and the old one is not
-- [ ] 4.5 Document the host changes and the two commands that remove the hosts block and the CA trust after `k3s-uninstall.sh` in `platform/README.md`, and verify those commands restore a clean `/etc/hosts` and trust store
+- [ ] 4.2 Implement applying every secrets manifest entry as a Kubernetes Secret through `kubectl apply` with dry-run output (namespaces created first). Verify each target Secret exists, and that changing a value and re-running updates it (rotation)
+- [ ] 4.3 Create `platform/hosts.txt` (`gitea`, `plane`, `argocd`) and implement the managed `/etc/hosts` block. Verify `getent hosts gitea.sdlc.internal` returns `127.0.0.1`, and that a re-run leaves `/etc/hosts` byte-identical
+- [ ] 4.4 Implement host CA trust: the system store via `update-ca-certificates`, `~/.pki/nssdb` via `certutil`, and a Firefox policy for enterprise roots. Verify the CA appears in all three
+- [ ] 4.5 Implement CA rotation when fewer than 30 days remain: a new CA, trust added for it, trust removed for the old one, and the Secret updated. Verify by temporarily swapping in a CA valid for 10 days (after backing up the real one), re-running, and checking that the new CA is trusted and the old one is not
+- [ ] 4.6 Document the host changes and the two commands that remove the hosts block and the CA trust after `k3s-uninstall.sh` in `platform/README.md`, and verify those commands restore a clean `/etc/hosts` and trust store
 
 ## 5. Shared database
 
-- [ ] 5.1 Write `platform/apps/cnpg/` values and the `platform-pg` Cluster with `managed.roles` for `gitea` and `plane` (passwords from the seeded Secrets), plus `Database` resources owned by those roles
+- [ ] 5.1 Write `platform/apps/cloudnative-pg/` values (the operator), and in `platform/apps/databases/` the `platform-pg` Cluster with `managed.roles` for `gitea` and `plane` (passwords from the seeded Secrets), plus `Database` resources owned by those roles. Pin the Postgres image with `imageName`, so an operator upgrade cannot change the Postgres version
 - [ ] 5.2 Add the wave -1 SQL Job that revokes `CONNECT` from `PUBLIC` on each service database
 - [ ] 5.3 Implement bootstrap phase 3 for the CNPG operator and cluster with Helm and `kubectl`, reading the same files, and verify the cluster reports healthy
 - [ ] 5.4 Add a smoke check: the `gitea` credentials can open the `gitea` database and are refused on `plane`. Verify it passes
 
 ## 6. Gitea
 
-- [ ] 6.1 Write `platform/apps/gitea/values.yaml`: `postgresql-ha` and `valkey-cluster` disabled, database `platform-pg/gitea`, built-in cache, session and queue, `ROOT_URL=https://gitea.sdlc.internal/`, no SSH service, admin from the seeded Secret, a local-path PVC, explicit resource requests and limits
+- [ ] 6.1 Write `platform/apps/gitea/values.yaml`: `postgresql-ha` and `valkey-cluster` disabled, database `platform-pg/gitea`, built-in cache, session and queue, `ROOT_URL=https://gitea.sdlc.internal/`, no SSH service, admin from the seeded Secret, a local-path PVC, explicit resource requests and limits, and the chart's helm-test pod disabled (`test.enabled: false`, it uses `busybox:latest`)
 - [ ] 6.2 Implement Gitea installation in bootstrap phase 3 with the same values file, and verify through a port-forward that the API answers and the admin can authenticate
 
 ## 7. Repository and origin
@@ -70,6 +70,7 @@
 - [ ] 8.3 Implement phase 6: wait until every Application is Synced and Healthy, delete the `sh.helm.release.v1.*` Secrets of the releases from phases 3 and 5, and make phases 3 and 5 skip when their Applications exist. Verify that `helm list -A` shows no releases afterwards, that no pod restarted during adoption, and that a re-run changes nothing
 - [ ] 8.4 Add smoke checks for reconciliation: a pushed values change is applied within 5 minutes, a manual edit to a managed resource is reverted within 5 minutes, and an Argo CD setting changed in git is applied to Argo CD itself. Verify all three pass
 - [ ] 8.5 Document how to change the platform through git and the recovery procedure for a broken Argo CD (`helm upgrade` with the last good values) in `platform/README.md`
+- [ ] 8.6 Add a smoke check `no_floating_images`: every container image of every pod in the cluster has an explicit tag or digest, and none is `latest`. Verify it passes, and that it fails while a throwaway pod with an untagged image is running
 
 ## 9. Ingress and TLS
 
@@ -91,7 +92,7 @@
 
 - [ ] 11.1 Spike: install Plane and verify it delivers a webhook to an in-cluster endpoint addressed by its service name. If Plane refuses private addresses, look for a setting that allows them. Report back before building further if neither works
 - [ ] 11.2 Spike: find a supported way to create the instance admin non-interactively (a management command in the API image or similar). If none exists, apply the design's fallback and update the `issue-tracking` spec before continuing
-- [ ] 11.3 Write `platform/apps/plane/values.yaml`: bundled Postgres disabled, external database `platform-pg/plane`, Redis, RabbitMQ and MinIO from the chart, the `plane.sdlc.internal` ingress without TLS settings, secrets from the seeded Secrets, explicit resource requests and limits. Verify the app is Synced and Healthy, and that a work item created in the UI is saved
+- [ ] 11.3 Write `platform/apps/plane/values.yaml`: bundled Postgres disabled, external database `platform-pg/plane`, Redis, RabbitMQ and MinIO from the chart, the `plane.sdlc.internal` ingress without TLS settings, secrets from the seeded Secrets, explicit resource requests and limits, and a pinned tag for the MinIO init image (the chart defaults to an untagged `busybox`). Verify the app is Synced and Healthy, and that a work item created in the UI is saved
 - [ ] 11.4 Add the idempotent PostSync Job that creates the instance admin from `PLANE_ADMIN_EMAIL` and `PLANE_ADMIN_PASSWORD`. Verify that sign-in works with those credentials after bootstrap, that `/god-mode/` no longer offers admin creation, and that a re-sync leaves the admin unchanged
 - [ ] 11.5 Add smoke checks: with an API key, read a work item and change its status (visible in the UI), and a status change delivers a webhook to a temporary in-cluster echo endpoint within 1 minute. Verify both pass
 - [ ] 11.6 Document the admin sign-in, API key creation and webhook setup in `platform/README.md`

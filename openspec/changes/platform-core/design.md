@@ -217,7 +217,7 @@ only after a clean scan. If anything is found, the job fails and the mirror is n
 the one gate on the way to public exposure, and it catches every path into `main`: human
 commits, agent commits and `--no-verify`. It works by pattern only: the runner deliberately
 has no access to `secrets.env`. The exact-value check therefore stays in the local smoke
-check (task 3.5). Deleting the mirror workflow removes the gate together with the exposure it
+check (task 3.4). Deleting the mirror workflow removes the gate together with the exposure it
 guards.
 
 - **Alternative:** Gitea's built-in push mirror. It mirrors every ref, so agent branches would
@@ -256,7 +256,7 @@ platform/
 .gitea/workflows/mirror-main.yml
 ```
 
-There is one namespace per component: `argocd`, `cert-manager`, `cnpg-system`, `databases`,
+There is one namespace per component: `argocd`, `cert-manager`, `cloudnative-pg`, `databases`,
 `traefik`, `gitea`, `plane`.
 
 ## Risks / Trade-offs

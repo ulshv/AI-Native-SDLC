@@ -1,0 +1,4 @@
+# Secret material belongs in ~/.config/ai-native-sdlc/, never in the working tree.
+secrets.env
+*.key
+.secrets/

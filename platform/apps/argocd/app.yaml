@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-cd
+      targetRevision: 10.11.6
+      helm:
+        releaseName: argocd
+        valueFiles:
+          - $values/platform/apps/argocd/values.yaml
+    - repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
+      targetRevision: main
+      ref: values

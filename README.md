@@ -203,6 +203,29 @@ each one lands with the first change that needs it, not up front.
 
 LLMs are remote, and running models locally on top of this would not fit.
 
+### Host prerequisites
+
+Example for Ubuntu 26.04 LTS, the author's machine. `platform/bootstrap.sh` checks all of
+these before it changes anything and names whatever is missing.
+
+```bash
+# usually preinstalled
+sudo apt install git openssl jq curl
+
+# certutil: adds the local CA to Chrome's certificate store
+sudo apt install libnss3-tools
+
+# yq v4 by Mike Farah (apt's `yq` is a different Python tool with another syntax)
+sudo snap install yq
+
+# Helm, the Kubernetes package manager
+sudo snap install helm --classic
+```
+
+`kubectl` doesn't need a separate install: it comes with k3s, which the bootstrap installs.
+You also need `sudo` rights and free ports 80 and 443. Stop Docker Desktop, or anything else
+listening there, before bootstrapping.
+
 ## Roadmap
 
 Each step is one OpenSpec change: spec first, then implementation.
