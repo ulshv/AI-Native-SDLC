@@ -31,6 +31,14 @@ FIREFOX_CA=/etc/firefox/policies/$TRUST_NAME-ca.crt
 POD_CIDR=10.42.0.0/16
 POD_ROUTE_PRIORITY=100
 K3S_ROUTING_DROPIN=/etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf
+GITEA_HOST=https://gitea.sdlc.internal
+GITEA_REPO=sdlc/ai-native-sdlc
+GITEA_REMOTE=$GITEA_HOST/$GITEA_REPO.git
+# Argo CD reads the repository over the in-cluster Service, not through the ingress.
+ARGOCD_REPO_URL=http://gitea-http.gitea.svc:3000/$GITEA_REPO.git
+# Created through the Gitea API for this cluster and replaced after a rebuild, so it is not a
+# value in secrets.env.
+PUSH_TOKEN_FILE=$SECRETS_DIR/gitea-push-token
 
 DRY_RUN=false
 
@@ -496,8 +504,171 @@ phase_git_hosting() {
   step "Gitea (helm)" "helm_release_current gitea" "helm_install gitea"
 }
 
+# Gitea's public name only works once Argo CD has reconciled Traefik and the certificate, so
+# phase 4 talks to Gitea through a temporary port-forward, killed when the script exits.
+start_gitea_forward() {
+  local log port=""
+  log=$(mktemp)
+  kubectl port-forward -n gitea svc/gitea-http 0:3000 >"$log" 2>&1 &
+  GITEA_FORWARD_PID=$!
+  trap 'kill "$GITEA_FORWARD_PID" 2>/dev/null' EXIT
+  for _ in $(seq 50); do
+    port=$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9]*\).*/\1/p' "$log")
+    [[ -z $port ]] || break
+    sleep 0.2
+  done
+  rm -f "$log"
+  if [[ -z $port ]]; then
+    $DRY_RUN && return 0 # nothing to talk to yet; every check below reports todo
+    echo "error: cannot port-forward to Gitea" >&2
+    return 1
+  fi
+  GITEA_URL=http://127.0.0.1:$port
+}
+
+# gitea_api <method> <path> [json]: the Gitea API as the admin. The password reaches curl
+# through a netrc on a pipe, never as an argument.
+gitea_api() {
+  local data=()
+  [[ -z ${3-} ]] || data=(-H 'Content-Type: application/json' --data "$3")
+  curl -fsS --max-time 20 -X "$1" "${data[@]}" \
+    --netrc-file <(printf 'machine 127.0.0.1 login gitea_admin password %s\n' "$(secret_value GITEA_ADMIN_PASSWORD)") \
+    "${GITEA_URL:?}/api/v1$2"
+}
+
+# gitea_token_works <token>: the token can read the repository.
+gitea_token_works() {
+  [[ -n $1 ]] && curl -fsS --max-time 20 -o /dev/null \
+    -H @<(printf 'Authorization: token %s\n' "$1") "${GITEA_URL:?}/api/v1/repos/$GITEA_REPO"
+}
+
+# new_gitea_token <name> <scope>: replaces the admin's token of that name and prints it. Gitea
+# shows a token only once, so a lost one is recreated rather than looked up.
+new_gitea_token() {
+  gitea_api DELETE "/users/gitea_admin/tokens/$1" >/dev/null 2>&1 || true
+  gitea_api POST /users/gitea_admin/tokens "{\"name\": \"$1\", \"scopes\": [\"$2\"]}" | jq -er .sha1
+}
+
+org_exists() { [[ -n ${GITEA_URL-} ]] && gitea_api GET /orgs/sdlc >/dev/null 2>&1; }
+create_org() { gitea_api POST /orgs '{"username": "sdlc", "visibility": "private"}' >/dev/null; }
+
+repo_exists() { [[ -n ${GITEA_URL-} ]] && gitea_api GET "/repos/$GITEA_REPO" >/dev/null 2>&1; }
+create_repo() { gitea_api POST /orgs/sdlc/repos '{"name": "ai-native-sdlc", "private": true}' >/dev/null; }
+
+push_token_works() {
+  [[ -n ${GITEA_URL-} && -s $PUSH_TOKEN_FILE ]] && gitea_token_works "$(<"$PUSH_TOKEN_FILE")"
+}
+
+create_push_token() {
+  local token
+  token=$(new_gitea_token bootstrap-push write:repository)
+  (umask 077 && printf '%s\n' "$token" >"$PUSH_TOKEN_FILE")
+}
+
+argocd_token() {
+  kubectl get secret -n argocd repo-ai-native-sdlc -o jsonpath='{.data.password}' 2>/dev/null | base64 -d
+}
+
+argocd_token_works() { [[ -n ${GITEA_URL-} ]] && gitea_token_works "$(argocd_token)"; }
+
+# The read-only token lives only in Argo CD's repository Secret, which Argo CD finds by label.
+create_argocd_token() {
+  local token
+  token=$(new_gitea_token argocd-read read:repository)
+  ensure_namespace argocd
+  printf '%s' "$token" | jq -Rn --arg url "$ARGOCD_REPO_URL" '{
+    apiVersion: "v1", kind: "Secret",
+    metadata: {namespace: "argocd", name: "repo-ai-native-sdlc",
+      labels: {"argocd.argoproj.io/secret-type": "repository", "app.kubernetes.io/managed-by": "ai-native-sdlc"}},
+    stringData: {type: "git", url: $url, username: "gitea_admin", password: input}
+  }' | kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f - >/dev/null
+}
+
+origin_is_gitea() { [[ $(git remote get-url origin 2>/dev/null) == "$GITEA_REMOTE" ]]; }
+
+# The previous origin is kept as "github", so nothing it references is lost.
+move_origin() {
+  local current github
+  current=$(git remote get-url origin 2>/dev/null || true)
+  if [[ -n $current ]]; then
+    github=$(git remote get-url github 2>/dev/null || true)
+    if [[ -z $github ]]; then
+      git remote rename origin github
+    elif [[ $github == "$current" ]]; then
+      git remote remove origin
+    else
+      echo "error: origin ($current) cannot be kept as github, which points to $github" >&2
+      return 1
+    fi
+  fi
+  git remote add origin "$GITEA_REMOTE"
+}
+
+# The helper reads the push token from the secrets directory at the moment git asks, so the
+# token is never written into .git/config or ~/.git-credentials. The empty first entry drops
+# any helper inherited from global config for this URL.
+credential_helper() {
+  printf '%s' "!f() { test \"\$1\" = get || exit 0; echo username=gitea_admin; echo \"password=\$(cat '$PUSH_TOKEN_FILE')\"; }; f"
+}
+
+credential_helper_set() {
+  [[ $(git config --get-all "credential.$GITEA_HOST.helper") == "$(printf '\n%s' "$(credential_helper)")" ]]
+}
+
+set_credential_helper() {
+  git config --unset-all "credential.$GITEA_HOST.helper" || true
+  git config --add "credential.$GITEA_HOST.helper" ""
+  git config --add "credential.$GITEA_HOST.helper" "$(credential_helper)"
+}
+
+# git_via_forward <git args...>: git with Gitea's public URL rewritten to the port-forward and
+# the same credential helper, so named-remote commands work before the ingress exists.
+git_via_forward() {
+  git -c "url.$GITEA_URL/.insteadOf=$GITEA_HOST/" -c credential.helper= \
+    -c "credential.helper=$(credential_helper)" "$@"
+}
+
+local_refs() { git for-each-ref --format='%(objectname) %(refname)' refs/heads refs/tags | sort; }
+
+gitea_has_local_refs() {
+  [[ -n ${GITEA_URL-} ]] && origin_is_gitea || return 1
+  local remote
+  remote=$(git_via_forward ls-remote origin 'refs/heads/*' 'refs/tags/*' 2>/dev/null | grep -v '\^{}$' | awk '{ print $1, $2 }' | sort) &&
+    [[ -z $(comm -23 <(local_refs) <(printf '%s\n' "$remote")) ]]
+}
+
+# main goes first: Gitea makes the first branch pushed to an empty repository its default
+# branch, asynchronously, so pushing everything at once could leave another branch as default.
+push_all_refs() {
+  git show-ref --verify --quiet refs/heads/main && git_via_forward push origin refs/heads/main:refs/heads/main
+  git_via_forward push origin 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'
+}
+
+main_tracks_origin() {
+  origin_is_gitea && [[ $(git config branch.main.remote) == origin && $(git config branch.main.merge) == refs/heads/main ]]
+}
+
+track_main() { git branch --set-upstream-to=origin/main main; }
+
+default_branch_is_main() {
+  [[ -n ${GITEA_URL-} ]] && [[ $(gitea_api GET "/repos/$GITEA_REPO" 2>/dev/null | jq -r .default_branch) == main ]]
+}
+
+set_default_branch() { gitea_api PATCH "/repos/$GITEA_REPO" '{"default_branch": "main"}' >/dev/null; }
+
 # Creates the Gitea org and repo, moves origin to Gitea and pushes branches and tags.
-phase_repository() { :; }
+phase_repository() {
+  start_gitea_forward
+  step "Gitea org sdlc exists" org_exists create_org
+  step "private repo $GITEA_REPO exists" repo_exists create_repo
+  step "push token in the secrets directory works" push_token_works create_push_token
+  step "Argo CD's read token works" argocd_token_works create_argocd_token
+  step "origin is $GITEA_REMOTE (the old one kept as github)" origin_is_gitea move_origin
+  step "credential helper for $GITEA_HOST reads the push token" credential_helper_set set_credential_helper
+  step "Gitea has every local branch and tag" gitea_has_local_refs push_all_refs
+  step "main tracks origin/main" main_tracks_origin track_main
+  step "the Gitea repo's default branch is main" default_branch_is_main set_default_branch
+}
 
 # Installs Argo CD with Helm and applies the root Application.
 phase_gitops() { :; }

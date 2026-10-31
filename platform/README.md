@@ -118,6 +118,28 @@ and the secrets directory stay; delete them by hand if you want them gone.
 
 ## Repository and origin
 
+Phase 4 makes the platform's Gitea the home of this repository:
+
+- creates the org `sdlc` and the private repository `sdlc/ai-native-sdlc`;
+- renames the old `origin` (GitHub) to `github`, so nothing it references is lost, and adds
+  `https://gitea.sdlc.internal/sdlc/ai-native-sdlc.git` as `origin`;
+- pushes every local branch and tag, and sets `main` to track `origin/main`;
+- creates two Gitea tokens for the admin: `bootstrap-push` (write access to repositories) in
+  `~/.config/ai-native-sdlc/gitea-push-token`, and `argocd-read` (read only) in Argo CD's
+  repository Secret. Both belong to this cluster and are replaced after a rebuild.
+
+Until the ingress is up, phase 4 reaches Gitea through a temporary port-forward. Afterwards a
+plain `git push` goes to `gitea.sdlc.internal`: a credential helper in this clone's
+`.git/config`, scoped to that host, reads the push token from the secrets directory when git
+asks, so the token itself is never written into `.git/config` or `~/.git-credentials`.
+
+**Rollback** to GitHub as `origin`:
+
+```bash
+git remote remove origin && git remote rename github origin
+git config --remove-section credential.https://gitea.sdlc.internal
+```
+
 ## Changing the platform through git
 
 ## Service URLs

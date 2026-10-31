@@ -191,9 +191,11 @@ through the Gitea API.
   Plane's MinIO and RabbitMQ passwords and `PLANE_ADMIN_PASSWORD` are generated; the three
   secret keys are of kind `key`, the rest `password`.
   `PLANE_ADMIN_EMAIL` is `external` and required. `GITHUB_MIRROR_TOKEN` is `external` and
-  required only when the mirror is enabled. Tokens that only make sense for one cluster (the Gitea runner
-  registration token, and the Argo CD and git-push tokens) are created by the bootstrap
-  through the Gitea API on every rebuild, not persisted.
+  required only when the mirror is enabled. Tokens that only make sense for one cluster (the
+  Gitea runner registration token, and the Argo CD and git-push tokens) are created by the
+  bootstrap through the Gitea API and replaced after a rebuild, so they are not values in
+  `secrets.env`. The read token lives only in Argo CD's repository Secret; the push token is
+  a file next to `secrets.env`, because the git credential helper reads it from there.
 - **Alternatives:** SOPS with age (secrets in git, but needs a KSOPS plugin in Argo CD);
   Sealed Secrets (the controller's key must be backed up off-cluster); Vault or OpenBao
   (unseal on every reboot, much more machinery, and its benefits are short-lived audited

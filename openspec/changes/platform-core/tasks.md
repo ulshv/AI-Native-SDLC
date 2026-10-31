@@ -59,10 +59,10 @@
 
 ## 7. Repository and origin
 
-- [ ] 7.1 Implement phase 4: start a temporary port-forward to Gitea's Service, create the org `sdlc` and the private repo `ai-native-sdlc` through the API if missing, and create the push token and the Argo CD read token. Verify that a re-run creates nothing new
-- [ ] 7.2 Implement the origin move: rename `origin` to `github` when it points elsewhere (and fail if `github` exists with a different URL), add the Gitea URL as `origin`, push all branches and tags through the port-forward, and set `main` to track `origin/main`. Verify every local branch and tag exists on Gitea with the same commits, and that a re-run leaves the remotes unchanged
-- [ ] 7.3 Configure the git credential helper scoped to `https://gitea.sdlc.internal`, which reads the push token from the secrets directory. Verify the token appears in neither `.git/config` nor `~/.git-credentials`
-- [ ] 7.4 Document the origin move and its rollback (`git remote remove origin && git remote rename github origin`) in `platform/README.md`
+- [x] 7.1 Implement phase 4: start a temporary port-forward to Gitea's Service, create the org `sdlc` and the private repo `ai-native-sdlc` through the API if missing, and create the push token and the Argo CD read token. Verify that a re-run creates nothing new
+- [x] 7.2 Implement the origin move: rename `origin` to `github` when it points elsewhere (and fail if `github` exists with a different URL), add the Gitea URL as `origin`, push all branches and tags through the port-forward, and set `main` to track `origin/main`. Verify every local branch and tag exists on Gitea with the same commits, and that a re-run leaves the remotes unchanged
+- [x] 7.3 Configure the git credential helper scoped to `https://gitea.sdlc.internal`, which reads the push token from the secrets directory. Verify the token appears in neither `.git/config` nor `~/.git-credentials`
+- [x] 7.4 Document the origin move and its rollback (`git remote remove origin && git remote rename github origin`) in `platform/README.md`
 
 ## 8. GitOps hand-over
 
