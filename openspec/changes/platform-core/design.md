@@ -123,8 +123,9 @@ through the Gitea API.
 ### 5. TLS: a persistent local CA, one wildcard certificate at the edge
 
 - The CA key pair lives in `~/.config/ai-native-sdlc/ca.{key,crt}`. If it is missing, the
-  bootstrap generates it with openssl and loads it as a Secret into `cert-manager`. A CA
-  `ClusterIssuer` uses it.
+  bootstrap generates it with openssl and loads it as the Secret `cert-manager/root-ca`. A
+  CA `ClusterIssuer` uses it. The CA carries a name constraint for `sdlc.internal`, so the
+  trusted key cannot sign certificates for any other domain.
 - **The root CA is valid for 1 year.** Each bootstrap run checks its expiry. When fewer than 30
   days remain, the run generates a new CA, installs host trust for it, removes host trust for
   the old one, and updates the Secret, after which cert-manager re-issues the wildcard
@@ -134,8 +135,11 @@ through the Gitea API.
   routes and never handle TLS. Traefik's `web` entrypoint redirects to `websecure`.
 - **Host trust:** the CA is copied to `/usr/local/share/ca-certificates/` and installed with
   `update-ca-certificates`. It is added with `certutil` to `~/.pki/nssdb`, which Chrome on
-  Linux uses. Firefox gets a policy (`security.enterprise_roots.enabled`) to read the system
-  store.
+  Linux uses. Firefox on Linux ignores the system store, and `security.enterprise_roots` works
+  only on Windows and macOS, so Firefox gets a `Certificates.Install` policy in
+  `/etc/firefox/policies/` that points at a copy of the CA there; the Firefox snap can read
+  that directory. Firefox imports the CA into its profile, so after a rotation it keeps
+  trusting the old CA until it expires (at most 30 days, and only for `sdlc.internal`).
 - **Alternative:** cert-manager generates a self-signed CA. It would be lost on every rebuild,
   and the host would have to re-trust it each time.
 

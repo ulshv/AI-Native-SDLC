@@ -37,12 +37,12 @@
 
 ## 4. Host and cluster
 
-- [ ] 4.1 Implement k3s installation with `--disable traefik` (ServiceLB and local-path kept) and kubeconfig access for the operator. Verify `kubectl get nodes` shows the node Ready, and that a re-run does not reinstall k3s
-- [ ] 4.2 Implement applying every secrets manifest entry as a Kubernetes Secret through `kubectl apply` with dry-run output (namespaces created first). Verify each target Secret exists, and that changing a value and re-running updates it (rotation)
-- [ ] 4.3 Create `platform/hosts.txt` (`gitea`, `plane`, `argocd`) and implement the managed `/etc/hosts` block. Verify `getent hosts gitea.sdlc.internal` returns `127.0.0.1`, and that a re-run leaves `/etc/hosts` byte-identical
-- [ ] 4.4 Implement host CA trust: the system store via `update-ca-certificates`, `~/.pki/nssdb` via `certutil`, and a Firefox policy for enterprise roots. Verify the CA appears in all three
-- [ ] 4.5 Implement CA rotation when fewer than 30 days remain: a new CA, trust added for it, trust removed for the old one, and the Secret updated. Verify by temporarily swapping in a CA valid for 10 days (after backing up the real one), re-running, and checking that the new CA is trusted and the old one is not
-- [ ] 4.6 Document the host changes and the two commands that remove the hosts block and the CA trust after `k3s-uninstall.sh` in `platform/README.md`, and verify those commands restore a clean `/etc/hosts` and trust store
+- [x] 4.1 Implement k3s installation with `--disable traefik` (ServiceLB and local-path kept) and kubeconfig access for the operator. Verify `kubectl get nodes` shows the node Ready, and that a re-run does not reinstall k3s
+- [x] 4.2 Implement applying every secrets manifest entry as a Kubernetes Secret through `kubectl apply` with dry-run output (namespaces created first). Verify each target Secret exists, and that changing a value and re-running updates it (rotation)
+- [x] 4.3 Create `platform/hosts.txt` (`gitea`, `plane`, `argocd`) and implement the managed `/etc/hosts` block. Verify `getent hosts gitea.sdlc.internal` returns `127.0.0.1`, and that a re-run leaves `/etc/hosts` byte-identical
+- [x] 4.4 Implement host CA trust: the system store via `update-ca-certificates`, `~/.pki/nssdb` via `certutil`, and a Firefox `Certificates.Install` policy in `/etc/firefox/policies/`. Verify the CA appears in all three
+- [x] 4.5 Implement CA rotation when fewer than 30 days remain: a new CA, trust added for it, trust removed for the old one, and the Secret updated. Verify by temporarily swapping in a CA valid for 10 days (after backing up the real one), re-running, and checking that the new CA is trusted and the old one is not
+- [x] 4.6 Document the host changes and the two commands that remove the hosts block and the CA trust after `k3s-uninstall.sh` in `platform/README.md`, and verify those commands restore a clean `/etc/hosts` and trust store
 
 ## 5. Shared database
 

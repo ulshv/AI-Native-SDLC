@@ -73,6 +73,42 @@ Restore it to `~/.config/ai-native-sdlc/` before running the bootstrap on a new 
 
 ## Host changes and removal
 
+Phase 2 changes the host, and each change is checked first and skipped when already in place:
+
+| What | Where |
+|---|---|
+| k3s, pinned in `bootstrap.sh`, bundled Traefik disabled | system service `k3s`, `/usr/local/bin/{k3s,kubectl}`, `/etc/rancher/`, `/var/lib/rancher/` |
+| Cluster access for you | `~/.kube/config`; a config that was already there is kept as `~/.kube/config.before-ai-native-sdlc` |
+| Service names from [`hosts.txt`](hosts.txt) → `127.0.0.1` | a block between `# BEGIN ai-native-sdlc` and `# END ai-native-sdlc` in `/etc/hosts`; the original is kept as `/etc/hosts.before-ai-native-sdlc` |
+| Root CA trusted by the system (curl, git, most tools) | `/usr/local/share/ca-certificates/ai-native-sdlc.crt` |
+| Root CA trusted by Chrome | `~/.pki/nssdb`, nickname `ai-native-sdlc` |
+| Root CA trusted by Firefox | the `Certificates.Install` policy in `/etc/firefox/policies/policies.json`, pointing at `/etc/firefox/policies/ai-native-sdlc-ca.crt` |
+
+The CA can only sign names under `sdlc.internal`, so even a leaked key cannot impersonate
+other sites. When fewer than 30 days of its year are left, the bootstrap replaces it and moves
+all of the trust above to the new one. Firefox is the exception: it imports the CA into its
+profile and keeps the old one until it expires.
+
+**Removal.** `/usr/local/bin/k3s-uninstall.sh` removes the cluster with all its data. The
+host changes are harmless leftovers; these two commands remove them:
+
+```bash
+# 1. the /etc/hosts block
+sudo sed -i '/^# BEGIN ai-native-sdlc$/,/^# END ai-native-sdlc$/d' /etc/hosts
+
+# 2. the CA trust (if policies.json holds nothing else, you can delete it instead)
+sudo rm -f /usr/local/share/ca-certificates/ai-native-sdlc.crt /etc/firefox/policies/ai-native-sdlc-ca.crt \
+  && sudo update-ca-certificates --fresh \
+  && certutil -d sql:$HOME/.pki/nssdb -D -n ai-native-sdlc \
+  && jq 'del(.policies.Certificates.Install[] | select(endswith("/ai-native-sdlc-ca.crt")))' /etc/firefox/policies/policies.json \
+     | sudo tee /etc/firefox/policies/policies.json.new >/dev/null \
+  && sudo mv /etc/firefox/policies/policies.json.new /etc/firefox/policies/policies.json
+```
+
+Firefox keeps the CA it already imported. Remove it under Settings → Privacy & Security →
+Certificates → View Certificates → Authorities (`ai-native-sdlc local CA`). `~/.kube/config`
+and the secrets directory stay; delete them by hand if you want them gone.
+
 ## Repository and origin
 
 ## Changing the platform through git

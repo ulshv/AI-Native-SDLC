@@ -4,7 +4,7 @@
 #   platform/bootstrap.sh --dry-run  print the plan and change nothing
 #   platform/bootstrap.sh --example  print secrets.env.example from secrets.manifest
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # Pinned k3s release. Chart versions are pinned in platform/apps/*/app.yaml.
 K3S_VERSION=v1.36.5+k3s1
@@ -16,6 +16,17 @@ CA_CRT=$SECRETS_DIR/ca.crt
 MANIFEST=platform/secrets.manifest
 TOOLS=(helm git openssl jq yq curl certutil)
 PORTS=(80 443)
+
+# The script always talks to this cluster, whatever KUBECONFIG the shell had.
+export KUBECONFIG=$HOME/.kube/config
+FIELD_MANAGER=ai-native-sdlc
+HOSTS_BEGIN="# BEGIN ai-native-sdlc"
+HOSTS_END="# END ai-native-sdlc"
+TRUST_NAME=ai-native-sdlc
+SYSTEM_CA=/usr/local/share/ca-certificates/$TRUST_NAME.crt
+NSSDB=sql:$HOME/.pki/nssdb
+FIREFOX_POLICIES=/etc/firefox/policies/policies.json
+FIREFOX_CA=/etc/firefox/policies/$TRUST_NAME-ca.crt
 
 DRY_RUN=false
 
@@ -141,11 +152,19 @@ generate_missing_secrets() {
   done
 }
 
-ca_present() { [[ -f $CA_KEY && -f $CA_CRT ]]; }
+ca_valid() {
+  [[ -f $CA_KEY && -f $CA_CRT ]] && openssl x509 -checkend $((30 * 86400)) -noout -in "$CA_CRT" >/dev/null
+}
 
 # The root CA is valid for one year and may only sign names under sdlc.internal, so a leaked
-# key cannot be used to impersonate any other site to this host's browsers.
+# key cannot be used to impersonate any other site to this host's browsers. A CA with fewer
+# than 30 days left is replaced; phase 2 then swaps the trust over to the new one.
 generate_ca() {
+  if [[ -f $CA_CRT ]]; then
+    mv "$CA_CRT" "$SECRETS_DIR/ca.old.crt"
+    [[ ! -f $CA_KEY ]] || mv "$CA_KEY" "$SECRETS_DIR/ca.old.key"
+    log "        replaced the expiring CA, kept it as ca.old.{crt,key}"
+  fi
   (
     umask 077
     openssl req -x509 -new -noenc -newkey rsa:4096 -days 365 \
@@ -161,11 +180,193 @@ generate_ca() {
 phase_secrets() {
   step "secrets directory is private (0700/0600)" secrets_file_private make_secrets_file_private
   step "every generated secret has a value" generated_secrets_present generate_missing_secrets
-  step "root CA exists" ca_present generate_ca
+  step "root CA exists and is valid for 30+ days" ca_valid generate_ca
+}
+
+k3s_installed() {
+  [[ $(k3s --version 2>/dev/null) == *"$K3S_VERSION"* ]] && systemctl is-active -q k3s
+}
+
+# The install script comes from the pinned release tag, not from the moving get.k3s.io.
+# Bundled Traefik is disabled because Argo CD installs its own; ServiceLB and local-path stay.
+install_k3s() {
+  local script
+  script=$(mktemp)
+  curl -sfL "https://raw.githubusercontent.com/k3s-io/k3s/$K3S_VERSION/install.sh" -o "$script"
+  sudo env INSTALL_K3S_VERSION="$K3S_VERSION" sh "$script" --disable traefik
+  rm -f "$script"
+}
+
+kubeconfig_works() {
+  [[ $(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null) == https://127.0.0.1:6443 ]] &&
+    kubectl get --raw /readyz >/dev/null 2>&1
+}
+
+# A kubeconfig that was there before is kept once as ~/.kube/config.before-ai-native-sdlc.
+write_kubeconfig() {
+  mkdir -p "$HOME/.kube"
+  if [[ -s $KUBECONFIG && ! -e $KUBECONFIG.before-ai-native-sdlc ]]; then
+    cp -p "$KUBECONFIG" "$KUBECONFIG.before-ai-native-sdlc"
+  fi
+  (umask 077 && sudo cat /etc/rancher/k3s/k3s.yaml >"$KUBECONFIG")
+}
+
+node_ready() { kubectl get nodes --no-headers 2>/dev/null | grep -qw Ready; }
+
+wait_node_ready() {
+  local i
+  for i in $(seq 60); do
+    node_ready && return 0
+    sleep 2
+  done
+  echo "error: the node is not Ready after 2 minutes" >&2
+  return 1
+}
+
+# The managed block of /etc/hosts: every name in platform/hosts.txt under sdlc.internal.
+hosts_block() {
+  local name
+  echo "$HOSTS_BEGIN"
+  grep -vE '^[[:space:]]*(#|$)' platform/hosts.txt | while read -r name; do
+    echo "127.0.0.1 $name.sdlc.internal"
+  done
+  echo "$HOSTS_END"
+}
+
+# hosts_without_block <file>: the file without the managed block.
+hosts_without_block() {
+  awk -v b="$HOSTS_BEGIN" -v e="$HOSTS_END" '$0 == b { skip = 1 } !skip { print } $0 == e { skip = 0 }' "$1"
+}
+
+hosts_current() {
+  [[ $(awk -v b="$HOSTS_BEGIN" -v e="$HOSTS_END" '$0 == b { on = 1 } on { print } $0 == e { on = 0 }' /etc/hosts) == "$(hosts_block)" ]]
+}
+
+# The first change keeps the original as /etc/hosts.before-ai-native-sdlc.
+write_hosts() {
+  local tmp
+  tmp=$(mktemp)
+  { hosts_without_block /etc/hosts; hosts_block; } >"$tmp"
+  [[ -e /etc/hosts.before-ai-native-sdlc ]] || sudo cp -p /etc/hosts /etc/hosts.before-ai-native-sdlc
+  sudo cp "$tmp" /etc/hosts
+  rm -f "$tmp"
+}
+
+fingerprint() { openssl x509 -noout -fingerprint -sha256 2>/dev/null; }
+
+system_trusts_ca() { cmp -s "$CA_CRT" "$SYSTEM_CA" && [[ -e /etc/ssl/certs/$TRUST_NAME.pem ]]; }
+
+# Same file name for every CA, so a rotated CA replaces the old one; --fresh drops stale links.
+trust_ca_system() {
+  sudo install -m 644 "$CA_CRT" "$SYSTEM_CA"
+  sudo update-ca-certificates --fresh >/dev/null
+}
+
+# Chrome on Linux reads ~/.pki/nssdb.
+nss_trusts_ca() {
+  [[ -f $CA_CRT && $(certutil -d "$NSSDB" -L -n "$TRUST_NAME" -a 2>/dev/null | fingerprint) == "$(fingerprint <"$CA_CRT")" ]]
+}
+
+trust_ca_nss() {
+  if [[ ! -f $HOME/.pki/nssdb/cert9.db ]]; then
+    mkdir -p "$HOME/.pki/nssdb"
+    certutil -d "$NSSDB" -N --empty-password
+  fi
+  certutil -d "$NSSDB" -D -n "$TRUST_NAME" 2>/dev/null || true
+  certutil -d "$NSSDB" -A -t "C,," -n "$TRUST_NAME" -i "$CA_CRT"
+}
+
+# Firefox on Linux ignores the system store. Its policy installs the CA from a file under
+# /etc/firefox, which the Firefox snap can read.
+firefox_trusts_ca() {
+  cmp -s "$CA_CRT" "$FIREFOX_CA" &&
+    jq -e --arg ca "$FIREFOX_CA" '.policies.Certificates.Install | index($ca)' "$FIREFOX_POLICIES" >/dev/null 2>&1
+}
+
+# Merges into an existing policies.json instead of replacing it.
+trust_ca_firefox() {
+  local tmp
+  tmp=$(mktemp)
+  { cat "$FIREFOX_POLICIES" 2>/dev/null || echo '{}'; } |
+    jq --arg ca "$FIREFOX_CA" '.policies.Certificates.Install = ((.policies.Certificates.Install // []) - [$ca] + [$ca])' >"$tmp"
+  sudo mkdir -p "$(dirname "$FIREFOX_POLICIES")"
+  sudo install -m 644 "$CA_CRT" "$FIREFOX_CA"
+  sudo install -m 644 "$tmp" "$FIREFOX_POLICIES"
+  rm -f "$tmp"
+}
+
+# expand <template>: the template with every ${NAME} replaced by its value from secrets.env.
+expand() {
+  local out=$1 name value
+  while [[ $out =~ \$\{([A-Za-z0-9_]+)\} ]]; do
+    name=${BASH_REMATCH[1]}
+    value=$(secret_value "$name")
+    [[ -n $value ]] || { echo "error: $name is used in secrets.manifest but has no value" >&2; return 1; }
+    out=${out//"\${$name}"/"$value"}
+  done
+  printf '%s' "$out"
+}
+
+# Every Secret from the manifest's put lines, plus the root CA for cert-manager, as one
+# kubectl List. Values travel through pipes only, never through command-line arguments.
+render_secrets() {
+  local target key template value
+  {
+    awk '$1 == "put" { print $2, $3, $4 }' "$MANIFEST" | while read -r target key template; do
+      value=$(expand "$template") || return 1
+      printf '%s %s %s\n' "$target" "$key" "$(printf '%s' "$value" | base64 -w0)"
+    done
+    printf 'cert-manager/root-ca tls.crt %s\n' "$(base64 -w0 <"$CA_CRT")"
+    printf 'cert-manager/root-ca tls.key %s\n' "$(base64 -w0 <"$CA_KEY")"
+  } | jq -Rn --arg manager "$FIELD_MANAGER" '
+    [inputs | split(" ") | {target: .[0], key: .[1], value: .[2]}]
+    | group_by(.target)
+    | {apiVersion: "v1", kind: "List", items: map({
+        apiVersion: "v1",
+        kind: "Secret",
+        metadata: {
+          namespace: (.[0].target | split("/")[0]),
+          name: (.[0].target | split("/")[1]),
+          labels: {
+            "app.kubernetes.io/managed-by": $manager,
+            "cnpg.io/reload": "true"
+          }
+        },
+        type: (if any(.key == "tls.crt") then "kubernetes.io/tls" else "Opaque" end),
+        data: (map({(.key): .value}) | add)
+      })}'
+}
+
+secret_namespaces() {
+  { awk '$1 == "put" { split($2, t, "/"); print t[1] }' "$MANIFEST"; echo cert-manager; } | sort -u
+}
+
+cluster_secrets_current() {
+  { render_secrets | kubectl diff --server-side --field-manager="$FIELD_MANAGER" -f -; } >/dev/null 2>&1
+}
+
+# Server-side apply keeps no last-applied annotation, so values are not copied into metadata.
+# The cnpg.io/reload label makes CloudNativePG pick up a rotated role password.
+apply_cluster_secrets() {
+  local ns
+  for ns in $(secret_namespaces); do
+    kubectl create namespace "$ns" --dry-run=client -o yaml |
+      kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f - >/dev/null
+  done
+  render_secrets | kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f -
 }
 
 # Installs k3s, the /etc/hosts block and host CA trust, and applies Kubernetes Secrets.
-phase_host() { :; }
+phase_host() {
+  step "k3s $K3S_VERSION installed and running" k3s_installed install_k3s
+  step "~/.kube/config points at k3s" kubeconfig_works write_kubeconfig
+  step "node is Ready" node_ready wait_node_ready
+  step "/etc/hosts block matches platform/hosts.txt" hosts_current write_hosts
+  step "system trust store has the root CA" system_trusts_ca trust_ca_system
+  step "Chrome (~/.pki/nssdb) trusts the root CA" nss_trusts_ca trust_ca_nss
+  step "Firefox policy installs the root CA" firefox_trusts_ca trust_ca_firefox
+  step "Kubernetes Secrets match secrets.env and the root CA" cluster_secrets_current apply_cluster_secrets
+}
 
 # Installs the CloudNativePG operator, the Postgres cluster and Gitea with Helm.
 phase_git_hosting() { :; }
@@ -181,7 +382,7 @@ phase_adoption() { :; }
 
 PHASES=(preflight secrets host git_hosting repository gitops adoption)
 
-usage() { sed -n '2,5s/^# \{0,1\}//p' "$0"; }
+usage() { sed -n '2,5s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; }
 
 main() {
   case ${1-} in
@@ -207,4 +408,5 @@ main() {
   fi
 }
 
-main "$@"
+# Sourcing the script (for tests) defines the functions without running anything.
+[[ ${BASH_SOURCE[0]} != "$0" ]] || main "$@"

@@ -1,0 +1,5 @@
+# Service names under sdlc.internal, one per line. The bootstrap maps each to 127.0.0.1 in
+# /etc/hosts; inside the cluster, CoreDNS sends all of *.sdlc.internal to Traefik.
+gitea
+plane
+argocd
