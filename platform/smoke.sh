@@ -111,6 +111,75 @@ gitea_admin_is_admin() {
 register gitea_admin_login
 check_gitea_admin_login() { with_gitea gitea_admin_is_admin; }
 
+# gitea_main_head: the commit main points to on Gitea (runs inside with_gitea).
+gitea_main_head() {
+  local password
+  password=$(sed -n 's/^GITEA_ADMIN_PASSWORD=//p' "$SECRETS_FILE")
+  curl -fsS --max-time 10 --netrc-file <(printf 'machine 127.0.0.1 login gitea_admin password %s\n' "$password") \
+    "$GITEA_URL/api/v1/repos/sdlc/ai-native-sdlc/branches/main" | jq -er .commit.id
+}
+
+# apps_synced_at <commit>: every Application is Synced and Healthy at that commit. A
+# multi-source Application lists the commit among its revisions.
+apps_synced_at() {
+  kubectl get applications -n argocd -o json | jq -e --arg head "$1" '
+    (.items | length) > 0 and all(.items[];
+      .status.sync.status == "Synced" and .status.health.status == "Healthy" and
+      (.status.sync.revision == $head or ((.status.sync.revisions // []) | index($head)) != null))' >/dev/null
+}
+
+# A change pushed to main is applied within 5 minutes: run it after a push.
+register gitops_synced_to_main
+check_gitops_synced_to_main() {
+  local head
+  head=$(with_gitea gitea_main_head) || return 1
+  for _ in $(seq 30); do
+    apps_synced_at "$head" && return 0
+    sleep 10
+  done
+  echo "not every Application is Synced and Healthy at main ${head:0:7} after 5 minutes:"
+  kubectl get applications -n argocd
+  return 1
+}
+
+# A manual change to a managed object is reverted within 5 minutes.
+register gitops_self_heal
+check_gitops_self_heal() {
+  kubectl patch configmap self-heal-probe -n smoke --type merge -p '{"data": {"value": "changed-by-smoke"}}' >/dev/null ||
+    return 1
+  for _ in $(seq 60); do
+    [[ $(kubectl get configmap self-heal-probe -n smoke -o jsonpath='{.data.value}') == declared-in-git ]] && return 0
+    sleep 5
+  done
+  echo "Argo CD did not revert smoke/self-heal-probe within 5 minutes"
+  return 1
+}
+
+# Argo CD manages itself: every setting in its values.yaml is live in its own ConfigMaps.
+register argocd_self_managed
+check_argocd_self_managed() {
+  local values
+  values=$(yq -o json '.configs' <platform/apps/argocd/values.yaml) || return 1
+  jq -en --argjson want "$values" \
+    --argjson cm "$(kubectl get configmap argocd-cm -n argocd -o json)" \
+    --argjson params "$(kubectl get configmap argocd-cmd-params-cm -n argocd -o json)" '
+    def same($want; $live): all($want | to_entries[];
+      ($live[.key] // "" | tostring | rtrimstr("\n")) == (.value | tostring | rtrimstr("\n")));
+    same($want.cm; $cm.data) and same($want.params; $params.data)' >/dev/null ||
+    { echo "argocd-cm or argocd-cmd-params-cm differs from platform/apps/argocd/values.yaml"; return 1; }
+}
+
+# Every container image names a tag or a digest, and no tag is latest.
+register no_floating_images
+check_no_floating_images() {
+  local floating
+  floating=$(kubectl get pods -A -o json |
+    jq -r '.items[] | .metadata.namespace + "/" + .metadata.name + " " + ((.spec.initContainers // []) + .spec.containers)[].image' |
+    awk '{ image = $2; sub(/.*\//, "", image) }
+      $2 !~ /@sha256:/ && (image !~ /:/ || image ~ /:latest$/) { print }')
+  [[ -z $floating ]] || { echo "images without a pinned version:"; echo "$floating"; return 1; }
+}
+
 register secrets_example_current
 check_secrets_example_current() {
   diff <(platform/bootstrap.sh --example) platform/secrets.env.example

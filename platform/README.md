@@ -142,6 +142,41 @@ git config --remove-section credential.https://gitea.sdlc.internal
 
 ## Changing the platform through git
 
+After the bootstrap, Argo CD owns every component, itself included. The root Application
+([`argocd/root.yaml`](argocd/root.yaml)) renders one Application per
+`apps/<component>/app.yaml` and keeps each in line with `main` on Gitea:
+
+- **To change something**, edit `apps/<component>/values.yaml` (or the manifests next to it),
+  or raise the pinned `targetRevision` in its `app.yaml`, commit, and push to `main`. Argo CD
+  notices within about three minutes. `platform/smoke.sh gitops_synced_to_main` waits until
+  every Application is Synced and Healthy at the commit you pushed. Until the ingress exists,
+  `platform/bootstrap.sh` does the push through a port-forward.
+- **Manual edits do not stick.** Anything changed with `kubectl edit` or in k9s is reverted
+  within seconds. Change git instead.
+- **To add a component**, create `apps/<component>/` with an `app.yaml` (sync wave, automated
+  sync) and its values or manifests. Components whose configuration is not written yet are
+  listed in the root Application's `exclude`.
+- **Watch it** with `kubectl get applications -n argocd`, or `:applications` in k9s.
+
+The bootstrap installed Argo CD, CloudNativePG and Gitea with Helm once, then deleted Helm's
+release records, so `helm list -A` is empty on purpose. Re-running the bootstrap leaves
+anything Argo CD manages alone.
+
+**Recovering a broken Argo CD.** A bad change to `apps/argocd/values.yaml` can break the
+controller that would revert it. Reinstall it from the last good commit with Helm, outside
+GitOps:
+
+```bash
+good=<last good commit>
+git show "$good":platform/apps/argocd/values.yaml > /tmp/argocd-values.yaml
+version=$(git show "$good":platform/apps/argocd/app.yaml | yq '.spec.sources[0].targetRevision')
+helm upgrade --install argocd argo-cd --repo https://argoproj.github.io/argo-helm \
+  --version "$version" --namespace argocd --values /tmp/argocd-values.yaml --wait
+```
+
+Then fix or revert the bad commit on `main`, and run `platform/bootstrap.sh` once Argo CD
+reports itself Synced again: its last phase deletes the Helm release record again.
+
 ## Service URLs
 
 ## Public mirror

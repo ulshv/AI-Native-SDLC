@@ -1,0 +1,9 @@
+# A harmless object for the gitops_self_heal smoke check, which changes it by hand and waits
+# for Argo CD to put it back.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: self-heal-probe
+  namespace: smoke
+data:
+  value: declared-in-git
