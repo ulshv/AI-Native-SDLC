@@ -1,5 +1,6 @@
-# App-of-apps: renders one child Application per platform/apps/<component>/app.yaml. The
-# bootstrap applies it once; everything it renders is reconciled from git after that.
+# App-of-apps: renders one child Application per platform/apps/<component>/app.yaml, and
+# this file too, so a change to the root itself also arrives through git. The bootstrap
+# applies it once to start the loop.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -13,13 +14,13 @@ spec:
   source:
     repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
     targetRevision: main
-    path: platform/apps
+    path: platform
     directory:
       recurse: true
-      include: '*/app.yaml'
+      include: '{argocd/root.yaml,apps/*/app.yaml}'
       # Components whose configuration is not written yet. Each task group that writes one
       # removes it from this list.
-      exclude: '{plane}/app.yaml'
+      exclude: '{apps/plane/app.yaml}'
   syncPolicy:
     automated:
       prune: true

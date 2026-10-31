@@ -144,7 +144,7 @@ git config --remove-section credential.https://gitea.sdlc.internal
 
 After the bootstrap, Argo CD owns every component, itself included. The root Application
 ([`argocd/root.yaml`](argocd/root.yaml)) renders one Application per
-`apps/<component>/app.yaml` and keeps each in line with `main` on Gitea:
+`apps/<component>/app.yaml`, and itself, and keeps each in line with `main` on Gitea:
 
 - **To change something**, edit `apps/<component>/values.yaml` (or the manifests next to it),
   or raise the pinned `targetRevision` in its `app.yaml`, commit, and push to `main`. Argo CD
@@ -178,6 +178,23 @@ Then fix or revert the bad commit on `main`, and run `platform/bootstrap.sh` onc
 reports itself Synced again: its last phase deletes the Helm release record again.
 
 ## Service URLs
+
+| Service | URL | Sign in |
+|---|---|---|
+| Gitea | <https://gitea.sdlc.internal> | `gitea_admin`, password `GITEA_ADMIN_PASSWORD` from `secrets.env` |
+| Argo CD | <https://argocd.sdlc.internal> | `admin`, password: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' \| base64 -d` |
+| Plane | <https://plane.sdlc.internal> | arrives with the Plane section below |
+
+The same names work from inside pods: CoreDNS answers every `*.sdlc.internal` name with
+Traefik's Service. Pods do not trust the local CA yet, so a client in a pod has to be given
+`ca.crt` explicitly.
+
+**After the CA is trusted for the first time, restart the browsers.** Chrome reads
+`~/.pki/nssdb` and Firefox reads its policies only at startup. Until then they show a
+certificate warning.
+
+To add a name, append it to [`hosts.txt`](hosts.txt) and re-run `platform/bootstrap.sh`: the
+host's `/etc/hosts` gets it, pods resolve it already, and the wildcard certificate covers it.
 
 ## Public mirror
 

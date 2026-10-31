@@ -93,9 +93,12 @@ existing Applications and skip them. This satisfies the hand-over requirement.
 
 ### 3. Argo CD: app-of-apps, sync waves, automated sync
 
-`platform/argocd/root.yaml` is an Application that points at `platform/apps/` and renders
-one child Application per component. Every child uses automated sync with `prune` and
-`selfHeal`, and sets `ServerSideApply=true`, which large CRDs such as cert-manager's need.
+`platform/argocd/root.yaml` is an Application that renders one child Application per
+component from `platform/apps/*/app.yaml`, and renders itself too, so a change to the root
+(such as its list of not-yet-configured components) also arrives through git. Every child
+uses automated sync with `prune` and `selfHeal`, and sets `ServerSideApply=true`, which large
+CRDs such as cert-manager's need. Argo CD compares server-side, so fields that admission
+webhooks default do not show as drift, and polls git every minute.
 
 | Wave | Components |
 |---|---|
