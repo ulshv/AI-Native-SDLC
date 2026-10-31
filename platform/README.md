@@ -162,10 +162,11 @@ The bootstrap installed Argo CD, CloudNativePG and Gitea with Helm once, then de
 release records, so `helm list -A` is empty on purpose. Re-running the bootstrap leaves
 anything Argo CD manages alone.
 
-The bootstrap's last step also removes Helm's and its own claims on the fields of everything
-Argo CD manages (`managedFields`). Kubernetes drops a field that is deleted from git only when
-no one else still claims it; without this step, a value deleted from `values.yaml` would stay
-in the cluster while Argo CD showed Synced.
+The bootstrap's last step also gives up Helm's and its own claims on the fields of everything
+Argo CD manages (`managedFields`), and removes what only they had set, such as Helm's own
+labels. Kubernetes drops a field that is deleted from git only when no one else still claims
+it; without this step, a value deleted from `values.yaml` would stay in the cluster while
+Argo CD showed Synced.
 
 **Recovering a broken Argo CD.** A bad change to `apps/argocd/values.yaml` can break the
 controller that would revert it. Reinstall it from the last good commit with Helm, outside

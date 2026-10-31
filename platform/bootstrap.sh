@@ -776,16 +776,19 @@ foreign_owned() {
 
 argo_owns_alone() { [[ -z $(foreign_owned) ]]; }
 
-# Removes the foreign managers' entries from managedFields. The fields stay as they are;
-# Argo CD, which applies all of them too, becomes their only owner.
+# Releases the foreign managers by applying an empty object in each one's name, which gives
+# up all of its fields. Fields Argo CD applies too stay, now owned by Argo CD alone; fields
+# only the foreign manager set, such as Helm's own label, are not in git and are removed.
 drop_foreign_managers() {
-  local ns object
+  local ns object live manager
   foreign_owned | while read -r ns object; do
-    kubectl patch "$object" -n "${ns/#-/default}" --type=json --patch-file=<(
-      kubectl get "$object" -n "${ns/#-/default}" --show-managed-fields -o json | jq -c --argjson foreign "$FOREIGN_MANAGERS" '
-        [{op: "replace", path: "/metadata/managedFields",
-          value: [.metadata.managedFields[] | select(.manager as $m | $foreign | index($m) | not)]}]'
-    ) >/dev/null && echo "$object: Argo CD owns it alone"
+    live=$(kubectl get "$object" -n "${ns/#-/default}" --show-managed-fields -o json) || return 1
+    for manager in $(jq -r --argjson foreign "$FOREIGN_MANAGERS" \
+      '[.metadata.managedFields[].manager | select(. as $m | $foreign | index($m))] | unique[]' <<<"$live"); do
+      jq '{apiVersion, kind, metadata: (.metadata | {name} + if .namespace then {namespace} else {} end)}' <<<"$live" |
+        kubectl apply --server-side --field-manager="$manager" -f - >/dev/null || return 1
+    done
+    echo "$object: Argo CD owns it alone"
   done
 }
 
