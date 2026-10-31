@@ -15,6 +15,8 @@ configs:
     # own), which stays well within the 5 minutes the platform promises.
     timeout.reconciliation: 60s
     timeout.reconciliation.jitter: 30s
+    # Lets a kustomization render a Helm chart and patch its output (apps/plane).
+    kustomize.buildOptions: --enable-helm
     # Argo CD does not assess a child Application's health by default, so sync waves in the
     # root Application would not wait for a component to become healthy. This restores it.
     resource.customizations.health.argoproj.io_Application: |
