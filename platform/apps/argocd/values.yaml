@@ -11,6 +11,10 @@ configs:
     # as CloudNativePG's role settings) do not show as drift.
     controller.diff.server.side: "true"
   cm:
+    # Poll git every minute. A new component takes two polls (the root Application, then its
+    # own), which stays well within the 5 minutes the platform promises.
+    timeout.reconciliation: 60s
+    timeout.reconciliation.jitter: 30s
     # Argo CD does not assess a child Application's health by default, so sync waves in the
     # root Application would not wait for a component to become healthy. This restores it.
     resource.customizations.health.argoproj.io_Application: |
