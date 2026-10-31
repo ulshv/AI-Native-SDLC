@@ -23,9 +23,9 @@
 
 ## 2. Bootstrap skeleton and preflight
 
-- [ ] 2.1 Create `platform/bootstrap.sh` with the phase structure from design decision 2, where every phase first checks the current state and skips when already done, and verify a dry run prints the phase plan without changing anything
-- [ ] 2.2 Implement preflight: sudo available; required tools present (`helm`, `git`, `openssl`, `jq`, `yq`, `curl`, `certutil`); ports 80 and 443 free, naming the process that holds them; required external secrets present. Verify that each missing prerequisite makes the script exit non-zero with its name, and that the host is unchanged
-- [ ] 2.3 Document the preflight requirements and how to free ports 80 and 443 (for example, stopping Docker Desktop) in `platform/README.md`
+- [x] 2.1 Create `platform/bootstrap.sh` with the phase structure from design decision 2, where every phase first checks the current state and skips when already done, and verify a dry run prints the phase plan without changing anything
+- [x] 2.2 Implement preflight: sudo available; required tools present (`helm`, `git`, `openssl`, `jq`, `yq`, `curl`, `certutil`); ports 80 and 443 free, naming the process that holds them; required external secrets present. Verify that each missing prerequisite makes the script exit non-zero with its name, and that the host is unchanged
+- [x] 2.3 Document the preflight requirements and how to free ports 80 and 443 (for example, stopping Docker Desktop) in `platform/README.md`
 
 ## 3. Secrets
 

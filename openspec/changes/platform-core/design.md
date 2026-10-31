@@ -59,10 +59,11 @@ GitOps.
 is what makes the script idempotent:
 
 ```
- 0. preflight      sudo available; ports 80/443 free; required external secrets present
- 1. host           k3s; /etc/hosts block; CA into system + browser trust stores
- 2. secrets        generate missing values -> ~/.config/ai-native-sdlc/; apply k8s Secrets
- 3. git hosting    CNPG operator + Postgres cluster + Gitea   (helm, values from platform/apps/)
+ 0. preflight      sudo available; tools present; ports 80/443 free; required external secrets present
+ 1. secrets        generate missing values and the root CA -> ~/.config/ai-native-sdlc/
+                   (local files only, so the CA exists before phase 2 trusts it)
+ 2. host           k3s; /etc/hosts block; CA into system + browser trust stores; apply k8s Secrets
+ 3. git hosting    CloudNativePG operator + Postgres cluster + Gitea   (helm, values from platform/apps/)
  4. repository     create org/repo; move origin; push branches and tags   (see decision 9)
                    (via a temporary port-forward to Gitea's Service, because ingress and TLS
                     only arrive with Argo CD in phases 5-6)
