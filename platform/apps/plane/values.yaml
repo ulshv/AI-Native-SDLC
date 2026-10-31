@@ -1,1 +1,70 @@
-{}
+# Plane CE, the platform's issue tracker. Its database is platform-pg/plane; Redis, RabbitMQ
+# and MinIO run from the chart. Every credential and connection string comes from the Secrets
+# the bootstrap seeds into this namespace (see secrets.manifest).
+planeVersion: v1.4.3
+
+# No bundled Postgres: Plane connects to platform-pg/plane through DATABASE_URL in the
+# plane-app-env Secret (see secrets.manifest), because the URL carries the role's password.
+postgres:
+  local_setup: false
+
+# Fail the render instead of falling back to the chart's public example keys.
+env:
+  requireExplicitSecrets: true
+
+external_secrets:
+  app_keys_existingSecret: plane-app-keys
+  app_env_existingSecret: plane-app-env
+  live_env_existingSecret: plane-live-env
+  rabbitmq_existingSecret: plane-rabbitmq
+  doc_store_existingSecret: plane-doc-store
+
+# Plain HTTP routes on Traefik's websecure entry point, which terminates TLS for every
+# *.sdlc.internal name; externalTermination makes Plane build its links with https://.
+ingress:
+  enabled: true
+  appHost: plane.sdlc.internal
+  ingressClass: traefik
+  traefik:
+    entryPoints: [websecure]
+ssl:
+  externalTermination: true
+
+# The chart defaults to an untagged busybox.
+minio:
+  init_image: docker.io/rancher/mirrored-library-busybox:1.37.0
+
+# Tags are pinned, so a pod restart needs no registry: the chart's default "Always" would
+# re-pull on every restart and fail offline. Memory is sized from a measured idle install;
+# the chart has no resource values for Redis, RabbitMQ and MinIO, which get the namespace
+# defaults from limit-range.yaml.
+web:
+  pullPolicy: IfNotPresent
+  memoryRequest: 64Mi
+  memoryLimit: 256Mi
+space:
+  pullPolicy: IfNotPresent
+  memoryRequest: 64Mi
+  memoryLimit: 256Mi
+admin:
+  pullPolicy: IfNotPresent
+  memoryRequest: 64Mi
+  memoryLimit: 256Mi
+live:
+  pullPolicy: IfNotPresent
+  memoryRequest: 160Mi
+  memoryLimit: 384Mi
+api:
+  pullPolicy: IfNotPresent
+  memoryRequest: 192Mi
+  memoryLimit: 768Mi
+# Celery starts one process per CPU core unless CELERY_WORKER_CONCURRENCY (in plane-app-env)
+# caps it; uncapped it ran out of this limit on a 14-core laptop.
+worker:
+  pullPolicy: IfNotPresent
+  memoryRequest: 256Mi
+  memoryLimit: 1Gi
+beatworker:
+  pullPolicy: IfNotPresent
+  memoryRequest: 160Mi
+  memoryLimit: 384Mi

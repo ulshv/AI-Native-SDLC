@@ -7,6 +7,8 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 SECRETS_FILE=${SECRETS_DIR:-$HOME/.config/ai-native-sdlc}/secrets.env
+# The checks always talk to this cluster, whatever KUBECONFIG the shell had (as bootstrap.sh).
+export KUBECONFIG=$HOME/.kube/config
 
 CHECKS=()
 # A check is a function check_<name>, registered with `register <name>`.
@@ -231,6 +233,145 @@ check_https_on_every_name() {
   done
   return $failed
 }
+
+# plane_shell: runs Python from stdin in Django's shell inside Plane's API pod. The checks use
+# it for what Plane's public API cannot do: creating API keys and webhooks. Only lines
+# starting with "SMOKE " are its answer; the rest is Plane's logging.
+plane_shell() {
+  kubectl exec -i -n plane deploy/plane-api-wl -- python -W ignore manage.py shell --no-imports 2>/dev/null |
+    sed -n 's/^SMOKE //p'
+}
+
+# with_plane_key <command...>: runs the command with PLANE_KEY set to a temporary API key of
+# the instance admin in the workspace "smoke" (created on the first run), and deletes the key
+# afterwards. The key also expires on its own after 10 minutes.
+with_plane_key() {
+  local rc
+  PLANE_KEY=$(plane_shell <<'EOF'
+from datetime import timedelta
+from django.utils import timezone
+from plane.db.models import APIToken, Workspace, WorkspaceMember
+from plane.license.models import InstanceAdmin
+admin = InstanceAdmin.objects.order_by("created_at").first().user
+workspace, _ = Workspace.objects.get_or_create(slug="smoke", defaults={"name": "Smoke", "owner": admin})
+WorkspaceMember.objects.get_or_create(workspace=workspace, member=admin, defaults={"role": 20})
+APIToken.all_objects.filter(label="smoke-check").delete()
+token = APIToken.objects.create(user=admin, workspace=workspace, label="smoke-check",
+    description="platform/smoke.sh, deleted when the check ends",
+    expired_at=timezone.now() + timedelta(minutes=10))
+print("SMOKE", token.token)
+EOF
+  )
+  [[ -n $PLANE_KEY ]] || { echo "could not create a temporary Plane API key"; return 1; }
+  "$@"
+  rc=$?
+  plane_shell <<<'from plane.db.models import APIToken; APIToken.all_objects.filter(label="smoke-check").delete()' >/dev/null
+  unset PLANE_KEY
+  return $rc
+}
+
+# plane_api <method> <path> [json]: a call to Plane's public API in the workspace "smoke",
+# through the ingress. The key goes to curl as a header file on a pipe, never as an argument.
+plane_api() {
+  curl -fsS --max-time 20 -X "$1" -H @<(printf 'X-API-Key: %s\n' "$PLANE_KEY") \
+    -H 'Content-Type: application/json' ${3:+--data "$3"} \
+    "https://plane.sdlc.internal/api/v1/workspaces/smoke$2"
+}
+
+# plane_probe: "<project id> <work item id>" of the work item "smoke probe" in the project
+# SMOKE, both created on the first run.
+plane_probe() {
+  local project item
+  project=$(plane_api GET /projects/ | jq -r '.results[] | select(.identifier == "SMOKE") | .id') || return 1
+  [[ -n $project ]] ||
+    project=$(plane_api POST /projects/ '{"name": "Smoke", "identifier": "SMOKE"}' | jq -er .id) || return 1
+  item=$(plane_api GET "/projects/$project/issues/" | jq -r '.results[] | select(.name == "smoke probe") | .id' | head -1) ||
+    return 1
+  [[ -n $item ]] || item=$(plane_api POST "/projects/$project/issues/" '{"name": "smoke probe"}' | jq -er .id) || return 1
+  echo "$project $item"
+}
+
+# toggle_probe_status <project> <item>: moves the probe between Todo and Done, checks that the
+# change reads back, and prints the new state's id.
+toggle_probe_status() {
+  local states current target
+  states=$(plane_api GET "/projects/$1/states/") || return 1
+  current=$(plane_api GET "/projects/$1/issues/$2/" | jq -er .state) || return 1
+  target=$(jq -r --arg current "$current" '
+    (.results[] | select(.id == $current) | .group) as $group
+    | [.results[] | select(.group == (if $group == "completed" then "unstarted" else "completed" end))][0].id // empty' \
+    <<<"$states")
+  [[ -n $target ]] || { echo "the project SMOKE has no Todo or Done state"; return 1; }
+  plane_api PATCH "/projects/$1/issues/$2/" "$(jq -n --arg state "$target" '{state: $state}')" >/dev/null || return 1
+  [[ $(plane_api GET "/projects/$1/issues/$2/" | jq -r .state) == "$target" ]] ||
+    { echo "the status of smoke probe did not change"; return 1; }
+  echo "$target"
+}
+
+plane_status_changes() {
+  local probe
+  probe=$(plane_probe) || return 1
+  # shellcheck disable=SC2086 # two words: project and item
+  toggle_probe_status $probe >/dev/null
+}
+
+# An automated client reads a work item with an API key and changes its status; the change
+# shows in the UI (Smoke workspace, project SMOKE).
+register plane_api_work_item
+check_plane_api_work_item() { with_plane_key plane_status_changes; }
+
+# A temporary echo endpoint in the cluster, addressed by its Service name, gets the webhook
+# for a status change. It runs Python from Plane's own image, which the node already has.
+PLANE_ECHO=smoke-plane-echo
+plane_webhook_delivered() {
+  local image probe state rc=1
+  image=$(kubectl get deploy plane-api-wl -n plane -o jsonpath='{.spec.template.spec.containers[0].image}') || return 1
+  probe=$(plane_probe) || return 1
+  kubectl delete pod,service "$PLANE_ECHO" -n smoke --grace-period=1 --ignore-not-found >/dev/null
+  kubectl run "$PLANE_ECHO" -n smoke --restart=Never --image="$image" --image-pull-policy=IfNotPresent \
+    --port=8080 --expose --command -- python -u -c '
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class Echo(BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        state = body.get("data", {}).get("state")
+        print("WEBHOOK", body.get("event"), body.get("action"), state.get("id") if isinstance(state, dict) else state)
+        self.send_response(200)
+        self.end_headers()
+    def log_message(self, *args):
+        pass
+HTTPServer(("", 8080), Echo).serve_forever()' >/dev/null || return 1
+  if kubectl wait pod/"$PLANE_ECHO" -n smoke --for=condition=Ready --timeout=60s >/dev/null &&
+    [[ $(plane_shell <<EOF
+from plane.app.serializers import WebhookSerializer
+from plane.db.models import Workspace, Webhook
+workspace = Workspace.objects.get(slug="smoke")
+Webhook.all_objects.filter(workspace=workspace).delete()
+webhook = WebhookSerializer(data={"url": "http://$PLANE_ECHO.smoke.svc:8080/", "issue": True}, context={"request": None})
+print("SMOKE", webhook.save(workspace_id=workspace.id).id if webhook.is_valid() else webhook.errors)
+EOF
+    ) =~ ^[0-9a-f-]{36}$ ]]; then
+    # shellcheck disable=SC2086 # two words: project and item
+    if state=$(toggle_probe_status $probe); then
+      for _ in $(seq 60); do
+        kubectl logs "$PLANE_ECHO" -n smoke | grep -q "^WEBHOOK issue updated $state$" && { rc=0; break; }
+        sleep 1
+      done
+      ((rc == 0)) || echo "no webhook for the status change reached $PLANE_ECHO.smoke.svc within 1 minute"
+    else
+      echo "$state"
+    fi
+  else
+    echo "could not start $PLANE_ECHO or create its webhook"
+  fi
+  plane_shell <<<'from plane.db.models import Webhook; Webhook.all_objects.filter(workspace__slug="smoke").delete()' >/dev/null
+  kubectl delete pod,service "$PLANE_ECHO" -n smoke --grace-period=1 --wait=false >/dev/null
+  return $rc
+}
+
+register plane_webhook_in_cluster
+check_plane_webhook_in_cluster() { with_plane_key plane_webhook_delivered; }
 
 # The public mirror holds main and nothing else: no other branch, no tag. Read anonymously over
 # HTTPS from the github remote's address; passes when there is no github remote.

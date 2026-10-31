@@ -1,0 +1,15 @@
+# Memory for the containers the chart renders without resources: Redis, RabbitMQ, MinIO and
+# the chart's Jobs. Applied before the workloads, which get these defaults when created.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: defaults
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        memory: 64Mi
+      default:
+        memory: 512Mi

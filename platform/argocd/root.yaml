@@ -18,9 +18,6 @@ spec:
     directory:
       recurse: true
       include: '{argocd/root.yaml,apps/*/app.yaml}'
-      # Components whose configuration is not written yet. Each task group that writes one
-      # removes it from this list.
-      exclude: '{apps/plane/app.yaml}'
   syncPolicy:
     automated:
       prune: true

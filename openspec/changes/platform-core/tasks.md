@@ -91,12 +91,12 @@
 
 ## 11. Plane CE
 
-- [ ] 11.1 Spike: install Plane and verify it delivers a webhook to an in-cluster endpoint addressed by its service name. If Plane refuses private addresses, look for a setting that allows them. Report back before building further if neither works
-- [ ] 11.2 Spike: find a supported way to create the instance admin non-interactively (a management command in the API image or similar). If none exists, apply the design's fallback and update the `issue-tracking` spec before continuing
-- [ ] 11.3 Write `platform/apps/plane/values.yaml`: bundled Postgres disabled, external database `platform-pg/plane`, Redis, RabbitMQ and MinIO from the chart, the `plane.sdlc.internal` ingress without TLS settings, secrets from the seeded Secrets, explicit resource requests and limits, and a pinned tag for the MinIO init image (the chart defaults to an untagged `busybox`). Verify the app is Synced and Healthy, and that a work item created in the UI is saved
-- [ ] 11.4 Add the idempotent PostSync Job that creates the instance admin from `PLANE_ADMIN_EMAIL` and `PLANE_ADMIN_PASSWORD`. Verify that sign-in works with those credentials after bootstrap, that `/god-mode/` no longer offers admin creation, and that a re-sync leaves the admin unchanged
-- [ ] 11.5 Add smoke checks: with an API key, read a work item and change its status (visible in the UI), and a status change delivers a webhook to a temporary in-cluster echo endpoint within 1 minute. Verify both pass
-- [ ] 11.6 Document the admin sign-in, API key creation and webhook setup in `platform/README.md`
+- [x] 11.1 Spike: install Plane and verify it delivers a webhook to an in-cluster endpoint addressed by its service name. If Plane refuses private addresses, look for a setting that allows them. Report back before building further if neither works
+- [x] 11.2 Spike: find a supported way to create the instance admin non-interactively (a management command in the API image or similar). If none exists, apply the design's fallback and update the `issue-tracking` spec before continuing
+- [x] 11.3 Write `platform/apps/plane/values.yaml`: bundled Postgres disabled, external database `platform-pg/plane`, Redis, RabbitMQ and MinIO from the chart, the `plane.sdlc.internal` ingress without TLS settings, secrets from the seeded Secrets, explicit resource requests and limits, and a pinned tag for the MinIO init image (the chart defaults to an untagged `busybox`). Verify the app is Synced and Healthy, and that a work item created in the UI is saved
+- [x] 11.4 Add the idempotent PostSync Job that creates the instance admin from `PLANE_ADMIN_EMAIL` and `PLANE_ADMIN_PASSWORD`. Verify that sign-in works with those credentials after bootstrap, that `/god-mode/` no longer offers admin creation, and that a re-sync leaves the admin unchanged
+- [x] 11.5 Add smoke checks: with an API key, read a work item and change its status (visible in the UI), and a status change delivers a webhook to a temporary in-cluster echo endpoint within 1 minute. Verify both pass
+- [x] 11.6 Document the admin sign-in, API key creation and webhook setup in `platform/README.md`
 
 ## 12. End-to-end verification
 

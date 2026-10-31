@@ -6,7 +6,7 @@
 > - **TLS on day one:** one wildcard certificate at Traefik, signed by a local CA that lives outside the cluster and so survives rebuilds (decision 5).
 > - **Secrets outside the repo:** values in `~/.config/ai-native-sdlc/secrets.env`, generated on first run. The repo holds only a manifest of names (decision 6).
 > - **`origin` moves to Gitea:** `main` reaches GitHub only by a manual push, which a pre-push hook checks for secret values (decision 9).
-> - **Biggest risk:** Plane may refuse webhooks to private addresses. It is checked first with a spike.
+> - **Biggest risk:** Plane may refuse webhooks to private addresses. A spike confirmed it does, and that `WEBHOOK_ALLOWED_IPS` allows the cluster's networks (decision 10).
 
 ## Context
 
@@ -286,13 +286,25 @@ Pushes to Gitea are not checked: a leak there stays private and recoverable. `gi
   kept in `secrets.env` so a personal address stays out of the public repo). The password is
   `PLANE_ADMIN_PASSWORD` (generated). The Job is idempotent: if the admin already exists, it
   does nothing.
-- **The mechanism needs a spike.** Plane documents no Helm value or environment variable for
-  this, and the official flow is the `/god-mode/` wizard. A community Railway template
-  automates it with its own `ADMIN_EMAIL` wrapper. The most likely route is a management
-  command in Plane's backend. Automation also closes the window in which anyone who reaches
-  `/god-mode/` first could claim the instance. **Fallback:** if no supported mechanism
-  exists, the wizard stays a documented one-time step and the corresponding requirement in
-  `issue-tracking` is revised.
+- **The mechanism** (found by a spike): Plane documents no Helm value or environment variable
+  for this, and its `create_instance_admin` command only promotes an existing user and leaves
+  the wizard open. The Job therefore runs Django's shell and posts to the wizard's own sign-up
+  endpoint in-process (Django's test client, so no network and no CSRF). The admin is set up
+  exactly as the wizard does it, `/god-mode/` stops offering the setup, and nobody who reaches
+  it first can claim the instance.
+- **Webhooks to in-cluster services** need `WEBHOOK_ALLOWED_IPS`: Plane refuses private
+  addresses by default and checks again at delivery. It is set to the pod and service
+  networks (`10.42.0.0/16,10.43.0.0/16`). The chart has no value for extra environment, so this
+  and `CELERY_WORKER_CONCURRENCY=2` ride in the seeded `plane-app-env` Secret; uncapped,
+  Celery starts one process per CPU core and ran out of memory.
+- **Argo CD renders the chart through kustomize** (`helmCharts` in
+  `apps/plane/kustomization.yaml`, enabled by `kustomize.buildOptions: --enable-helm` in
+  `argocd-cm`). The chart stamps every pod template with the render time and names its Jobs
+  after the Helm revision, which Argo CD never increments, so each push would restart Plane and
+  fail on the immutable Jobs; `ignoreDifferences` cannot stop it, because Argo CD applies the
+  new stamp anyway. Kustomize removes the stamp and turns the chart's Jobs into sync hooks.
+- Images are pulled `IfNotPresent` (the chart defaults to `Always`, which fails offline), and
+  the containers the chart renders without resources get a namespace `LimitRange`.
 
 ### 11. Layout and namespaces
 
@@ -319,13 +331,11 @@ There is one namespace per component: `argocd`, `cert-manager`, `cloudnative-pg`
 - **[Argo CD manages itself]** A bad change to Argo CD's own values can break the controller
   that would revert it. → A documented recovery: `helm upgrade` with the values from the
   last good commit. This is a manual procedure, not part of the bootstrap.
-- **[Plane webhooks to private addresses]** Plane may refuse webhook URLs that resolve to
-  private IPs (SSRF protection), which would break the in-cluster webhook requirement. →
-  This is the first Plane task: a spike that verifies delivery to an in-cluster endpoint
-  before anything else is built on it. If it fails, we look for a setting that allows the
-  internal range before changing the approach.
-- **[Plane admin automation]** No documented mechanism exists. → A spike at the start of the
-  Plane task, with the manual wizard as a fallback (decision 10).
+- **[Plane webhooks to private addresses]** Plane refuses webhook URLs that resolve to
+  private IPs (SSRF protection). → Resolved by the spike: `WEBHOOK_ALLOWED_IPS` allows the
+  cluster's networks only (decision 10).
+- **[Plane admin automation]** No documented mechanism exists. → Resolved by the spike: the
+  Job drives the wizard's own endpoint (decision 10).
 - **[ServiceLB on loopback]** `127.0.0.1:443` reaching Traefik relies on how klipper publishes
   host ports. → It is verified early in the Traefik task. The fallback is running Traefik
   with `hostNetwork` on ports 80 and 443.

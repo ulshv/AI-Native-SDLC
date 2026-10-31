@@ -147,15 +147,15 @@ After the bootstrap, Argo CD owns every component, itself included. The root App
 `apps/<component>/app.yaml`, and itself, and keeps each in line with `main` on Gitea:
 
 - **To change something**, edit `apps/<component>/values.yaml` (or the manifests next to it),
-  or raise the pinned `targetRevision` in its `app.yaml`, commit, and push to `main`. Argo CD
+  or raise the pinned chart version (`targetRevision` in its `app.yaml`; for Plane, `version`
+  in its `kustomization.yaml`), commit, and push to `main`. Argo CD
   notices within about three minutes. `platform/smoke.sh gitops_synced_to_main` waits until
   every Application is Synced and Healthy at the commit you pushed. Until the ingress exists,
   `platform/bootstrap.sh` does the push through a port-forward.
 - **Manual edits do not stick.** Anything changed with `kubectl edit` or in k9s is reverted
   within seconds. Change git instead.
 - **To add a component**, create `apps/<component>/` with an `app.yaml` (sync wave, automated
-  sync) and its values or manifests. Components whose configuration is not written yet are
-  listed in the root Application's `exclude`.
+  sync) and its values or manifests.
 - **Watch it** with `kubectl get applications -n argocd`, or `:applications` in k9s.
 
 The bootstrap installed Argo CD, CloudNativePG and Gitea with Helm once, then deleted Helm's
@@ -183,7 +183,7 @@ reports itself Synced again: its last phase deletes the Helm release record agai
 |---|---|---|
 | Gitea | <https://gitea.sdlc.internal> | `gitea_admin`, password `GITEA_ADMIN_PASSWORD` from `secrets.env` |
 | Argo CD | <https://argocd.sdlc.internal> | `admin`, password: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' \| base64 -d` |
-| Plane | <https://plane.sdlc.internal> | arrives with the Plane section below |
+| Plane | <https://plane.sdlc.internal> | `PLANE_ADMIN_EMAIL`, password `PLANE_ADMIN_PASSWORD` from `secrets.env` |
 
 The same names work from inside pods: CoreDNS answers every `*.sdlc.internal` name with
 Traefik's Service. Pods do not trust the local CA yet, so a client in a pod has to be given
@@ -231,3 +231,37 @@ push to GitHub again.
 `platform/smoke.sh mirror_only_main` checks that GitHub holds `main` and nothing else.
 
 ## Plane
+
+Plane CE, the issue tracker, runs at <https://plane.sdlc.internal> on the platform's Postgres
+(database `plane`); Redis, RabbitMQ and MinIO come with its chart. Argo CD renders the chart
+through [`apps/plane/kustomization.yaml`](apps/plane/kustomization.yaml), which patches two
+things Helm values cannot change: a render timestamp on every pod, which would restart Plane
+after every push, and the chart's Jobs, which become sync hooks.
+
+**Admin.** Sign in with `PLANE_ADMIN_EMAIL` and `PLANE_ADMIN_PASSWORD` from `secrets.env`; the
+instance settings are at <https://plane.sdlc.internal/god-mode/>. The admin is created by a
+Job ([`apps/plane/admin-job.yaml`](apps/plane/admin-job.yaml)) that runs after every sync and
+does nothing once an admin exists, so the first-run wizard never opens. For the same reason,
+changing `PLANE_ADMIN_PASSWORD` later does not change the password: change it in Plane
+(Profile settings → Security) and keep `secrets.env` in step. A rebuild creates a new admin
+from `secrets.env`, because the data does not survive it.
+
+**API key.** In Plane: Profile settings → Personal Access Tokens → Add token. A client sends it
+in the `X-API-Key` header to `https://plane.sdlc.internal/api/v1/`, for example:
+
+```bash
+curl -H @<(printf 'X-API-Key: %s\n' "$PLANE_API_KEY") \
+  https://plane.sdlc.internal/api/v1/workspaces/<workspace>/projects/
+```
+
+**Webhooks.** In Plane: Workspace settings → Webhooks → Add webhook, with the events to send.
+A receiver in the cluster is addressed by its Service name, such as
+`http://<service>.<namespace>.svc:<port>/`. Plane refuses webhook URLs on private addresses,
+except for the cluster's pod and service networks, allowed by `WEBHOOK_ALLOWED_IPS` in
+[`secrets.manifest`](secrets.manifest). Plane signs each delivery with the webhook's secret
+(the `X-Plane-Signature` header) and lists the deliveries under the webhook.
+
+The smoke checks `plane_api_work_item` and `plane_webhook_in_cluster` do the same with a
+temporary key and webhook in the workspace `smoke`: they switch the work item `smoke probe` in
+project SMOKE between Todo and Done, and delete the key, the webhook and their echo endpoint
+afterwards.

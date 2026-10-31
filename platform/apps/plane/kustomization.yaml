@@ -1,0 +1,36 @@
+# Argo CD renders Plane through kustomize, because the chart's output needs two fixes that
+# Helm values cannot make.
+helmCharts:
+  - name: plane-ce
+    repo: https://helm.plane.so
+    version: 1.8.6
+    releaseName: plane
+    namespace: plane
+    valuesFile: values.yaml
+
+resources:
+  - limit-range.yaml
+  - admin-job.yaml
+
+patches:
+  # The chart stamps every pod template with the render time, and Argo CD renders again after
+  # every push to main: each push would restart all of Plane.
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: remove
+        path: /spec/template/metadata/annotations/timestamp
+  # A Job's pod template is immutable, and the chart names its Jobs after the Helm revision,
+  # which Argo CD never increments, so a new Plane version could not update them. As Sync
+  # hooks they are recreated on every sync instead; both are safe to repeat.
+  - target:
+      kind: Job
+      name: plane-(api-migrate|minio-bucket)-1
+    patch: |-
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: chart-job
+        annotations:
+          argocd.argoproj.io/hook: Sync
+          argocd.argoproj.io/hook-delete-policy: BeforeHookCreation

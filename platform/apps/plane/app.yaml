@@ -10,17 +10,12 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: plane
-  sources:
-    - repoURL: https://helm.plane.so
-      chart: plane-ce
-      targetRevision: 1.8.6
-      helm:
-        releaseName: plane
-        valueFiles:
-          - $values/platform/apps/plane/values.yaml
-    - repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
-      targetRevision: main
-      ref: values
+  # Rendered through kustomization.yaml, which inflates the chart (version pinned there) with
+  # values.yaml and patches its output.
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
+    targetRevision: main
+    path: platform/apps/plane
   syncPolicy:
     automated:
       prune: true

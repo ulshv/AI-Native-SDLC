@@ -1,0 +1,70 @@
+# Creates Plane's instance admin from PLANE_ADMIN_EMAIL and PLANE_ADMIN_PASSWORD after every
+# sync, so /god-mode/ never offers its first-run setup to whoever opens it first. It posts to
+# the wizard's own sign-up endpoint in-process, so the admin is set up exactly as the wizard
+# would; once an admin exists it does nothing.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: plane-create-admin
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: create-admin
+          # Same image and tag as Plane's API (planeVersion in values.yaml).
+          image: artifacts.plane.so/makeplane/plane-backend:v1.4.3
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: plane-app-vars
+            - secretRef:
+                name: plane-app-env
+            - secretRef:
+                name: plane-doc-store
+            - secretRef:
+                name: plane-app-keys
+          env:
+            - name: ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef: {name: plane-admin, key: email}
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: plane-admin, key: password}
+          resources:
+            requests:
+              memory: 192Mi
+            limits:
+              memory: 512Mi
+          # -W: the static files are collected only in the API pod, so whitenoise warns here.
+          command: [python, -W, "ignore:No directory at", manage.py, shell, --no-imports, -c]
+          args:
+            - |
+              import os, sys
+              from urllib.parse import urlparse, parse_qs
+              from django.test import Client
+              from plane.license.models import Instance, InstanceAdmin
+
+              instance = Instance.objects.first()
+              if instance is None:
+                  sys.exit("Plane's API has not registered the instance yet")
+              if instance.is_setup_done or InstanceAdmin.objects.exists():
+                  print("instance admin exists, nothing to do")
+                  sys.exit(0)
+
+              response = Client(HTTP_USER_AGENT="ai-native-sdlc").post("/api/instances/admins/sign-up/", {
+                  "email": os.environ["ADMIN_EMAIL"],
+                  "password": os.environ["ADMIN_PASSWORD"],
+                  "first_name": "Admin",
+                  "company_name": "ai-native-sdlc",
+                  "is_telemetry_enabled": "False",
+              })
+              location = urlparse(response.get("Location", ""))
+              error = parse_qs(location.query).get("error_code")
+              if response.status_code != 302 or error or not location.path.endswith("/general/"):
+                  sys.exit(f"admin sign-up failed: {response.status_code} {error or location.path}")
+              print("instance admin created")

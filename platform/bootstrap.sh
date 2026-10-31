@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# Pinned k3s release. Chart versions are pinned in platform/apps/*/app.yaml.
+# Pinned k3s release. Chart versions are pinned in platform/apps/*/app.yaml (Plane: kustomization.yaml).
 K3S_VERSION=v1.36.5+k3s1
 
 SECRETS_DIR=${SECRETS_DIR:-$HOME/.config/ai-native-sdlc}
