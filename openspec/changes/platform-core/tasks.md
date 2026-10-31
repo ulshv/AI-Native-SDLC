@@ -54,8 +54,8 @@
 
 ## 6. Gitea
 
-- [ ] 6.1 Write `platform/apps/gitea/values.yaml`: `postgresql-ha` and `valkey-cluster` disabled, database `platform-pg/gitea`, built-in cache, session and queue, `ROOT_URL=https://gitea.sdlc.internal/`, no SSH service, admin from the seeded Secret, a local-path PVC, explicit resource requests and limits, and the chart's helm-test pod disabled (`test.enabled: false`, it uses `busybox:latest`)
-- [ ] 6.2 Implement Gitea installation in bootstrap phase 3 with the same values file, and verify through a port-forward that the API answers and the admin can authenticate
+- [x] 6.1 Write `platform/apps/gitea/values.yaml`: `postgresql-ha` and `valkey-cluster` disabled, database `platform-pg/gitea`, built-in cache, session and queue, `ROOT_URL=https://gitea.sdlc.internal/`, no SSH service, admin from the seeded Secret, a local-path PVC, explicit resource requests and limits, and the chart's helm-test pod disabled (`test.enabled: false`, it uses `busybox:latest`)
+- [x] 6.2 Implement Gitea installation in bootstrap phase 3 with the same values file, and verify through a port-forward that the API answers and the admin can authenticate
 
 ## 7. Repository and origin
 

@@ -1,1 +1,74 @@
-{}
+# Gitea, the platform's git server. Its database is platform-pg/gitea; cache, sessions and
+# queues use Gitea's built-in backends (the chart picks memory and LevelDB when Valkey is off),
+# so no bundled Postgres or Valkey runs.
+postgresql:
+  enabled: false
+postgresql-ha:
+  enabled: false
+valkey:
+  enabled: false
+valkey-cluster:
+  enabled: false
+
+# The chart's helm-test pod uses busybox:latest.
+test:
+  enabled: false
+
+# One ReadWriteOnce volume and a LevelDB queue: two pods must never run at once.
+strategy:
+  type: Recreate
+
+persistence:
+  enabled: true
+  size: 5Gi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+gitea:
+  # Username and password come from the gitea-admin Secret that the bootstrap seeds;
+  # keepUpdated applies a rotated password on the next start.
+  admin:
+    existingSecret: gitea-admin
+    email: gitea-admin@sdlc.internal
+    passwordMode: keepUpdated
+
+  config:
+    server:
+      DOMAIN: gitea.sdlc.internal
+      ROOT_URL: https://gitea.sdlc.internal/
+      # Git over HTTPS only; see the design's non-goals.
+      DISABLE_SSH: true
+      START_SSH_SERVER: false
+    database:
+      DB_TYPE: postgres
+      HOST: platform-pg-rw.databases.svc:5432
+      NAME: gitea
+      USER: gitea
+      SSL_MODE: require
+    service:
+      # Accounts are created by the admin, not by whoever reaches the page first.
+      DISABLE_REGISTRATION: true
+
+  # Secret values from the gitea-secrets Secret. The chart writes them into app.ini on the
+  # first start and never overwrites SECRET_KEY or INTERNAL_TOKEN afterwards.
+  additionalConfigFromEnvs:
+    - name: GITEA__SECURITY__SECRET_KEY
+      valueFrom:
+        secretKeyRef:
+          name: gitea-secrets
+          key: secret-key
+    - name: GITEA__SECURITY__INTERNAL_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: gitea-secrets
+          key: internal-token
+    - name: GITEA__DATABASE__PASSWD
+      valueFrom:
+        secretKeyRef:
+          name: gitea-secrets
+          key: db-password

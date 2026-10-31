@@ -4,7 +4,7 @@
 #   platform/smoke.sh <name>   run the named checks only
 # Stops at the first failing check and exits non-zero.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 SECRETS_FILE=${SECRETS_DIR:-$HOME/.config/ai-native-sdlc}/secrets.env
 
@@ -73,6 +73,44 @@ check_database_isolation() {
   )"
 }
 
+# with_gitea <command...>: runs the command with GITEA_URL pointing at a temporary port-forward
+# to Gitea's Service, so it works before the ingress exists.
+with_gitea() {
+  local log pid port rc
+  log=$(mktemp)
+  kubectl port-forward -n gitea svc/gitea-http 0:3000 >"$log" 2>&1 &
+  pid=$!
+  for _ in $(seq 50); do
+    port=$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9]*\).*/\1/p' "$log")
+    [[ -z $port ]] || break
+    sleep 0.2
+  done
+  if [[ -z $port ]]; then
+    cat "$log"
+    kill "$pid" 2>/dev/null
+    rm -f "$log"
+    return 1
+  fi
+  GITEA_URL=http://127.0.0.1:$port "$@"
+  rc=$?
+  kill "$pid" 2>/dev/null
+  rm -f "$log"
+  return $rc
+}
+
+# The admin signs in through the API with the password from secrets.env. The password goes
+# to curl through a netrc on a pipe, never as an argument.
+gitea_admin_is_admin() {
+  local password
+  password=$(sed -n 's/^GITEA_ADMIN_PASSWORD=//p' "$SECRETS_FILE")
+  curl -fsS --max-time 10 --netrc-file <(printf 'machine 127.0.0.1 login gitea_admin password %s\n' "$password") \
+    "$GITEA_URL/api/v1/user" | jq -e '.login == "gitea_admin" and .is_admin' >/dev/null ||
+    { echo "gitea_admin cannot sign in as an admin"; return 1; }
+}
+
+register gitea_admin_login
+check_gitea_admin_login() { with_gitea gitea_admin_is_admin; }
+
 register secrets_example_current
 check_secrets_example_current() {
   diff <(platform/bootstrap.sh --example) platform/secrets.env.example
@@ -101,4 +139,5 @@ main() {
   done
 }
 
-main "$@"
+# Sourcing the script (for tests) defines the checks without running them.
+[[ ${BASH_SOURCE[0]} != "$0" ]] || main "$@"

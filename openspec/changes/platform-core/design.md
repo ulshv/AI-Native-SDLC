@@ -222,8 +222,14 @@ through the Gitea API.
 
 - **Chart dependencies** `postgresql-ha` and `valkey-cluster` are disabled. The database is
   `platform-pg/gitea`, and cache, session and queue use Gitea's built-in backends.
-- `ROOT_URL=https://gitea.sdlc.internal/`. There is no SSH service. Data lives on a
-  local-path PVC.
+- `ROOT_URL=https://gitea.sdlc.internal/`. SSH is disabled in Gitea; the chart still creates
+  an empty `gitea-ssh` Service, which nothing listens behind. Data lives on a local-path PVC,
+  and the Deployment uses `Recreate`, because a second pod could not share the volume or the
+  LevelDB queue. Self-registration is off: the admin creates accounts.
+- **Secret values** reach Gitea through `additionalConfigFromEnvs` from the seeded
+  `gitea-secrets` Secret. The chart writes them into `app.ini` on the first start and never
+  overwrites `SECRET_KEY` or `INTERNAL_TOKEN` afterwards, which matches the rule that those
+  are not rotated. The database password is re-applied on every start.
 - **`act_runner`** is deployed by Argo CD in host mode (jobs run as processes in the runner
   pod, with no Docker-in-Docker). That is enough for the mirror job. Container-based CI
   arrives with the change that needs it.

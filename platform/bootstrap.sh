@@ -493,6 +493,7 @@ phase_git_hosting() {
   step "CloudNativePG operator (helm)" "helm_release_current cloudnative-pg" "helm_install cloudnative-pg"
   step "platform-pg cluster and databases applied" "manifests_current databases" "apply_manifests databases"
   step "platform-pg healthy, databases created" platform_pg_healthy wait_platform_pg
+  step "Gitea (helm)" "helm_release_current gitea" "helm_install gitea"
 }
 
 # Creates the Gitea org and repo, moves origin to Gitea and pushes branches and tags.
