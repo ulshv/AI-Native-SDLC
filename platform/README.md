@@ -56,8 +56,8 @@ description of each.
 bootstrap creates when they are missing, so you never type them. A `password` (22 characters,
 128 bits) is only hashed or compared; a `key` (44 characters, 256 bits) is turned into an
 encryption or signing key by the app. `external` values come from somewhere else, and you
-put them into `secrets.env` yourself: `PLANE_ADMIN_EMAIL` always, `GITHUB_MIRROR_TOKEN` only for
-the public mirror. Values persist across rebuilds, so services keep the same credentials.
+put them into `secrets.env` yourself; for now that is only `PLANE_ADMIN_EMAIL`. Values persist
+across rebuilds, so services keep the same credentials.
 
 **Rotation.** Change the value, or delete its line to get a new generated one, re-run
 `platform/bootstrap.sh`, then restart the service that uses it. Two values must not be
@@ -197,5 +197,37 @@ To add a name, append it to [`hosts.txt`](hosts.txt) and re-run `platform/bootst
 host's `/etc/hosts` gets it, pods resolve it already, and the wildcard certificate covers it.
 
 ## Public mirror
+
+GitHub (`github.com/ulshv/AI-Native-SDLC`, the `github` remote) is a public copy of `main`,
+updated by hand:
+
+```bash
+git push github main
+```
+
+Nothing pushes there automatically, and nothing comes back: never pull GitHub into `main`.
+Pull requests or commits made on GitHub are not merged; take a change over with
+`git cherry-pick` into Gitea if it is wanted, and it reaches GitHub with the next push. To stop
+publishing, remove the `github` remote.
+
+**The pre-push hook** ([`hooks/pre-push`](hooks/pre-push), enabled by the bootstrap through
+`core.hooksPath`) checks every push to a `github.com` remote and refuses it when:
+
+- it pushes anything but `main`: another branch, a tag, or the deletion of `main`;
+- a pushed commit contains a value from `secrets.env`, a password or the admin email alike.
+  It names the file, never the value;
+- gitleaks, when installed, finds a well-known secret format in the pushed commits. Without
+  gitleaks the hook says so and checks the exact values only.
+
+Pushes to Gitea are not checked. `git push --no-verify` skips the hook: use it only if you are
+sure.
+
+**When the hook refuses a push**, the secret is in a commit on `main`, so it is in Gitea too.
+Treat it as leaked: rotate it in `secrets.env` and re-run the bootstrap (see Secrets). Then
+remove it from history, for example with `git rebase -i` for a recent commit or
+`git filter-repo --replace-text` for an old one, force-push the rewritten `main` to Gitea, and
+push to GitHub again.
+
+`platform/smoke.sh mirror_only_main` checks that GitHub holds `main` and nothing else.
 
 ## Plane

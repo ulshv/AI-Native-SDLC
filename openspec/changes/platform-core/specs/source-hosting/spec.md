@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repository lives on the platform's own git server, which becomes the default place to push. The original GitHub copy stays, at most, as a read-only public mirror of `main`, and work-in-progress branches never leave the laptop.
+This repository lives on the platform's own git server, which becomes the default place to push. The original GitHub copy stays, at most, as a public mirror of `main` that the operator updates by hand, and a check on that push keeps work-in-progress branches and secret values on the laptop.
 
 ## ADDED Requirements
 
@@ -38,24 +38,28 @@ nothing it references is lost. All local branches and tags SHALL be present on t
 - **THEN** the remotes are left unchanged
 
 ### Requirement: Public mirror publishes only `main`
-When the public mirror is enabled, only the `main` branch SHALL be published to it. No other
-branch and no tag SHALL leave the git server through the mirror.
+Publishing to the public mirror SHALL be a manual push of `main` by the operator. A push of any
+other branch, or of any tag, to the public mirror SHALL be refused before anything is sent.
 
-#### Scenario: Main is mirrored
-- **WHEN** a commit lands on `main` on the git server while the mirror is enabled
-- **THEN** the public mirror's `main` matches it within 10 minutes
+#### Scenario: Main is published
+- **WHEN** the operator pushes `main` to the public mirror
+- **THEN** the public mirror's `main` matches the local `main`
 
-#### Scenario: Other branches stay private
-- **WHEN** a commit is pushed to any branch other than `main`
-- **THEN** that branch does not appear on the public mirror
+#### Scenario: Other branches and tags stay private
+- **WHEN** the operator pushes a branch other than `main`, or a tag, to the public mirror
+- **THEN** the push is refused, and that ref does not appear on the public mirror
+
+### Requirement: No secret value reaches the public mirror
+A push to the public mirror SHALL be refused when any commit being pushed contains a value from
+the secrets directory. The refusal SHALL name the file and SHALL NOT print the value.
+
+#### Scenario: Secret value in a pushed commit
+- **WHEN** a commit that would be pushed to the public mirror contains a value from the secrets directory
+- **THEN** the push is refused, and the message names the file but not the value
 
 ### Requirement: Mirror is optional and one-way
-The public mirror SHALL be enabled or disabled by a single change in the repository. Nothing
-SHALL flow back from the mirror into the git server.
-
-#### Scenario: Mirror disabled
-- **WHEN** the mirror is disabled in the repository and the change lands on `main`
-- **THEN** later commits on `main` are no longer published to the public mirror
+The public mirror SHALL receive commits only when the operator pushes them. Nothing SHALL flow
+back from the mirror into the git server.
 
 #### Scenario: Changes on the mirror are ignored
 - **WHEN** a commit or pull request is created on the public mirror

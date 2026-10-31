@@ -663,6 +663,10 @@ main_tracks_origin() {
 
 track_main() { git branch --set-upstream-to=origin/main main; }
 
+# platform/hooks/pre-push guards pushes to GitHub, the public mirror.
+hooks_path_set() { [[ $(git config core.hooksPath) == platform/hooks ]]; }
+set_hooks_path() { git config core.hooksPath platform/hooks; }
+
 default_branch_is_main() {
   [[ -n ${GITEA_URL-} ]] && [[ $(gitea_api GET "/repos/$GITEA_REPO" 2>/dev/null | jq -r .default_branch) == main ]]
 }
@@ -681,6 +685,7 @@ phase_repository() {
   step "Gitea has every local branch and tag" gitea_has_local_refs push_all_refs
   step "main tracks origin/main" main_tracks_origin track_main
   step "the Gitea repo's default branch is main" default_branch_is_main set_default_branch
+  step "git hooks come from platform/hooks (pre-push guards GitHub)" hooks_path_set set_hooks_path
 }
 
 # app_adopted <component>: Argo CD has an Application for it. From then on Argo CD alone

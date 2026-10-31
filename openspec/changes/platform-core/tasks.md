@@ -10,7 +10,7 @@
 >   - `PLANE_ADMIN_EMAIL` in `secrets.env`;
 >   - freeing ports 80 and 443 (for example, by stopping Docker Desktop);
 >   - restarting the browser after the CA is first trusted;
->   - a GitHub token, only if the mirror is wanted;
+>   - `git push github main` by hand whenever `main` should be published;
 >   - a reboot and turning the network off and back on in the final checks.
 
 ## 1. Scaffolding
@@ -84,11 +84,10 @@
 
 ## 10. Public mirror
 
-- [ ] 10.1 Write the `act_runner` app in host mode, registered with a token the bootstrap fetches from Gitea on each run, and verify the runner shows as online in Gitea
-- [ ] 10.2 Add `.gitea/workflows/mirror-main.yml`. On a push to any branch, it scans the branch history with a pinned gitleaks release. Only on `main`, and only after a clean scan, it force-pushes `HEAD:main` to `github.com/ulshv/AI-Native-SDLC`. Have the bootstrap store `GITHUB_MIRROR_TOKEN` as a repository Actions secret when the workflow file exists. Verify preflight fails without the token while the file exists
-- [ ] 10.3 Add smoke checks: a commit on `main` reaches the mirror within 10 minutes, a commit on another branch never appears there, and a fake token committed on a throwaway test branch fails the gitleaks step. Verify all three pass, and remove the test branch afterwards
-- [ ] 10.4 Document how to enable and disable the mirror, how to create a GitHub token with write access to that repository only, and what to do when the gitleaks step blocks the mirror (rewrite history and rotate the leaked secret), in `platform/README.md`
-- [ ] 10.5 Before the mirror's first push of `main`, push the change's final state as branch `platform-core` to the `github` remote and open a pull request into `github/main`, so the change shows on GitHub as one unit of work. Verify the pull request lists every `platform-core:` commit, and that GitHub marks it merged once the mirror has pushed `main`
+- [x] 10.1 Add `platform/hooks/pre-push`. For a push to a `github.com` remote, it refuses every ref except `main` and every tag, refuses the push when a pushed commit contains a value from `secrets.env` (naming the file, never the value), and runs gitleaks on the pushed commits when it is installed. Have the bootstrap set `core.hooksPath` to `platform/hooks`. Verify against a local bare repository whose path contains `github.com`: `main` is pushed, another branch and a tag are refused, a commit with a planted value is refused, and a push to Gitea is not checked
+- [x] 10.2 Add a smoke check that the public mirror on GitHub holds no branch other than `main` and no tag. Verify it passes
+- [x] 10.3 Push `main` to `github` by hand and verify that the hook lets it through and that GitHub's `main` matches the local one
+- [x] 10.4 Document publishing to the mirror, what the hook checks, and what to do when it refuses a push (rewrite the history and rotate the leaked secret) in `platform/README.md`
 
 ## 11. Plane CE
 

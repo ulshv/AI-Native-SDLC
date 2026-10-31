@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Guards pushes to GitHub, the public mirror; a push anywhere else passes untouched.
+# The bootstrap points core.hooksPath here. See "Public mirror" in platform/README.md.
+# git calls it with <remote name> <remote url>, and one line per ref on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+set -euo pipefail
+
+remote_url=$2
+[[ $remote_url == *github.com[:/]* ]] || exit 0
+
+SECRETS_FILE=${SECRETS_DIR:-$HOME/.config/ai-native-sdlc}/secrets.env
+ZERO=0000000000000000000000000000000000000000
+
+refuse() {
+  printf 'pre-push: %s\n' "$*" >&2
+  exit 1
+}
+
+# Every non-empty value in secrets.env, one per line. Never print it.
+secret_values() { sed -n 's/^[A-Za-z0-9_]*=//p' "$SECRETS_FILE" | grep -v '^$'; }
+
+[[ -s $SECRETS_FILE ]] || refuse "no $SECRETS_FILE to check the push against"
+
+while read -r _ local_sha remote_ref remote_sha; do
+  [[ $remote_ref == refs/heads/main ]] || refuse "only main may go to $remote_url, not $remote_ref"
+  [[ $local_sha != "$ZERO" ]] || refuse "deleting main on $remote_url is not allowed"
+
+  # The commits new to the remote; all of them when the remote's head is unknown here.
+  range=$local_sha
+  if [[ $remote_sha != "$ZERO" ]] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    range=$remote_sha..$local_sha
+  fi
+
+  for commit in $(git rev-list "$range"); do
+    files=$(git grep -lF -f <(secret_values) "$commit" -- 2>/dev/null | sed "s/^$commit://" | paste -sd' ' || true)
+    [[ -z $files ]] || refuse "commit ${commit:0:7} contains a value from secrets.env in: $files"
+  done
+
+  if command -v gitleaks >/dev/null; then
+    gitleaks git --no-banner --redact --log-opts="$range" . >&2 ||
+      refuse "gitleaks found a secret in the pushed commits"
+  else
+    echo "pre-push: gitleaks is not installed; checked exact values from secrets.env only" >&2
+  fi
+done

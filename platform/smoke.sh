@@ -232,6 +232,17 @@ check_https_on_every_name() {
   return $failed
 }
 
+# The public mirror holds main and nothing else: no other branch, no tag. Read anonymously over
+# HTTPS from the github remote's address; passes when there is no github remote.
+register mirror_only_main
+check_mirror_only_main() {
+  local url refs
+  url=$(git remote get-url github 2>/dev/null) || return 0
+  url=$(sed -E 's#^git@github\.com:#https://github.com/#' <<<"$url")
+  refs=$(git ls-remote "$url" 'refs/heads/*' 'refs/tags/*' | awk '{ print $2 }') || return 1
+  [[ $refs == refs/heads/main ]] || { echo "the mirror $url holds more than main:"; echo "$refs"; return 1; }
+}
+
 register secrets_example_current
 check_secrets_example_current() {
   diff <(platform/bootstrap.sh --example) platform/secrets.env.example

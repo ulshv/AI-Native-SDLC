@@ -5,7 +5,7 @@
 > - **One name per service, two resolvers:** `*.sdlc.internal` goes to `127.0.0.1` on the host via `/etc/hosts`, and to Traefik in pods via a CoreDNS rewrite. Both work offline (decision 4).
 > - **TLS on day one:** one wildcard certificate at Traefik, signed by a local CA that lives outside the cluster and so survives rebuilds (decision 5).
 > - **Secrets outside the repo:** values in `~/.config/ai-native-sdlc/secrets.env`, generated on first run. The repo holds only a manifest of names (decision 6).
-> - **`origin` moves to Gitea:** a workflow mirrors only `main` to GitHub (decision 9).
+> - **`origin` moves to Gitea:** `main` reaches GitHub only by a manual push, which a pre-push hook checks for secret values (decision 9).
 > - **Biggest risk:** Plane may refuse webhooks to private addresses. It is checked first with a spike.
 
 ## Context
@@ -35,7 +35,7 @@ See `proposal.md` for the motivation and `specs/` for the required behavior.
 - CA trust *inside* pods. It arrives with Keycloak, which is the first in-cluster client that
   must validate platform certificates.
 - NetworkPolicies and per-workload RBAC hardening. These arrive with the agent Jobs.
-- Git over SSH. Machines (Argo CD, agent Jobs, the mirror) use scoped HTTPS tokens anyway.
+- Git over SSH. Machines (Argo CD, agent Jobs) use scoped HTTPS tokens anyway.
   Humans push over HTTPS too, through the credential helper from decision 9, which makes it
   as seamless as SSH. SSH would need a separate port, a host key persisted across rebuilds,
   and key registration. It can be added later as a separate change if the HTTPS flow proves
@@ -104,7 +104,7 @@ webhooks default do not show as drift, and polls git every minute.
 |---|---|
 | -2 | cert-manager, CloudNativePG operator (CRDs and operators) |
 | -1 | CA ClusterIssuer and wildcard Certificate, Traefik with its TLSStore, `coredns-custom`, Postgres cluster and databases |
-| 0 | Gitea and its runner, Plane CE, Argo CD itself |
+| 0 | Gitea, Plane CE, Argo CD itself |
 
 Argo CD fetches the repository over Gitea's in-cluster service URL
 (`http://gitea-http.gitea.svc:3000/...`), not through the ingress. It therefore needs no CA
@@ -187,16 +187,14 @@ through the Gitea API.
   values. Argo CD ignores objects it does not own.
 - **`.gitignore`** gets `secrets.env`, `*.key` and `.secrets/` as a second line of defense.
 - **No pre-commit hook.** A leak into the local, private Gitea is recoverable. The only path
-  to public exposure is the mirror, so the scan sits there instead (decision 9). A hook would
-  also protect only the operator's clone, because agent Jobs work in fresh clones without it.
+  to public exposure is publishing `main` to GitHub, so the check sits on that push instead
+  (decision 9). Agent Jobs cannot publish at all: they have no GitHub credentials.
 - **In this change:** Gitea admin password, Gitea secret key and internal token, the Postgres
   role passwords for `gitea` and `plane`, Plane's `SECRET_KEY` and `LIVE_SERVER_SECRET_KEY`,
   Plane's MinIO and RabbitMQ passwords and `PLANE_ADMIN_PASSWORD` are generated; the three
   secret keys are of kind `key`, the rest `password`.
-  `PLANE_ADMIN_EMAIL` is `external` and required. `GITHUB_MIRROR_TOKEN` is `external` and
-  required only when the mirror is enabled. Tokens that only make sense for one cluster (the
-  Gitea runner registration token, and the Argo CD and git-push tokens) are created by the
-  bootstrap through the Gitea API and replaced after a rebuild, so they are not values in
+  `PLANE_ADMIN_EMAIL` is `external` and required. Tokens that only make sense for one
+  cluster (the Argo CD and git-push tokens) are created by the bootstrap through the Gitea API and replaced after a rebuild, so they are not values in
   `secrets.env`. The read token lives only in Argo CD's repository Secret; the push token is
   a file next to `secrets.env`, because the git credential helper reads it from there.
 - **Alternatives:** SOPS with age (secrets in git, but needs a KSOPS plugin in Argo CD);
@@ -223,7 +221,7 @@ through the Gitea API.
   exist. It needs a psql image, retries and hook ordering to wait for the operator, where
   `pg_hba` is three declarative lines that hold from the cluster's first start.
 
-### 8. Gitea and its Actions runner
+### 8. Gitea
 
 - **Chart dependencies** `postgresql-ha` and `valkey-cluster` are disabled. The database is
   `platform-pg/gitea`, and cache, session and queue use Gitea's built-in backends.
@@ -235,11 +233,9 @@ through the Gitea API.
   `gitea-secrets` Secret. The chart writes them into `app.ini` on the first start and never
   overwrites `SECRET_KEY` or `INTERNAL_TOKEN` afterwards, which matches the rule that those
   are not rotated. The database password is re-applied on every start.
-- **`act_runner`** is deployed by Argo CD in host mode (jobs run as processes in the runner
-  pod, with no Docker-in-Docker). That is enough for the mirror job. Container-based CI
-  arrives with the change that needs it.
+- Gitea Actions and its runner arrive with the change that first needs CI.
 
-### 9. Moving `origin` to Gitea and mirroring `main`
+### 9. Moving `origin` to Gitea and publishing `main`
 
 Phase 4 of the bootstrap:
 
@@ -257,22 +253,27 @@ Phase 4 of the bootstrap:
    push token from the secrets directory, so no token is written into `.git/config` or
    `~/.git-credentials`.
 
-**Mirror:** `.gitea/workflows/mirror-main.yml` runs on pushes to `main` and force-pushes
-`HEAD:main` to `github.com/ulshv/AI-Native-SDLC` with `GITHUB_MIRROR_TOKEN`. The bootstrap
-stores that token as a repository Actions secret. Force-push makes the mirror strictly
-one-way. Enabling or disabling the mirror means adding or deleting this file.
+**Publishing to GitHub** is a manual `git push github main` from the operator's clone.
+Nothing pushes there automatically, and nothing flows back: GitHub is never fetched into
+`main`. Removing the `github` remote stops publishing altogether.
 
-**Leak gate:** on a push to any branch, the workflow scans that branch's history with a pinned
-gitleaks release, so a leak shows up before it reaches `main`. On `main`, the force-push runs
-only after a clean scan. If anything is found, the job fails and the mirror is not updated. This is
-the one gate on the way to public exposure, and it catches every path into `main`: human
-commits, agent commits and `--no-verify`. It works by pattern only: the runner deliberately
-has no access to `secrets.env`. The exact-value check therefore stays in the local smoke
-check (task 3.4). Deleting the mirror workflow removes the gate together with the exposure it
-guards.
+**Pre-push hook.** The bootstrap points `core.hooksPath` at `platform/hooks/`. For a push to
+any `github.com` remote, `platform/hooks/pre-push`:
 
-- **Alternative:** Gitea's built-in push mirror. It mirrors every ref, so agent branches would
-  become public.
+- refuses every ref except `main`, and every tag, so work-in-progress branches never leave
+  the laptop;
+- refuses the push when a pushed commit contains a value from `secrets.env`, naming the file
+  but not the value. This exact-value check catches what pattern scanners miss, such as a
+  random password or the admin email;
+- runs gitleaks on the pushed commits when it is installed, for well-known token formats.
+
+Pushes to Gitea are not checked: a leak there stays private and recoverable. `git push
+--no-verify` skips the hook, which is the operator's explicit choice.
+
+- **Alternatives:** a Gitea Actions workflow that scans with gitleaks and force-pushes `main`
+  on every push. It needs a runner, a GitHub credential stored in Gitea and an image with
+  ssh, and its scan works by pattern only, because the runner has no access to `secrets.env`.
+  Gitea's built-in push mirror publishes every ref, so agent branches would become public.
 
 ### 10. Plane CE
 
@@ -304,7 +305,7 @@ platform/
   secrets.env.example     generated from the manifest, for humans
   argocd/root.yaml        app-of-apps
   apps/<component>/       app.yaml + values.yaml + extra manifests
-.gitea/workflows/mirror-main.yml
+  hooks/pre-push          checks what is pushed to GitHub
 ```
 
 There is one namespace per component: `argocd`, `cert-manager`, `cloudnative-pg`, `databases`,
@@ -335,9 +336,9 @@ There is one namespace per component: `argocd`, `cert-manager`, `cloudnative-pg`
   the README estimate.
 - **[Rebuild loses data]** Tickets and review threads are lost on rebuild. → Accepted for
   this change and stated in the spec. Backups get their own change.
-- **[Public mirror exposure]** Everything on `main` becomes public, including workflow files.
-  → No secret values in the repository (by spec), and the token lives only in Gitea's
-  Actions secrets.
+- **[Public mirror exposure]** Everything on `main` becomes public once it is pushed to
+  GitHub. → No secret values in the repository (by spec), and the pre-push hook refuses a push
+  that contains one.
 
 ## Migration Plan
 
@@ -346,9 +347,8 @@ There is one namespace per component: `argocd`, `cert-manager`, `cloudnative-pg`
    `main` and must find `platform/` there.
 2. Run `platform/bootstrap.sh`. Phase 4 moves `origin` to Gitea and keeps GitHub as `github`.
 3. Verify the spec scenarios, the smoke checks from `tasks.md`.
-4. If the mirror is wanted, put `GITHUB_MIRROR_TOKEN` into `secrets.env`, re-run the
-   bootstrap and push to `main`. Otherwise delete the mirror workflow, and optionally the
-   `github` remote and the GitHub repository.
+4. Publish with `git push github main` whenever wanted. To stop publishing, remove the
+   `github` remote, and optionally the GitHub repository.
 
 **Rollback:** k3s's own `/usr/local/bin/k3s-uninstall.sh` removes the cluster and all its
 data. The `/etc/hosts` block and the host CA trust are harmless leftovers, and
