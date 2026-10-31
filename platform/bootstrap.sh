@@ -744,10 +744,57 @@ drop_helm_records() {
   done
 }
 
-# Waits until Argo CD has everything Synced/Healthy, then drops the Helm release records.
+# Field managers the bootstrap leaves behind: Helm's installs and its own server-side applies.
+# Kubernetes removes a field that is gone from git only when no other manager still owns it,
+# so while these co-own Argo CD's fields, deleting a field in git would not reach the cluster
+# and Argo CD would still show Synced.
+FOREIGN_MANAGERS='["helm", "ai-native-sdlc"]'
+
+# argo_objects: "<namespace or -> <Kind.group>/<name>" for every Application and every object
+# an Application manages.
+argo_objects() {
+  kubectl get applications -n argocd -o json | jq -r '
+    .items[] | "argocd Application.argoproj.io/\(.metadata.name)",
+      (.status.resources[]? | "\(.namespace // "" | if . == "" then "-" else . end) \(.kind)\(.group // "" | if . == "" then "" else "." + . end)/\(.name)")' |
+    sort -u
+}
+
+# foreign_owned: the objects Argo CD has applied itself that still have a foreign manager.
+foreign_owned() {
+  local objects ns
+  objects=$(argo_objects) || return 1
+  for ns in $(cut -d' ' -f1 <<<"$objects" | sort -u); do
+    awk -v ns="$ns" '$1 == ns { print $2 }' <<<"$objects" |
+      xargs -r kubectl get --ignore-not-found --show-managed-fields -o json -n "${ns/#-/default}" |
+      jq -r --argjson foreign "$FOREIGN_MANAGERS" '(.items // [.])[]
+        | select(any(.metadata.managedFields[]?; .manager == "argocd-controller" and .operation == "Apply"))
+        | select(any(.metadata.managedFields[]?; .manager as $m | $foreign | index($m)))
+        | (.apiVersion | split("/")) as $api
+        | "\(.metadata.namespace // "-") \(.kind)\(if ($api | length) == 2 then "." + $api[0] else "" end)/\(.metadata.name)"'
+  done
+}
+
+argo_owns_alone() { [[ -z $(foreign_owned) ]]; }
+
+# Removes the foreign managers' entries from managedFields. The fields stay as they are;
+# Argo CD, which applies all of them too, becomes their only owner.
+drop_foreign_managers() {
+  local ns object
+  foreign_owned | while read -r ns object; do
+    kubectl patch "$object" -n "${ns/#-/default}" --type=json --patch-file=<(
+      kubectl get "$object" -n "${ns/#-/default}" --show-managed-fields -o json | jq -c --argjson foreign "$FOREIGN_MANAGERS" '
+        [{op: "replace", path: "/metadata/managedFields",
+          value: [.metadata.managedFields[] | select(.manager as $m | $foreign | index($m) | not)]}]'
+    ) >/dev/null && echo "$object: Argo CD owns it alone"
+  done
+}
+
+# Waits until Argo CD has everything Synced/Healthy, then removes what still ties the
+# components to the bootstrap: Helm's release records and its claims on their fields.
 phase_adoption() {
   step "every Application is Synced and Healthy" all_apps_healthy wait_all_apps
   step "no Helm release records left: Argo CD owns the components" helm_records_gone drop_helm_records
+  step "Argo CD alone owns the fields of what it manages" argo_owns_alone drop_foreign_managers
 }
 
 PHASES=(preflight secrets host git_hosting repository gitops adoption)
