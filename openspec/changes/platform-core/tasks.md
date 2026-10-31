@@ -29,11 +29,11 @@
 
 ## 3. Secrets
 
-- [ ] 3.1 Write `platform/secrets.manifest` with every secret from design decision 6 (name, `generated` or `external`, required flag, target namespace, Secret and key), and generate `platform/secrets.env.example` from it. Verify the example lists every name and contains no values
-- [ ] 3.2 Implement secret loading and generation into `~/.config/ai-native-sdlc/secrets.env` (mode 0600). Verify that a fresh directory gets every generatable value, that a second run leaves the file's checksum unchanged, and that a missing `PLANE_ADMIN_EMAIL` fails preflight
-- [ ] 3.3 Implement root CA generation (1-year validity) into `~/.config/ai-native-sdlc/ca.{key,crt}` when missing, and verify with `openssl x509 -enddate` that the expiry is one year out
-- [ ] 3.4 Add smoke checks: no value from `secrets.env` appears in any tracked file, and the working tree holds no secret material. Verify both pass, and that the first one fails when a value is planted in a tracked test file
-- [ ] 3.5 Document `secrets.env`, generated versus external values, rotation and backing up the secrets directory in `platform/README.md`
+- [x] 3.1 Write `platform/secrets.manifest` with every secret from design decision 6 (name, `generated` or `external`, required flag, target namespace, Secret and key), and generate `platform/secrets.env.example` from it. Verify the example lists every name and contains no values
+- [x] 3.2 Implement secret loading and generation into `~/.config/ai-native-sdlc/secrets.env` (mode 0600). Verify that a fresh directory gets every generatable value, that a second run leaves the file's checksum unchanged, and that a missing `PLANE_ADMIN_EMAIL` fails preflight
+- [x] 3.3 Implement root CA generation (1-year validity) into `~/.config/ai-native-sdlc/ca.{key,crt}` when missing, and verify with `openssl x509 -enddate` that the expiry is one year out
+- [x] 3.4 Add smoke checks: no value from `secrets.env` appears in any tracked file, and the working tree holds no secret material. Verify both pass, and that the first one fails when a value is planted in a tracked test file
+- [x] 3.5 Document `secrets.env`, generated versus external values, rotation and backing up the secrets directory in `platform/README.md`
 
 ## 4. Host and cluster
 

@@ -42,6 +42,35 @@ systemctl --user stop docker-desktop   # if it is Docker Desktop
 
 ## Secrets
 
+Everything secret lives in `~/.config/ai-native-sdlc/`, outside the working tree, so nothing
+that runs in the repository (agents included) can read it, and nothing can be committed:
+
+- `secrets.env`: one `NAME=value` per line, no quotes;
+- `ca.key`, `ca.crt`: the local root CA behind every `*.sdlc.internal` certificate.
+
+[`secrets.manifest`](secrets.manifest) is the contract: which secrets exist and where each
+goes in the cluster. [`secrets.env.example`](secrets.env.example) lists the names with a
+description of each.
+
+**Generated or external.** `generated` values are random and created by the bootstrap when
+they are missing, so you never type them. `external` values come from somewhere else, and you
+put them into `secrets.env` yourself: `PLANE_ADMIN_EMAIL` always, `GITHUB_MIRROR_TOKEN` only for
+the public mirror. Values persist across rebuilds, so services keep the same credentials.
+
+**Rotation.** Change the value, or delete its line to get a new generated one, re-run
+`platform/bootstrap.sh`, then restart the service that uses it. Two values must not be
+rotated: `GITEA_SECRET_KEY` and `PLANE_SECRET_KEY` encrypt data stored in the databases
+(2FA secrets, instance settings), and a new key silently makes that data unreadable.
+
+**Backup.** This directory and the git clone are all a rebuild needs. Keep a copy off the
+laptop, for example in a password manager or on an encrypted drive:
+
+```bash
+tar -czf ai-native-sdlc-secrets.tgz -C ~/.config ai-native-sdlc
+```
+
+Restore it to `~/.config/ai-native-sdlc/` before running the bootstrap on a new machine.
+
 ## Host changes and removal
 
 ## Repository and origin

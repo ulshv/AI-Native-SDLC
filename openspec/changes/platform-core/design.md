@@ -141,9 +141,14 @@ through the Gitea API.
 
 ### 6. Secrets: a file outside the repo, a manifest inside it
 
-- **`platform/secrets.manifest`** (tracked) lists every secret: its name, its kind
-  (`generated` or `external`), whether it is required, and where it goes (namespace, Secret,
-  key). This is the contract the spec calls "the list of required secret names".
+- **`platform/secrets.manifest`** (tracked) has two kinds of lines. A `value` line names a
+  secret, its kind (`generated` or `external`), whether it is required, and what it is for.
+  A `put` line says where a value goes in the cluster: namespace, Secret, key, and a template
+  in which `${NAME}` is replaced by that value. Templates exist because charts want more
+  than one bare value per key: one value often goes to several Secrets (a role password for
+  both CloudNativePG and Gitea), next to non-secret constants (`username`), or inside a
+  connection string (Plane's `DATABASE_URL`). The manifest holds names and templates only,
+  never values. This is the contract the spec calls "the list of required secret names".
   `platform/secrets.env.example` is derived from it for humans.
 - **`~/.config/ai-native-sdlc/secrets.env`** (mode 0600) holds the values. When a `generated`
   value is missing, the bootstrap creates it (`openssl rand`) and appends it. When a
@@ -157,9 +162,10 @@ through the Gitea API.
   to public exposure is the mirror, so the scan sits there instead (decision 9). A hook would
   also protect only the operator's clone, because agent Jobs work in fresh clones without it.
 - **In this change:** Gitea admin password, Gitea secret key and internal token, the Postgres
-  role passwords for `gitea` and `plane`, Plane's `SECRET_KEY`, Plane's MinIO and RabbitMQ
-  passwords and `PLANE_ADMIN_PASSWORD` are `generated`. `PLANE_ADMIN_EMAIL` is `external` and
-  required. `GITHUB_MIRROR_TOKEN` is `external` and required only when the mirror is enabled. Tokens that only make sense for one cluster (the Gitea runner
+  role passwords for `gitea` and `plane`, Plane's `SECRET_KEY` and `LIVE_SERVER_SECRET_KEY`,
+  Plane's MinIO and RabbitMQ passwords and `PLANE_ADMIN_PASSWORD` are `generated`.
+  `PLANE_ADMIN_EMAIL` is `external` and required. `GITHUB_MIRROR_TOKEN` is `external` and
+  required only when the mirror is enabled. Tokens that only make sense for one cluster (the Gitea runner
   registration token, and the Argo CD and git-push tokens) are created by the bootstrap
   through the Gitea API on every rebuild, not persisted.
 - **Alternatives:** SOPS with age (secrets in git, but needs a KSOPS plugin in Argo CD);
