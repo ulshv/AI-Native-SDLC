@@ -38,14 +38,31 @@ check_no_secret_material_in_worktree() {
   [[ -z $hits ]] || { echo "secret material in the working tree:"; echo "$hits"; return 1; }
 }
 
+# run_pod <namespace> <name> <kubectl run args...>: runs a throwaway pod to completion, prints
+# its output, deletes it, and fails when the pod failed. It waits for the pod instead of
+# attaching to it, because a short-lived container can exit before kubectl attaches.
+run_pod() {
+  local ns=$1 pod=$2 phase=""
+  shift 2
+  kubectl delete pod "$pod" -n "$ns" --ignore-not-found >/dev/null
+  kubectl run "$pod" -n "$ns" --restart=Never "$@" >/dev/null || return 1
+  for _ in $(seq 60); do
+    phase=$(kubectl get pod "$pod" -n "$ns" -o jsonpath='{.status.phase}')
+    [[ $phase == Succeeded || $phase == Failed ]] && break
+    sleep 1
+  done
+  kubectl logs "$pod" -n "$ns" 2>/dev/null
+  kubectl delete pod "$pod" -n "$ns" --wait=false >/dev/null
+  [[ $phase == Succeeded ]] || { [[ $phase == Failed ]] || echo "pod $ns/$pod did not finish (phase ${phase:-unknown})"; return 1; }
+}
+
 # A pod resolves a Service name through the cluster DNS Service. Fails when something on the
 # host, such as a VPN in TUN mode, steers pods' DNS traffic away from CoreDNS.
 register pod_dns
 check_pod_dns() {
-  local pod=smoke-pod-dns want
+  local want
   want=$(kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}') || return 1
-  kubectl delete pod "$pod" -n default --ignore-not-found >/dev/null
-  kubectl run "$pod" -n default --rm -i --quiet --restart=Never \
+  run_pod default smoke-pod-dns \
     --image=docker.io/rancher/mirrored-library-busybox:1.37.0 --image-pull-policy=IfNotPresent -- \
     sh -c "nslookup -timeout=3 kubernetes.default.svc.cluster.local | grep -q 'Address: $want' ||
       { echo 'kubernetes.default.svc.cluster.local does not resolve to $want from a pod'; exit 1; }"
@@ -57,8 +74,7 @@ register database_isolation
 check_database_isolation() {
   local image pod=smoke-database-isolation
   image=$(kubectl get cluster platform-pg -n databases -o jsonpath='{.spec.imageName}') || return 1
-  kubectl delete pod "$pod" -n databases --ignore-not-found >/dev/null
-  kubectl run "$pod" -n databases --rm -i --quiet --restart=Never --image="$image" --overrides="$(
+  run_pod databases "$pod" --image="$image" --overrides="$(
     jq -n --arg pod "$pod" --arg image "$image" '{spec: {containers: [{
       name: $pod, image: $image,
       env: [{name: "PGPASSWORD", valueFrom: {secretKeyRef: {name: "pg-gitea", key: "password"}}}],
@@ -191,8 +207,7 @@ check_names_resolve() {
       { echo "$name does not resolve to 127.0.0.1 on the host"; failed=1; }
   done
   traefik=$(kubectl get svc traefik -n traefik -o jsonpath='{.spec.clusterIP}') || return 1
-  kubectl delete pod "$pod" -n default --ignore-not-found >/dev/null
-  kubectl run "$pod" -n default --rm -i --quiet --restart=Never \
+  run_pod default "$pod" \
     --image=docker.io/rancher/mirrored-library-busybox:1.37.0 --image-pull-policy=IfNotPresent -- \
     sh -c "failed=0; for name in $(service_names | paste -sd' '); do
       nslookup -timeout=3 \$name | grep -q 'Address: $traefik' ||

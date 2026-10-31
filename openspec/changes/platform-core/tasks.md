@@ -75,12 +75,12 @@
 
 ## 9. Ingress and TLS
 
-- [ ] 9.1 Write the cert-manager app (wave -2) and the CA `ClusterIssuer` plus the `*.sdlc.internal` Certificate in the `traefik` namespace (wave -1), and verify the Certificate is Ready and chains to the root CA
-- [ ] 9.2 Write the Traefik app with ServiceLB, the default `TLSStore` using the wildcard certificate, and an HTTP→HTTPS redirect on the `web` entrypoint. Verify early that `127.0.0.1:443` reaches Traefik; if it does not, switch to the `hostNetwork` fallback from the design
-- [ ] 9.3 Write the `coredns-custom` ConfigMap that rewrites `*.sdlc.internal` to Traefik's Service, and verify from a throwaway pod that `gitea.sdlc.internal` resolves and that HTTPS succeeds when the CA is supplied explicitly
-- [ ] 9.4 Add ingress routes for Gitea and Argo CD, plus smoke checks: every name in `hosts.txt` answers over HTTPS with `curl` and no `-k`, and `http://` redirects to `https://`. Verify both pass and that Chrome and Firefox show no warnings
-- [ ] 9.5 Add the smoke check that a new name added to `hosts.txt` resolves from the host and pods after a re-run, and verify it with a temporary name
-- [ ] 9.6 Document the service URLs and the browser restart needed after the first CA trust in `platform/README.md`
+- [x] 9.1 Write the cert-manager app (wave -2) and the CA `ClusterIssuer` plus the `*.sdlc.internal` Certificate in the `traefik` namespace (wave -1), and verify the Certificate is Ready and chains to the root CA
+- [x] 9.2 Write the Traefik app with ServiceLB, the default `TLSStore` using the wildcard certificate, and an HTTP→HTTPS redirect on the `web` entrypoint. Verify early that `127.0.0.1:443` reaches Traefik; if it does not, switch to the `hostNetwork` fallback from the design
+- [x] 9.3 Write the `coredns-custom` ConfigMap that rewrites `*.sdlc.internal` to Traefik's Service, and verify from a throwaway pod that `gitea.sdlc.internal` resolves and that HTTPS succeeds when the CA is supplied explicitly
+- [x] 9.4 Add ingress routes for Gitea and Argo CD, plus smoke checks: every name in `hosts.txt` answers over HTTPS with `curl` and no `-k`, and `http://` redirects to `https://`. Verify both pass and that Chrome and Firefox show no warnings
+- [x] 9.5 Add the smoke check that a new name added to `hosts.txt` resolves from the host and pods after a re-run, and verify it with a temporary name
+- [x] 9.6 Document the service URLs and the browser restart needed after the first CA trust in `platform/README.md`
 
 ## 10. Public mirror
 
