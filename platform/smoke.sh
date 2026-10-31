@@ -180,6 +180,43 @@ check_no_floating_images() {
   [[ -z $floating ]] || { echo "images without a pinned version:"; echo "$floating"; return 1; }
 }
 
+service_names() { grep -vE '^[[:space:]]*(#|$)' platform/hosts.txt | sed 's/$/.sdlc.internal/'; }
+
+# Every service name resolves to 127.0.0.1 on the host, and to Traefik's Service from a pod.
+register names_resolve
+check_names_resolve() {
+  local name traefik pod=smoke-names-resolve failed=0
+  for name in $(service_names); do
+    [[ $(getent hosts "$name" | awk '{ print $1 }') == 127.0.0.1 ]] ||
+      { echo "$name does not resolve to 127.0.0.1 on the host"; failed=1; }
+  done
+  traefik=$(kubectl get svc traefik -n traefik -o jsonpath='{.spec.clusterIP}') || return 1
+  kubectl delete pod "$pod" -n default --ignore-not-found >/dev/null
+  kubectl run "$pod" -n default --rm -i --quiet --restart=Never \
+    --image=docker.io/rancher/mirrored-library-busybox:1.37.0 --image-pull-policy=IfNotPresent -- \
+    sh -c "failed=0; for name in $(service_names | paste -sd' '); do
+      nslookup -timeout=3 \$name | grep -q 'Address: $traefik' ||
+        { echo \"\$name does not resolve to Traefik ($traefik) from a pod\"; failed=1; }
+    done; exit \$failed" || failed=1
+  return $failed
+}
+
+# Every service name answers over HTTPS with a certificate the host trusts (curl without -k),
+# and plain HTTP redirects to HTTPS. A name whose service is not deployed yet gets Traefik's
+# 404, which still proves the name, the route to Traefik and the certificate.
+register https_on_every_name
+check_https_on_every_name() {
+  local name code location failed=0
+  for name in $(service_names); do
+    code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "https://$name/") &&
+      ((code < 500)) || { echo "https://$name/ failed (HTTP $code)"; failed=1; }
+    read -r code location < <(curl -sS --max-time 10 -o /dev/null -w '%{http_code} %{redirect_url}' "http://$name/")
+    [[ $code == 30[178] && $location == "https://$name/"* ]] ||
+      { echo "http://$name/ does not redirect to HTTPS (HTTP $code, Location $location)"; failed=1; }
+  done
+  return $failed
+}
+
 register secrets_example_current
 check_secrets_example_current() {
   diff <(platform/bootstrap.sh --example) platform/secrets.env.example

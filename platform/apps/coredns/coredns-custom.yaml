@@ -1,0 +1,14 @@
+# Pods resolve every *.sdlc.internal name to Traefik's Service, so a URL works the same from a
+# pod as from a browser on the host. k3s's CoreDNS imports the *.override entries of this
+# ConfigMap into its main server block.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  sdlc-internal.override: |
+    rewrite stop {
+      name regex (.+)\.sdlc\.internal\.$ traefik.traefik.svc.cluster.local.
+      answer auto
+    }

@@ -22,6 +22,15 @@ persistence:
   enabled: true
   size: 5Gi
 
+# Plain HTTP behind Traefik, which terminates TLS for every *.sdlc.internal name.
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - host: gitea.sdlc.internal
+      paths:
+        - path: /
+
 resources:
   requests:
     cpu: 100m

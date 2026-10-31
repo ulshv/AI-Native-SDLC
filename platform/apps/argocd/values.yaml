@@ -45,6 +45,10 @@ controller:
     limits:
       memory: 1Gi
 server:
+  # Plain HTTP behind Traefik, which terminates TLS (hence server.insecure above).
+  ingress:
+    enabled: true
+    ingressClassName: traefik
   resources:
     requests:
       cpu: 50m

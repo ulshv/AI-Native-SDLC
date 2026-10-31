@@ -412,6 +412,18 @@ apply_cluster_secrets() {
   render_secrets | kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f -
 }
 
+# cert-manager does not re-issue a certificate when its CA changes, so after a CA rotation the
+# wildcard certificate would still chain to the old, no longer trusted CA. Not issued yet
+# counts as current: cert-manager will sign it with the CA it has.
+wildcard_signed_by_current_ca() {
+  local crt
+  crt=$(kubectl get secret -n traefik wildcard-sdlc-internal-tls -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d)
+  [[ -z $crt ]] || openssl verify -CAfile "$CA_CRT" <(printf '%s\n' "$crt") >/dev/null 2>&1
+}
+
+# Deleting the Secret makes cert-manager issue a new certificate from the current CA.
+reissue_wildcard() { kubectl delete secret -n traefik wildcard-sdlc-internal-tls; }
+
 # Installs k3s, the /etc/hosts block and host CA trust, and applies Kubernetes Secrets.
 phase_host() {
   step "k3s $K3S_VERSION installed and running" k3s_installed install_k3s
@@ -423,6 +435,7 @@ phase_host() {
   step "Chrome (~/.pki/nssdb) trusts the root CA" nss_trusts_ca trust_ca_nss
   step "Firefox policy installs the root CA" firefox_trusts_ca trust_ca_firefox
   step "Kubernetes Secrets match secrets.env and the root CA" cluster_secrets_current apply_cluster_secrets
+  step "the wildcard certificate is signed by the current root CA" wildcard_signed_by_current_ca reissue_wildcard
 }
 
 # The bootstrap installs a component from the same app.yaml and values.yaml that Argo CD uses

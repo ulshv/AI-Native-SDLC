@@ -21,6 +21,11 @@ spec:
     - repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
       targetRevision: main
       ref: values
+    - repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
+      targetRevision: main
+      path: platform/apps/traefik
+      directory:
+        exclude: '{app.yaml,values.yaml}'
   syncPolicy:
     automated:
       prune: true

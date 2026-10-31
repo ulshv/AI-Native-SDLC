@@ -1,1 +1,21 @@
-{}
+# Traefik is the platform's single entry point. k3s's ServiceLB publishes its ports 80 and 443
+# on the host; every *.sdlc.internal name gets HTTPS with the wildcard certificate, so the
+# charts behind it configure plain HTTP routes only.
+ports:
+  web:
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+tlsStore:
+  default:
+    defaultCertificate:
+      secretName: wildcard-sdlc-internal-tls
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

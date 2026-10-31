@@ -1,0 +1,26 @@
+# The wildcard certificate Traefik serves for every *.sdlc.internal name, signed by the local
+# root CA that the bootstrap keeps in cert-manager/root-ca and the host trusts.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: local-ca
+spec:
+  ca:
+    secretName: root-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-sdlc-internal
+  namespace: traefik
+spec:
+  secretName: wildcard-sdlc-internal-tls
+  dnsNames:
+    - "*.sdlc.internal"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    kind: ClusterIssuer
+    name: local-ca
