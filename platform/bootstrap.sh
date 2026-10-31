@@ -498,10 +498,10 @@ wait_platform_pg() {
 
 # Installs the CloudNativePG operator, the Postgres cluster and Gitea with Helm.
 phase_git_hosting() {
-  step "CloudNativePG operator (helm)" "helm_release_current cloudnative-pg" "helm_install cloudnative-pg"
-  step "platform-pg cluster and databases applied" "manifests_current databases" "apply_manifests databases"
+  step "CloudNativePG operator (helm, until Argo CD manages it)" "installed_or_adopted cloudnative-pg" "helm_install cloudnative-pg"
+  step "platform-pg cluster and databases applied" "applied_or_adopted databases" "apply_manifests databases"
   step "platform-pg healthy, databases created" platform_pg_healthy wait_platform_pg
-  step "Gitea (helm)" "helm_release_current gitea" "helm_install gitea"
+  step "Gitea (helm, until Argo CD manages it)" "installed_or_adopted gitea" "helm_install gitea"
 }
 
 # Gitea's public name only works once Argo CD has reconciled Traefik and the certificate, so
@@ -670,11 +670,67 @@ phase_repository() {
   step "the Gitea repo's default branch is main" default_branch_is_main set_default_branch
 }
 
+# app_adopted <component>: Argo CD has an Application for it. From then on Argo CD alone
+# changes it, and the bootstrap leaves it alone.
+app_adopted() { kubectl get application -n argocd "$1" >/dev/null 2>&1; }
+
+installed_or_adopted() { app_adopted "$1" || helm_release_current "$1"; }
+
+applied_or_adopted() { app_adopted "$1" || manifests_current "$1"; }
+
+root_app_current() {
+  kubectl diff --server-side --field-manager="$FIELD_MANAGER" -f platform/argocd/root.yaml >/dev/null 2>&1
+}
+
+apply_root_app() { kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f platform/argocd/root.yaml; }
+
 # Installs Argo CD with Helm and applies the root Application.
-phase_gitops() { :; }
+phase_gitops() {
+  step "Argo CD (helm, until it manages itself)" "installed_or_adopted argocd" "helm_install argocd"
+  step "root Application applied" root_app_current apply_root_app
+}
+
+all_apps_healthy() {
+  kubectl get applications -n argocd -o json 2>/dev/null | jq -e '
+    (.items | length) > 1 and
+    all(.items[]; .status.sync.status == "Synced" and .status.health.status == "Healthy")' >/dev/null
+}
+
+wait_all_apps() {
+  local i
+  for i in $(seq 120); do
+    all_apps_healthy && return 0
+    sleep 5
+  done
+  echo "error: not every Application is Synced and Healthy after 10 minutes:" >&2
+  kubectl get applications -n argocd >&2
+  return 1
+}
+
+# Releases the bootstrap installed with Helm before Argo CD took them over.
+HELM_RELEASES=(cloudnative-pg/cloudnative-pg gitea/gitea argocd/argocd)
+
+helm_records_gone() {
+  local entry
+  for entry in "${HELM_RELEASES[@]}"; do
+    [[ -z $(kubectl get secret -n "${entry%/*}" -l "owner=helm,name=${entry#*/}" -o name 2>/dev/null) ]] || return 1
+  done
+}
+
+# Deleting the release records makes Helm forget the releases while every resource stays.
+# helm uninstall would delete the resources themselves.
+drop_helm_records() {
+  local entry
+  for entry in "${HELM_RELEASES[@]}"; do
+    kubectl delete secret -n "${entry%/*}" -l "owner=helm,name=${entry#*/}"
+  done
+}
 
 # Waits until Argo CD has everything Synced/Healthy, then drops the Helm release records.
-phase_adoption() { :; }
+phase_adoption() {
+  step "every Application is Synced and Healthy" all_apps_healthy wait_all_apps
+  step "no Helm release records left: Argo CD owns the components" helm_records_gone drop_helm_records
+}
 
 PHASES=(preflight secrets host git_hosting repository gitops adoption)
 

@@ -88,6 +88,7 @@
 - [ ] 10.2 Add `.gitea/workflows/mirror-main.yml`. On a push to any branch, it scans the branch history with a pinned gitleaks release. Only on `main`, and only after a clean scan, it force-pushes `HEAD:main` to `github.com/ulshv/AI-Native-SDLC`. Have the bootstrap store `GITHUB_MIRROR_TOKEN` as a repository Actions secret when the workflow file exists. Verify preflight fails without the token while the file exists
 - [ ] 10.3 Add smoke checks: a commit on `main` reaches the mirror within 10 minutes, a commit on another branch never appears there, and a fake token committed on a throwaway test branch fails the gitleaks step. Verify all three pass, and remove the test branch afterwards
 - [ ] 10.4 Document how to enable and disable the mirror, how to create a GitHub token with write access to that repository only, and what to do when the gitleaks step blocks the mirror (rewrite history and rotate the leaked secret), in `platform/README.md`
+- [ ] 10.5 Before the mirror's first push of `main`, push the change's final state as branch `platform-core` to the `github` remote and open a pull request into `github/main`, so the change shows on GitHub as one unit of work. Verify the pull request lists every `platform-core:` commit, and that GitHub marks it merged once the mirror has pushed `main`
 
 ## 11. Plane CE
 

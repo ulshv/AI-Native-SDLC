@@ -1,1 +1,60 @@
-{}
+# Argo CD reconciles the platform from Gitea, itself included. To recover a broken Argo CD,
+# see "Changing the platform through git" in platform/README.md.
+global:
+  domain: argocd.sdlc.internal
+
+configs:
+  params:
+    # TLS ends at Traefik, which forwards plain HTTP to the server.
+    server.insecure: true
+  cm:
+    # Argo CD does not assess a child Application's health by default, so sync waves in the
+    # root Application would not wait for a component to become healthy. This restores it.
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = ""
+      if obj.status ~= nil and obj.status.health ~= nil then
+        hs.status = obj.status.health.status
+        if obj.status.health.message ~= nil then
+          hs.message = obj.status.health.message
+        end
+      end
+      return hs
+
+# Not used: SSO is out of scope, nothing sends notifications, and no ApplicationSets exist.
+dex:
+  enabled: false
+notifications:
+  enabled: false
+applicationSet:
+  replicas: 0
+
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+repoServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+redis:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
