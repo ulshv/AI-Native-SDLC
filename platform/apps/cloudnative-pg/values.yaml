@@ -1,1 +1,7 @@
-{}
+# The CloudNativePG operator. The Postgres cluster it runs is in platform/apps/databases/.
+resources:
+  requests:
+    cpu: 50m
+    memory: 100Mi
+  limits:
+    memory: 256Mi

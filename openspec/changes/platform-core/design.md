@@ -121,6 +121,12 @@ through the Gitea API.
   (`traefik.traefik.svc.cluster.local`, answer rewritten automatically).
 - Both paths end at the same Traefik and the same certificate, and neither depends on the
   host's network address. This is what the offline and network-switch scenarios require.
+- **VPN clients on the host.** A VPN in TUN mode (sing-box, Clash, WireGuard, Tailscale) adds
+  policy routing rules that can capture pod traffic: sing-box sends all port 53 traffic into
+  its tunnel, so pods' DNS queries never reach CoreDNS once the Service IP is translated. The
+  bootstrap adds `ip rule add to 10.42.0.0/16 lookup main priority 100`, ahead of every such
+  client, and a drop-in for the k3s unit re-adds it whenever k3s starts. Pods still reach the
+  internet through the VPN.
 - **Zone:** `sdlc.internal`. ICANN reserves `.internal` for private use. `.local` belongs to
   mDNS on Ubuntu, and some software treats `.localhost` specially.
 - **Alternatives:** dnsmasq wildcard (it conflicts with systemd-resolved, and there are only

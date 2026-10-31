@@ -43,13 +43,14 @@
 - [x] 4.4 Implement host CA trust: the system store via `update-ca-certificates`, `~/.pki/nssdb` via `certutil`, and a Firefox `Certificates.Install` policy in `/etc/firefox/policies/`. Verify the CA appears in all three
 - [x] 4.5 Implement CA rotation when fewer than 30 days remain: a new CA, trust added for it, trust removed for the old one, and the Secret updated. Verify by temporarily swapping in a CA valid for 10 days (after backing up the real one), re-running, and checking that the new CA is trusted and the old one is not
 - [x] 4.6 Document the host changes and the two commands that remove the hosts block and the CA trust after `k3s-uninstall.sh` in `platform/README.md`, and verify those commands restore a clean `/etc/hosts` and trust store
+- [x] 4.7 Keep traffic to pods on the main routing table ahead of VPN policy rules (`ip rule` priority 100 for `10.42.0.0/16`, re-added by a k3s unit drop-in), and add a smoke check that a pod resolves a Service name. Verify the check fails with a TUN-mode VPN running and passes after the bootstrap, and that the rule is back after `systemctl restart k3s`
 
 ## 5. Shared database
 
-- [ ] 5.1 Write `platform/apps/cloudnative-pg/` values (the operator), and in `platform/apps/databases/` the `platform-pg` Cluster with `managed.roles` for `gitea` and `plane` (passwords from the seeded Secrets), plus `Database` resources owned by those roles. Pin the Postgres image with `imageName`, so an operator upgrade cannot change the Postgres version
-- [ ] 5.2 Add `pg_hba` rules to the `platform-pg` Cluster: each service role may connect only to its own database, and every other network connection is rejected
-- [ ] 5.3 Implement bootstrap phase 3 for the CNPG operator and cluster with Helm and `kubectl`, reading the same files, and verify the cluster reports healthy
-- [ ] 5.4 Add a smoke check: the `gitea` credentials can open the `gitea` database and are refused on `plane`. Verify it passes
+- [x] 5.1 Write `platform/apps/cloudnative-pg/` values (the operator), and in `platform/apps/databases/` the `platform-pg` Cluster with `managed.roles` for `gitea` and `plane` (passwords from the seeded Secrets), plus `Database` resources owned by those roles. Pin the Postgres image with `imageName`, so an operator upgrade cannot change the Postgres version
+- [x] 5.2 Add `pg_hba` rules to the `platform-pg` Cluster: each service role may connect only to its own database, and every other network connection is rejected
+- [x] 5.3 Implement bootstrap phase 3 for the CNPG operator and cluster with Helm and `kubectl`, reading the same files, and verify the cluster reports healthy
+- [x] 5.4 Add a smoke check: the `gitea` credentials can open the `gitea` database and are refused on `plane`. Verify it passes
 
 ## 6. Gitea
 

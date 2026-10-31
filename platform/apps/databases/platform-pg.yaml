@@ -1,0 +1,35 @@
+# The shared Postgres for every platform service: one database and one role per service.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: platform-pg
+  namespace: databases
+spec:
+  instances: 1
+  # A dated build tag, so an operator upgrade cannot change the Postgres version.
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-202610260820-minimal-trixie
+  storage:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  postgresql:
+    # Each role may open only its own database; every other network connection is refused
+    # before the password is checked. The operator's own connections are not affected.
+    pg_hba:
+      - host gitea gitea all scram-sha-256
+      - host plane plane all scram-sha-256
+      - host all all all reject
+  managed:
+    roles:
+      - name: gitea
+        login: true
+        passwordSecret:
+          name: pg-gitea
+      - name: plane
+        login: true
+        passwordSecret:
+          name: pg-plane

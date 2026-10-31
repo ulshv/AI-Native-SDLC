@@ -80,6 +80,7 @@ Phase 2 changes the host, and each change is checked first and skipped when alre
 | What | Where |
 |---|---|
 | k3s, pinned in `bootstrap.sh`, bundled Traefik disabled | system service `k3s`, `/usr/local/bin/{k3s,kubectl}`, `/etc/rancher/`, `/var/lib/rancher/` |
+| Traffic to pods bypasses VPN routing rules, so a VPN in TUN mode cannot capture pods' DNS | `ip rule` priority 100 for `10.42.0.0/16`, re-added on every k3s start by `/etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf` |
 | Cluster access for you | `~/.kube/config`; a config that was already there is kept as `~/.kube/config.before-ai-native-sdlc` |
 | Service names from [`hosts.txt`](hosts.txt) → `127.0.0.1` | a block between `# BEGIN ai-native-sdlc` and `# END ai-native-sdlc` in `/etc/hosts`; the original is kept as `/etc/hosts.before-ai-native-sdlc` |
 | Root CA trusted by the system (curl, git, most tools) | `/usr/local/share/ca-certificates/ai-native-sdlc.crt` |
@@ -92,7 +93,7 @@ all of the trust above to the new one. Firefox is the exception: it imports the 
 profile and keeps the old one until it expires.
 
 **Removal.** `/usr/local/bin/k3s-uninstall.sh` removes the cluster with all its data. The
-host changes are harmless leftovers; these two commands remove them:
+host changes are harmless leftovers; these commands remove them:
 
 ```bash
 # 1. the /etc/hosts block
@@ -105,6 +106,10 @@ sudo rm -f /usr/local/share/ca-certificates/ai-native-sdlc.crt /etc/firefox/poli
   && jq 'del(.policies.Certificates.Install[] | select(endswith("/ai-native-sdlc-ca.crt")))' /etc/firefox/policies/policies.json \
      | sudo tee /etc/firefox/policies/policies.json.new >/dev/null \
   && sudo mv /etc/firefox/policies/policies.json.new /etc/firefox/policies/policies.json
+
+# 3. the routing rule for pods
+sudo rm -f /etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf \
+  && sudo ip rule del to 10.42.0.0/16 lookup main priority 100
 ```
 
 Firefox keeps the CA it already imported. Remove it under Settings → Privacy & Security →

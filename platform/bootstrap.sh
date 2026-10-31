@@ -27,6 +27,10 @@ SYSTEM_CA=/usr/local/share/ca-certificates/$TRUST_NAME.crt
 NSSDB=sql:$HOME/.pki/nssdb
 FIREFOX_POLICIES=/etc/firefox/policies/policies.json
 FIREFOX_CA=/etc/firefox/policies/$TRUST_NAME-ca.crt
+# k3s's default --cluster-cidr: every pod IP is in it.
+POD_CIDR=10.42.0.0/16
+POD_ROUTE_PRIORITY=100
+K3S_ROUTING_DROPIN=/etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf
 
 DRY_RUN=false
 
@@ -224,6 +228,33 @@ write_kubeconfig() {
   (umask 077 && sudo cat /etc/rancher/k3s/k3s.yaml >"$KUBECONFIG")
 }
 
+# VPN clients in TUN mode (sing-box, Clash, WireGuard, Tailscale) add policy routing rules that
+# can steer pod traffic into their tunnel: sing-box sends all port 53 traffic there, so pods'
+# DNS queries never reach CoreDNS. A rule ahead of theirs keeps traffic to pods on the main
+# table. Traffic from pods to the internet still goes through the VPN.
+routing_dropin() {
+  local rule="to $POD_CIDR lookup main priority $POD_ROUTE_PRIORITY"
+  printf '%s\n' \
+    "# Managed by ai-native-sdlc platform/bootstrap.sh: traffic to pods bypasses VPN routing rules." \
+    "[Service]" \
+    "ExecStartPre=-/bin/sh -c '/usr/sbin/ip rule del $rule 2>/dev/null; /usr/sbin/ip rule add $rule'"
+}
+
+pod_routing_in_place() {
+  cmp -s <(routing_dropin) "$K3S_ROUTING_DROPIN" &&
+    ip rule show pref "$POD_ROUTE_PRIORITY" | grep -qE "^$POD_ROUTE_PRIORITY:\s+from all to $POD_CIDR lookup main"
+}
+
+# The drop-in re-adds the rule whenever k3s starts, including after a reboot.
+set_pod_routing() {
+  local rule="to $POD_CIDR lookup main priority $POD_ROUTE_PRIORITY"
+  sudo mkdir -p "$(dirname "$K3S_ROUTING_DROPIN")"
+  routing_dropin | sudo tee "$K3S_ROUTING_DROPIN" >/dev/null
+  sudo systemctl daemon-reload
+  sudo ip rule del $rule 2>/dev/null || true
+  sudo ip rule add $rule
+}
+
 node_ready() { kubectl get nodes --no-headers 2>/dev/null | grep -qw Ready; }
 
 wait_node_ready() {
@@ -350,6 +381,11 @@ render_secrets() {
       })}'
 }
 
+ensure_namespace() {
+  kubectl create namespace "$1" --dry-run=client -o yaml |
+    kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f - >/dev/null
+}
+
 secret_namespaces() {
   { awk '$1 == "put" { split($2, t, "/"); print t[1] }' "$MANIFEST"; echo cert-manager; } | sort -u
 }
@@ -363,8 +399,7 @@ cluster_secrets_current() {
 apply_cluster_secrets() {
   local ns
   for ns in $(secret_namespaces); do
-    kubectl create namespace "$ns" --dry-run=client -o yaml |
-      kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f - >/dev/null
+    ensure_namespace "$ns"
   done
   render_secrets | kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f -
 }
@@ -372,6 +407,7 @@ apply_cluster_secrets() {
 # Installs k3s, the /etc/hosts block and host CA trust, and applies Kubernetes Secrets.
 phase_host() {
   step "k3s $K3S_VERSION installed and running" k3s_installed install_k3s
+  step "traffic to pods bypasses VPN routing rules" pod_routing_in_place set_pod_routing
   step "~/.kube/config points at k3s" kubeconfig_works write_kubeconfig
   step "node is Ready" node_ready wait_node_ready
   step "/etc/hosts block matches platform/hosts.txt" hosts_current write_hosts
@@ -381,8 +417,83 @@ phase_host() {
   step "Kubernetes Secrets match secrets.env and the root CA" cluster_secrets_current apply_cluster_secrets
 }
 
+# The bootstrap installs a component from the same app.yaml and values.yaml that Argo CD uses
+# later, with the same release name and namespace, so Argo CD adopts it without changes.
+# yq reads from stdin: the snap's confinement may not reach every path.
+
+# app_chart <component>: "<repo> <chart> <version> <release>" from its app.yaml.
+app_chart() {
+  yq -r '.spec.sources[] | select(.chart) | [.repoURL, .chart, .targetRevision, .helm.releaseName] | join(" ")' \
+    <"platform/apps/$1/app.yaml"
+}
+
+app_namespace() { yq -r '.spec.destination.namespace' <"platform/apps/$1/app.yaml"; }
+
+# Values as compact JSON with sorted keys, so formatting, comments and key order do not count
+# as a difference.
+normalized_values() { yq -o json -I0 '(. // {}) | sort_keys(..)'; }
+
+helm_release_current() {
+  local repo chart version release ns
+  read -r repo chart version release <<<"$(app_chart "$1")"
+  ns=$(app_namespace "$1")
+  [[ $(helm list -n "$ns" -f "^$release\$" -o json 2>/dev/null | jq -r '.[0] | "\(.chart) \(.status)"') == "$chart-$version deployed" ]] &&
+    [[ $(helm get values "$release" -n "$ns" -o yaml 2>/dev/null | normalized_values) == \
+      "$(normalized_values <"platform/apps/$1/values.yaml")" ]]
+}
+
+helm_install() {
+  local repo chart version release
+  read -r repo chart version release <<<"$(app_chart "$1")"
+  helm upgrade --install "$release" "$chart" --repo "$repo" --version "$version" \
+    --namespace "$(app_namespace "$1")" --create-namespace \
+    --values "platform/apps/$1/values.yaml" --wait --timeout 5m >/dev/null
+}
+
+# app_manifests <component>: kubectl -f arguments for its manifests (everything but app.yaml
+# and values.yaml).
+app_manifests() {
+  local file
+  for file in "platform/apps/$1"/*.yaml; do
+    case ${file##*/} in app.yaml | values.yaml) ;; *) printf -- '-f\n%s\n' "$file" ;; esac
+  done
+}
+
+manifests_current() {
+  local args
+  mapfile -t args < <(app_manifests "$1")
+  kubectl diff --server-side --field-manager="$FIELD_MANAGER" "${args[@]}" >/dev/null 2>&1
+}
+
+apply_manifests() {
+  local args
+  mapfile -t args < <(app_manifests "$1")
+  ensure_namespace "$(app_namespace "$1")"
+  kubectl apply --server-side --field-manager="$FIELD_MANAGER" "${args[@]}"
+}
+
+platform_pg_healthy() {
+  [[ $(kubectl get cluster platform-pg -n databases -o jsonpath='{.status.phase}' 2>/dev/null) == "Cluster in healthy state" ]] &&
+    kubectl get database -n databases -o json 2>/dev/null |
+    jq -e '(.items | length) > 0 and all(.items[]; .status.applied == true)' >/dev/null
+}
+
+wait_platform_pg() {
+  local i
+  for i in $(seq 100); do
+    platform_pg_healthy && return 0
+    sleep 3
+  done
+  echo "error: platform-pg is not healthy after 5 minutes; see kubectl get cluster,database -n databases" >&2
+  return 1
+}
+
 # Installs the CloudNativePG operator, the Postgres cluster and Gitea with Helm.
-phase_git_hosting() { :; }
+phase_git_hosting() {
+  step "CloudNativePG operator (helm)" "helm_release_current cloudnative-pg" "helm_install cloudnative-pg"
+  step "platform-pg cluster and databases applied" "manifests_current databases" "apply_manifests databases"
+  step "platform-pg healthy, databases created" platform_pg_healthy wait_platform_pg
+}
 
 # Creates the Gitea org and repo, moves origin to Gitea and pushes branches and tags.
 phase_repository() { :; }

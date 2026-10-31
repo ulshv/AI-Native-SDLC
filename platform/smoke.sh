@@ -38,6 +38,41 @@ check_no_secret_material_in_worktree() {
   [[ -z $hits ]] || { echo "secret material in the working tree:"; echo "$hits"; return 1; }
 }
 
+# A pod resolves a Service name through the cluster DNS Service. Fails when something on the
+# host, such as a VPN in TUN mode, steers pods' DNS traffic away from CoreDNS.
+register pod_dns
+check_pod_dns() {
+  local pod=smoke-pod-dns want
+  want=$(kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}') || return 1
+  kubectl delete pod "$pod" -n default --ignore-not-found >/dev/null
+  kubectl run "$pod" -n default --rm -i --quiet --restart=Never \
+    --image=docker.io/rancher/mirrored-library-busybox:1.37.0 --image-pull-policy=IfNotPresent -- \
+    sh -c "nslookup -timeout=3 kubernetes.default.svc.cluster.local | grep -q 'Address: $want' ||
+      { echo 'kubernetes.default.svc.cluster.local does not resolve to $want from a pod'; exit 1; }"
+}
+
+# Runs psql in a throwaway pod with the gitea role's password from its Secret, so the password
+# never appears on a command line.
+register database_isolation
+check_database_isolation() {
+  local image pod=smoke-database-isolation
+  image=$(kubectl get cluster platform-pg -n databases -o jsonpath='{.spec.imageName}') || return 1
+  kubectl delete pod "$pod" -n databases --ignore-not-found >/dev/null
+  kubectl run "$pod" -n databases --rm -i --quiet --restart=Never --image="$image" --overrides="$(
+    jq -n --arg pod "$pod" --arg image "$image" '{spec: {containers: [{
+      name: $pod, image: $image,
+      env: [{name: "PGPASSWORD", valueFrom: {secretKeyRef: {name: "pg-gitea", key: "password"}}}],
+      command: ["sh", "-c", "
+        psql \"host=platform-pg-rw user=gitea dbname=gitea\" -tAc \"select 1\" >/dev/null ||
+          { echo \"gitea cannot open its own database\"; exit 1; }
+        if psql \"host=platform-pg-rw user=gitea dbname=plane\" -tAc \"select 1\" 2>/tmp/err; then
+          echo \"gitea opened the plane database\"; exit 1
+        fi
+        grep -q \"pg_hba.conf rejects connection\" /tmp/err || { cat /tmp/err; exit 1; }"]
+    }]}}'
+  )"
+}
+
 register secrets_example_current
 check_secrets_example_current() {
   diff <(platform/bootstrap.sh --example) platform/secrets.env.example
