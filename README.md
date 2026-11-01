@@ -23,6 +23,36 @@ stack.
 
 ---
 
+## In plain words
+
+Today a change to a product goes through many hands: a product manager writes the task,
+developers write the code, testers check it, and someone deploys it. Most of that time goes
+into routine work, and every change waits its turn in the sprint queue.
+
+This pipeline gives the routine part of that work to AI agents and keeps the decisions with
+people:
+
+| | Today | With the pipeline |
+|---|---|---|
+| Who decides what to build | product owner | product owner |
+| Who writes the plan and the code | developers | AI agents |
+| Who checks the work | testers and code review | automated tests and an engineer's review |
+| Where people spend their time | writing and checking code | deciding what to build and approving the result |
+| What a change waits for | a free developer | a person to approve it |
+
+People stay in charge at two points: a product owner approves the plan before any code is
+written, and an engineer approves the code before it ships. The same team can take on more
+changes, because its time goes into decisions rather than routine. Every decision is
+recorded: who asked for what, which plan was approved, and who accepted the code.
+
+It runs on the company's own servers, so code and data never leave them.
+
+> [!IMPORTANT]
+> This is the goal, not a proven result. The platform the pipeline runs on is built; the
+> loop itself is next on the [roadmap](#roadmap). Whether agents handle real products at
+> acceptable quality and cost is exactly what the [metrics](#how-well-know-it-works) will
+> show.
+
 ## The loop
 
 ![The AI-native delivery loop](docs/diagrams/loop.svg)
