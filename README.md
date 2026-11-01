@@ -2,7 +2,7 @@
 
 > From ticket to deployed change: AI agents do the work, humans make the decisions.
 
-![status](https://img.shields.io/badge/status-design%20phase-f59e0b)
+![status](https://img.shields.io/badge/status-platform%20core%20running-16a34a)
 ![python](https://img.shields.io/badge/python-LangGraph%20%C2%B7%20deepagents-3776ab)
 ![platform](https://img.shields.io/badge/platform-k3s%20%C2%B7%20Argo%20CD-0f766e)
 ![specs](https://img.shields.io/badge/specs-OpenSpec-7c3aed)
@@ -15,10 +15,11 @@ drive it, people gate it. Built to slot into enterprise SDLC workflows on a self
 stack.
 
 > [!NOTE]
-> **Status: design phase.** Everything below is the target architecture. It isn't deployed
-> to the cloud yet, and development happens on a local machine. Progress is tracked in the
-> [roadmap](#roadmap), and every decision with its trade-offs is in
-> [docs/decisions.md](docs/decisions.md).
+> **Status: the platform core runs, the loop is next.** Step 0 of the [roadmap](#roadmap)
+> is done: k3s, Argo CD, Postgres, Gitea and Plane run on a local machine and rebuild from
+> this repository with one command ([run it](#run-it)). Everything else below is the target
+> architecture, and nothing is deployed to the cloud yet. Every decision with its trade-offs
+> is in [docs/decisions.md](docs/decisions.md).
 
 ---
 
@@ -231,14 +232,33 @@ sudo snap install helm --classic
 You also need `sudo` rights and free ports 80 and 443. Stop Docker Desktop, or anything else
 listening there, before bootstrapping.
 
+### Run it
+
+```bash
+platform/bootstrap.sh   # build or rebuild the platform: ~11 min from scratch, safe to re-run
+platform/smoke.sh       # 15 end-to-end checks
+```
+
+Then the services are at <https://gitea.sdlc.internal>, <https://argocd.sdlc.internal> and
+<https://plane.sdlc.internal>, with certificates from a local CA that the bootstrap adds to
+the system and to Chrome. From here on, every change to the platform is a `git push`: Argo CD
+reconciles the cluster from `main` in Gitea, Argo CD itself included. Secret values live in
+`~/.config/ai-native-sdlc/secrets.env` and never enter git.
+
+`origin` becomes Gitea. GitHub keeps a public copy of `main` that is pushed by hand, through a
+pre-push hook that refuses every other branch and any commit containing a secret value.
+
+Logins, what the bootstrap changes on the host and how to undo it:
+[platform/README.md](platform/README.md).
+
 ## Roadmap
 
 Each step is one OpenSpec change: spec first, then implementation.
 
-- [ ] **0. Platform core**: k3s, Argo CD app-of-apps, CloudNativePG, Gitea and its runner, Plane CE
+- [x] **0. Platform core**: k3s, Argo CD app-of-apps, CloudNativePG, Gitea, Plane CE ([change](openspec/changes/archive/2026-11-01-platform-core/proposal.md))
 - [ ] **1. Spec loop (Plane only)**: ticket → spec PR → clarify / approve via ticket status
 - [ ] **2. More channels**: Mattermost buttons and threads, Gitea PR reviews
-- [ ] **3. Implementation phase**: approved spec → OpenCode k8s Job → code PR → human merge
+- [ ] **3. Implementation phase**: approved spec → OpenCode k8s Job → code PR → human merge, CI on a Gitea runner
 - [ ] **4. Target app**: a deepagents business agent with Langfuse tracing
 - [ ] **5. Triage**: logs (Loki) and traces (Langfuse) in the spec agent's context
 - [ ] **6. Auto-tickets**: anomalies open tickets on their own
@@ -259,9 +279,9 @@ Once step 1 works, changes to the orchestrator itself go through the orchestrato
 ## Repository
 
 ```
-openspec/        specs (source of truth) and changes in flight
+openspec/        specs (source of truth), changes in flight and archived ones
 docs/            decisions and diagrams
-platform/        Argo CD apps and Helm values          (planned)
+platform/        bootstrap, Argo CD apps, Helm values, smoke checks
 orchestrator/    the SDLC control plane                (planned)
 apps/            target business agent                 (planned)
 ```

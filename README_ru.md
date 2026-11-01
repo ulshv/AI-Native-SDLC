@@ -2,7 +2,7 @@
 
 > От тикета до задеплоенного изменения: работу делают AI-агенты, решения принимают люди.
 
-![status](https://img.shields.io/badge/status-design%20phase-f59e0b)
+![status](https://img.shields.io/badge/status-platform%20core%20running-16a34a)
 ![python](https://img.shields.io/badge/python-LangGraph%20%C2%B7%20deepagents-3776ab)
 ![platform](https://img.shields.io/badge/platform-k3s%20%C2%B7%20Argo%20CD-0f766e)
 ![specs](https://img.shields.io/badge/specs-OpenSpec-7c3aed)
@@ -15,9 +15,11 @@ AI-native пайплайн разработки ПО для компаний, к
 SDLC на self-hosted стеке.
 
 > [!NOTE]
-> **Статус: проектирование.** Всё, что ниже, — целевая архитектура, в облако ещё не
-> задеплоено, разработка ведётся на локальной машине. Прогресс — в [роадмапе](#роадмап),
-> все решения с компромиссами — в [docs/decisions.md](docs/decisions.md) (на английском).
+> **Статус: ядро платформы работает, дальше цикл.** Шаг 0 [роадмапа](#роадмап) готов:
+> k3s, Argo CD, Postgres, Gitea и Plane крутятся на локальной машине и пересобираются из
+> этого репозитория одной командой ([как запустить](#как-запустить)). Всё остальное ниже —
+> целевая архитектура, в облако ничего не задеплоено. Все решения с компромиссами — в
+> [docs/decisions.md](docs/decisions.md) (на английском).
 
 ---
 
@@ -229,14 +231,33 @@ sudo snap install helm --classic
 нужны права `sudo` и свободные порты 80 и 443. Перед бутстрапом останови Docker Desktop
 или что-то ещё, что их слушает.
 
+### Как запустить
+
+```bash
+platform/bootstrap.sh   # собрать или пересобрать платформу: ~11 мин с нуля, можно перезапускать
+platform/smoke.sh       # 15 сквозных проверок
+```
+
+После этого сервисы доступны на <https://gitea.sdlc.internal>, <https://argocd.sdlc.internal>
+и <https://plane.sdlc.internal>, с сертификатами от локального CA, который бутстрап добавляет
+в систему и в Chrome. Дальше любое изменение платформы — это `git push`: Argo CD приводит
+кластер к `main` в Gitea, включая сам Argo CD. Значения секретов лежат в
+`~/.config/ai-native-sdlc/secrets.env` и в git не попадают.
+
+`origin` становится Gitea. На GitHub остаётся публичная копия `main`, её пушат руками через
+pre-push хук, который не пропускает другие ветки и коммиты со значениями секретов.
+
+Логины, что бутстрап меняет на хосте и как это откатить — в
+[platform/README.md](platform/README.md) (на английском).
+
 ## Роадмап
 
 Каждый шаг — один change в OpenSpec: сначала спека, потом реализация.
 
-- [ ] **0. Ядро платформы**: k3s, Argo CD app-of-apps, CloudNativePG, Gitea и раннер, Plane CE
+- [x] **0. Ядро платформы**: k3s, Argo CD app-of-apps, CloudNativePG, Gitea, Plane CE ([change](openspec/changes/archive/2026-11-01-platform-core/proposal.md))
 - [ ] **1. Цикл спек (только Plane)**: тикет → PR спеки → уточнения / апрув через статус тикета
 - [ ] **2. Больше каналов**: кнопки и треды в Mattermost, ревью PR в Gitea
-- [ ] **3. Фаза реализации**: одобренная спека → OpenCode в k8s Job → PR с кодом → мёрж человеком
+- [ ] **3. Фаза реализации**: одобренная спека → OpenCode в k8s Job → PR с кодом → мёрж человеком, CI на раннере Gitea
 - [ ] **4. Целевое приложение**: бизнес-агент на deepagents с трейсингом в Langfuse
 - [ ] **5. Триаж**: логи (Loki) и трейсы (Langfuse) в контексте агента, пишущего спеки
 - [ ] **6. Автотикеты**: аномалии сами заводят тикеты
@@ -257,9 +278,9 @@ sudo snap install helm --classic
 ## Репозиторий
 
 ```
-openspec/        спеки (источник правды) и changes в работе
+openspec/        спеки (источник правды), changes в работе и в архиве
 docs/            решения и диаграммы
-platform/        Argo CD apps и Helm values          (в планах)
+platform/        бутстрап, Argo CD apps, Helm values, smoke-проверки
 orchestrator/    SDLC control plane                  (в планах)
 apps/            целевой бизнес-агент                (в планах)
 ```

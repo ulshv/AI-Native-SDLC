@@ -145,11 +145,30 @@ the candidate if agent Jobs need short-lived, audited credentials.
 
 **Context.** The GitHub repository was created as a public showcase. The loop's pull requests,
 reviews and branch protection belong on the self-hosted git server.
-**Decision.** The bootstrap moves `origin` to Gitea and keeps the old remote as `github`. A
-Gitea Actions workflow force-pushes `main` only to GitHub. Gitea's built-in push mirror is not
-used, because it mirrors every ref.
-**Consequence.** Agent branches never become public. Deleting one workflow file switches the
-mirror off, and the GitHub repository can be removed without affecting anything else.
+**Decision.** The bootstrap moves `origin` to Gitea and keeps the old remote as `github`.
+`main` reaches GitHub only by a manual `git push github main`, through a pre-push hook that
+refuses every other ref and any commit containing a value from `secrets.env`. Gitea's built-in
+push mirror is not used, because it mirrors every ref. A Gitea Actions workflow was rejected:
+it needs a runner and a GitHub credential in Gitea, and it could scan only by pattern, without
+access to the secret values.
+**Consequence.** Agent branches never become public. GitHub is as fresh as the last manual
+push. Removing the `github` remote stops publishing, and the GitHub repository can be removed
+without affecting anything else.
+
+### D16. On the laptop, the node gets a fixed address of its own
+
+**Context.** D13 keeps service names working offline and across networks, but the control plane
+had the same weakness underneath. k3s takes the Wi-Fi address as the node's, and the Kubernetes
+API Service points at it. Offline the address disappears, on another network it changes, and
+the operators and Argo CD lose the API. This showed up in the offline test.
+**Decision.** The node gets `10.254.0.1` on a dummy interface `sdlc0`, set as `node-ip` and
+`flannel-iface` in k3s's `config.yaml`. A drop-in for the k3s unit creates the interface on
+every start, next to the routing rule for VPN clients.
+**Consequence.** The cluster works the same offline, on any Wi-Fi and with a VPN on. This is for
+the laptop only. A cloud or multi-node host uses its own stable address as the node's and
+creates no such interface, because on several nodes it would give every node the same address.
+Nothing under `platform/apps/` refers to it, so moving to the cloud touches only the bootstrap.
+Specified in change `platform-core`.
 
 ---
 
