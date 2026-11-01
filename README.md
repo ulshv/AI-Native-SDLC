@@ -61,9 +61,9 @@ It runs on the company's own servers, so code and data never leave them.
 2. **Triage**: an agent reads the related logs (Loki) and LLM traces (Langfuse) and works out what is actually wrong.
 3. **Delta spec**: the agent proposes the fix or feature as an [OpenSpec](https://github.com/Fission-AI/OpenSpec) change, a reviewable *delta* against the current specs, opened as a pull request.
 4. **Spec approval** *(human)*: a developer or product owner approves, requests changes, or answers the agent's clarifying questions from Plane, Gitea or Mattermost.
-5. **Implementation**: the approved spec is handed to a coding agent that runs as an isolated Kubernetes Job and opens a code PR.
-6. **Code review** *(human)*: the regular PR review. The bot cannot merge.
-7. **Deploy**: merge to the environment branch, and Argo CD syncs the cluster.
+5. **Implementation**: the approved spec is handed to a coding agent that runs as an isolated Kubernetes Job and pushes the code to the same pull request. The PR gets a preview environment.
+6. **Code review** *(human)*: the regular PR review, plus a click through the preview. The bot cannot merge.
+7. **Deploy**: a merge into `development` reaches the dev environment, and a release merged into `main` reaches production. Argo CD syncs both ([branches and environments](#branches-and-environments)).
 8. **Observe**: logs and traces feed the next signal.
 
 <details>
@@ -154,7 +154,7 @@ makes the following rules easy to enforce:
 - **One source of truth.** A Plane status, a Gitea review or a Mattermost button all reach the same transition.
 - **No echo loops.** Events written by the bot itself are dropped. Otherwise, mirroring a status to Plane would trigger another transition.
 - **No races.** Every event carries the spec revision (the PR head SHA) it refers to. A stale approval is ignored, and its author gets a notification.
-- **Correlation.** One record links the Plane issue, the OpenSpec change, the spec PR, the code PR, the Mattermost thread and the LangGraph thread.
+- **Correlation.** One record links the Plane issue, the OpenSpec change, the branch and its PR, the preview, the Mattermost thread and the LangGraph thread.
 - **Resumable clarifications.** When the agent is unsure, it asks in the ticket and the chat thread, then waits. An answer from either place resumes it.
 
 <details>
@@ -168,18 +168,72 @@ stateDiagram-v2
     Triaged --> Drafting
     Drafting --> AwaitingClarification: needs info
     AwaitingClarification --> Drafting: answer
-    Drafting --> SpecReview: spec PR opened
+    Drafting --> SpecReview: PR opened with the spec
     SpecReview --> Drafting: request changes
     SpecReview --> Closed: reject
     SpecReview --> SpecApproved: approve
     SpecApproved --> Implementing: dispatch k8s Job
-    Implementing --> PRReview: code PR opened
-    PRReview --> Implementing: changes requested
-    PRReview --> Merged: human merge
-    Merged --> Deployed: Argo CD sync
-    Deployed --> Done: archive change · close ticket
+    Implementing --> CodeReview: code pushed to the same PR · preview up
+    CodeReview --> Implementing: changes requested
+    CodeReview --> OnDev: human merge into development
+    OnDev --> Released: human release · main tagged
+    Released --> Done: close ticket
     Closed --> [*]
     Done --> [*]
+```
+
+</details>
+
+## Branches and environments
+
+![Branches and environments](docs/diagrams/environments.svg)
+
+The loop fits into an ordinary branching model instead of replacing it. The first target is
+**`example-webapp`**: a small React app with a dummy login form and screens on mocked data.
+It lives in its own Gitea repository and is tracked as project `EWA` in Plane.
+
+| Branch | What it holds | Environment | Deployed when |
+|---|---|---|---|
+| `feat/EWA-12_<slug>` | one ticket's work, branched off `development` | `ewa-12.qa.example-webapp.sdlc.internal` (preview) | the code is in the PR and CI is green |
+| `development` | merged features | `dev.example-webapp.sdlc.internal` | on every merge |
+| `main` | releases | `example-webapp.sdlc.internal` | a person merges the release PR |
+
+- **One ticket, one id.** The orchestrator names the branch after the Plane ticket, so the
+  ticket, the branch, the PR and the preview host share one id. The preview link is posted
+  to the ticket.
+- **One PR, two gates.** The agent opens a PR into `development` that holds only the
+  OpenSpec change. Approving it in Plane starts the implementation, and the code lands in the
+  same PR. The agent archives the change there too, so the merged diff also shows how the
+  specs changed. An engineer reviews and merges it.
+- **Previews live as long as the PR.** An Argo CD ApplicationSet watches the repository's PRs
+  and deploys the ones the orchestrator has labelled. Closing the PR removes the environment.
+- **A release is a button.** A person merges `development` into `main` in Gitea. CI tags the
+  next minor version (1.5.0 → 1.6.0; a major bump is set by hand) and publishes a release
+  that lists its tickets, and the orchestrator moves those tickets to Released.
+- **The image tag is the commit SHA, everywhere.** CI builds each pushed commit once, and Argo
+  CD deploys the SHA it synced, so no bot commits image tags back to git. The version is a
+  label on an image that already exists.
+- **The bot cannot merge.** `development` and `main` are protected. The agent's token can push
+  only to feature branches.
+
+> [!NOTE]
+> This flow is the design for roadmap step 1 and is not built yet. Previews need wildcard
+> names on the host, which `/etc/hosts` can't provide; a spike decides how
+> ([open questions](docs/decisions.md#open)).
+
+<details>
+<summary>Mermaid source</summary>
+
+```mermaid
+flowchart LR
+    ticket([Plane EWA-12]) -- agent branches off --> feat[feat/EWA-12_add-filters]
+    feat -- "PR: spec first, code after approval" --> merge{{merge<br/>engineer}}
+    merge --> dev[development]
+    dev -- release PR --> release{{release<br/>a button in Gitea}}
+    release --> main[main<br/>tag v1.6.0]
+    feat -. "code in the PR, CI green" .-> preview[(preview<br/>ewa-12.qa.example-webapp)]
+    dev -. every merge .-> devenv[(dev<br/>dev.example-webapp)]
+    main -. every release .-> prod[(production<br/>example-webapp)]
 ```
 
 </details>
@@ -286,15 +340,16 @@ Logins, what the bootstrap changes on the host and how to undo it:
 Each step is one OpenSpec change: spec first, then implementation.
 
 - [x] **0. Platform core**: k3s, Argo CD app-of-apps, CloudNativePG, Gitea, Plane CE ([change](openspec/changes/archive/2026-11-01-platform-core/proposal.md))
-- [ ] **1. Spec loop (Plane only)**: ticket → spec PR → clarify / approve via ticket status
-- [ ] **2. More channels**: Mattermost buttons and threads, Gitea PR reviews
-- [ ] **3. Implementation phase**: approved spec → OpenCode k8s Job → code PR → human merge, CI on a Gitea runner
-- [ ] **4. Target app**: a deepagents business agent with Langfuse tracing
-- [ ] **5. Triage**: logs (Loki) and traces (Langfuse) in the spec agent's context
-- [ ] **6. Auto-tickets**: anomalies open tickets on their own
-- [ ] **7. Continuous deploy and SSO**: Argo CD per-environment sync, Keycloak
+- [ ] **1. Delivery loop on `example-webapp`**: Plane ticket → spec in a PR → approval in the ticket → code from an OpenCode k8s Job in the same PR → human merge, with [previews, dev and production](#branches-and-environments), releases, and CI on a Gitea runner
+- [ ] **2. Target agent app**: a deepagents business agent with Langfuse tracing, in its own repository
+- [ ] **3. Triage**: logs (Loki) and traces (Langfuse) in the spec agent's context
+- [ ] **4. More channels**: Mattermost buttons and threads, Gitea PR reviews
+- [ ] **5. Auto-tickets**: anomalies open tickets on their own
+- [ ] **6. SSO**: Keycloak
 
-Once step 1 works, changes to the orchestrator itself go through the orchestrator.
+The order changes as we learn. It was reshuffled once already: the full loop on a simple app
+came first, because that is what the main metric measures. Once step 1 works, changes to the
+orchestrator itself go through the orchestrator.
 
 ## How we'll know it works
 
@@ -313,8 +368,10 @@ openspec/        specs (source of truth), changes in flight and archived ones
 docs/            decisions and diagrams
 platform/        bootstrap, Argo CD apps, Helm values, smoke checks
 orchestrator/    the SDLC control plane                (planned)
-apps/            target business agent                 (planned)
 ```
+
+Target apps live in their own repositories, starting with `example-webapp`, so the
+orchestrator works across repositories from the start ([D17](docs/decisions.md#d17-target-apps-live-in-their-own-repositories)).
 
 This repository is built the way it describes: every change starts as an OpenSpec
 proposal with delta specs and is implemented only after review.

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 690" width="1240" height="690" role="img" aria-labelledby="title desc">
   <title id="title">Work item lifecycle</title>
-  <desc id="desc">State machine owned by the orchestrator. Spec phase: ticket open, triaged, drafting, awaiting answer, spec review, closed or spec approved. Build and release: implementing, PR review, merged, deployed, done. Human events from any channel are normalized.</desc>
+  <desc id="desc">State machine owned by the orchestrator. Spec phase: ticket open, triaged, drafting, awaiting answer, spec review, closed or spec approved. Build and release: implementing, code review in the same PR with a preview, on dev after the merge into development, released when a release reaches main, done. Human events from any channel are normalized.</desc>
   <style>
     .bg { fill: #ffffff; stroke: #e5e7eb; }
     text { font-family: Inter, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -120,7 +120,7 @@
   <g transform="translate(754,230)" filter="url(#sh)">
     <rect class="c-human" width="176" height="56" rx="12"/>
     <text class="st" x="88" y="25" text-anchor="middle">Spec review</text>
-    <text class="sub" x="88" y="43" text-anchor="middle">spec PR open</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">the PR holds the spec</text>
   </g>
   <g transform="translate(754,120)" filter="url(#sh)">
     <rect class="c-term" width="176" height="56" rx="12"/>
@@ -167,32 +167,32 @@
   </g>
   <g transform="translate(754,420)" filter="url(#sh)">
     <rect class="c-human" width="176" height="56" rx="12"/>
-    <text class="st" x="88" y="25" text-anchor="middle">PR review</text>
-    <text class="sub" x="88" y="43" text-anchor="middle">code PR open</text>
+    <text class="st" x="88" y="25" text-anchor="middle">Code review</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">same PR · preview up</text>
   </g>
   <g transform="translate(494,420)" filter="url(#sh)">
     <rect class="c-sys" width="176" height="56" rx="12"/>
-    <text class="st" x="88" y="25" text-anchor="middle">Merged</text>
-    <text class="sub" x="88" y="43" text-anchor="middle">into the env branch</text>
+    <text class="st" x="88" y="25" text-anchor="middle">On dev</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">development deployed</text>
   </g>
   <g transform="translate(262,420)" filter="url(#sh)">
     <rect class="c-sys" width="176" height="56" rx="12"/>
-    <text class="st" x="88" y="25" text-anchor="middle">Deployed</text>
-    <text class="sub" x="88" y="43" text-anchor="middle">Argo CD synced</text>
+    <text class="st" x="88" y="25" text-anchor="middle">Released</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">main tagged · prod synced</text>
   </g>
   <g transform="translate(40,420)" filter="url(#sh)">
     <rect class="c-term" width="176" height="56" rx="12"/>
     <text class="st" x="88" y="25" text-anchor="middle">Done</text>
-    <text class="sub" x="88" y="43" text-anchor="middle">change archived</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">ticket closed</text>
   </g>
 
   <!-- build & release edges -->
   <line class="edge" x1="1010" y1="448" x2="935" y2="448" marker-end="url(#ah)"/>
-  <text class="lbl" x="972" y="438" text-anchor="middle">code PR</text>
+  <text class="lbl" x="972" y="438" text-anchor="middle">code pushed</text>
   <line class="edge" x1="750" y1="448" x2="675" y2="448" marker-end="url(#ah)"/>
   <text class="lbl" x="712" y="438" text-anchor="middle">human merge</text>
   <line class="edge" x1="490" y1="448" x2="443" y2="448" marker-end="url(#ah)"/>
-  <text class="lbl" x="466" y="438" text-anchor="middle">sync</text>
+  <text class="lbl" x="466" y="438" text-anchor="middle">release</text>
   <line class="edge" x1="258" y1="448" x2="221" y2="448" marker-end="url(#ah)"/>
 
   <path class="edge-h" d="M842,480 C842,528 1102,528 1102,481" marker-end="url(#ahh)"/>

@@ -59,9 +59,9 @@ SDLC на self-hosted стеке.
 2. **Триаж**: агент читает связанные логи (Loki) и LLM-трейсы (Langfuse) и разбирается, что на самом деле сломалось.
 3. **Delta spec**: агент предлагает фикс или фичу как change в [OpenSpec](https://github.com/Fission-AI/OpenSpec) — ревьюируемую *дельту* к текущим спекам, оформленную пулл-реквестом.
 4. **Апрув спеки** *(человек)*: разработчик или product owner апрувит, просит доработать или отвечает на уточняющие вопросы агента — из Plane, Gitea или Mattermost.
-5. **Реализация**: одобренная спека уходит кодинг-агенту, который работает в изолированном Kubernetes Job и открывает PR с кодом.
-6. **Код-ревью** *(человек)*: обычное ревью PR. Бот смёржить не может.
-7. **Деплой**: мёрж в ветку окружения, Argo CD синхронизирует кластер.
+5. **Реализация**: одобренная спека уходит кодинг-агенту, который работает в изолированном Kubernetes Job и пушит код в тот же пулл-реквест. У PR появляется превью-окружение.
+6. **Код-ревью** *(человек)*: обычное ревью PR плюс прогулка по превью. Бот смёржить не может.
+7. **Деплой**: мёрж в `development` доезжает до dev-окружения, а релиз, смёрженный в `main`, — до продакшена. Оба синхронизирует Argo CD ([ветки и окружения](#ветки-и-окружения)).
 8. **Наблюдение**: логи и трейсы порождают следующий сигнал.
 
 <details>
@@ -151,7 +151,7 @@ flowchart LR
 - **Один источник правды.** Статус в Plane, ревью в Gitea и кнопка в Mattermost ведут к одному и тому же переходу.
 - **Без эхо-петель.** События, которые породил сам бот, отбрасываются. Иначе зеркалирование статуса в Plane вызвало бы ещё один переход.
 - **Без гонок.** Каждое событие несёт ревизию спеки (head SHA пулл-реквеста), к которой относится. Устаревший апрув игнорируется, и его автору приходит уведомление.
-- **Корреляция.** Одна запись связывает тикет в Plane, change в OpenSpec, PR спеки, PR кода, тред в Mattermost и тред в LangGraph.
+- **Корреляция.** Одна запись связывает тикет в Plane, change в OpenSpec, ветку и её PR, превью, тред в Mattermost и тред в LangGraph.
 - **Возобновляемые уточнения.** Когда агент не уверен, он спрашивает в тикете и в треде чата и ждёт. Ответ из любого места его возобновляет.
 
 <details>
@@ -165,18 +165,71 @@ stateDiagram-v2
     Triaged --> Drafting
     Drafting --> AwaitingClarification: needs info
     AwaitingClarification --> Drafting: answer
-    Drafting --> SpecReview: spec PR opened
+    Drafting --> SpecReview: PR opened with the spec
     SpecReview --> Drafting: request changes
     SpecReview --> Closed: reject
     SpecReview --> SpecApproved: approve
     SpecApproved --> Implementing: dispatch k8s Job
-    Implementing --> PRReview: code PR opened
-    PRReview --> Implementing: changes requested
-    PRReview --> Merged: human merge
-    Merged --> Deployed: Argo CD sync
-    Deployed --> Done: archive change · close ticket
+    Implementing --> CodeReview: code pushed to the same PR · preview up
+    CodeReview --> Implementing: changes requested
+    CodeReview --> OnDev: human merge into development
+    OnDev --> Released: human release · main tagged
+    Released --> Done: close ticket
     Closed --> [*]
     Done --> [*]
+```
+
+</details>
+
+## Ветки и окружения
+
+![Ветки и окружения](docs/diagrams/environments.svg)
+
+Цикл встраивается в обычную модель веток, а не заменяет её. Первая цель — **`example-webapp`**:
+небольшое React-приложение с формой логина-заглушкой и экранами на моковых данных. У него свой
+репозиторий в Gitea, а задачи ведутся в проекте `EWA` в Plane.
+
+| Ветка | Что в ней | Окружение | Когда деплоится |
+|---|---|---|---|
+| `feat/EWA-12_<slug>` | работа по одному тикету, ответвлена от `development` | `ewa-12.qa.example-webapp.sdlc.internal` (превью) | код уже в PR, и CI зелёный |
+| `development` | смёрженные фичи | `dev.example-webapp.sdlc.internal` | на каждый мёрж |
+| `main` | релизы | `example-webapp.sdlc.internal` | человек мёржит релизный PR |
+
+- **Один тикет — один id.** Оркестратор называет ветку по тикету в Plane, поэтому у тикета,
+  ветки, PR и хоста превью один и тот же id. Ссылка на превью приходит в тикет.
+- **Один PR, два гейта.** Агент открывает PR в `development`, в котором поначалу только
+  change в OpenSpec. Апрув в Plane запускает реализацию, и код попадает в тот же PR. Там же агент
+  архивирует change, так что в смёрженном диффе видно и то, как изменились спеки. Ревьюит и мёржит
+  инженер.
+- **Превью живёт, пока жив PR.** ApplicationSet в Argo CD следит за PR репозитория и деплоит
+  те, на которые оркестратор повесил метку. Закрыли PR — окружение удалилось.
+- **Релиз — это кнопка.** Человек мёржит `development` в `main` в Gitea. CI ставит тег
+  следующей минорной версии (1.5.0 → 1.6.0; мажорную поднимают руками) и публикует релиз со
+  списком тикетов, а оркестратор переводит эти тикеты в Released.
+- **Тег образа — SHA коммита, везде.** CI собирает каждый запушенный коммит один раз, а Argo CD
+  деплоит тот SHA, который синхронизировал, так что ни один бот не коммитит теги образов обратно
+  в git. Версия — это ярлык на уже собранном образе.
+- **Бот не может мёржить.** `development` и `main` защищены. Токен агента пушит только в
+  feature-ветки.
+
+> [!NOTE]
+> Этот флоу — дизайн шага 1 роадмапа, он ещё не построен. Превью нужны wildcard-имена на
+> хосте, а `/etc/hosts` так не умеет; как это решить, покажет спайк
+> ([открытые вопросы](docs/decisions.md#open)).
+
+<details>
+<summary>Исходник Mermaid</summary>
+
+```mermaid
+flowchart LR
+    ticket([Plane EWA-12]) -- agent branches off --> feat[feat/EWA-12_add-filters]
+    feat -- "PR: spec first, code after approval" --> merge{{merge<br/>engineer}}
+    merge --> dev[development]
+    dev -- release PR --> release{{release<br/>a button in Gitea}}
+    release --> main[main<br/>tag v1.6.0]
+    feat -. "code in the PR, CI green" .-> preview[(preview<br/>ewa-12.qa.example-webapp)]
+    dev -. every merge .-> devenv[(dev<br/>dev.example-webapp)]
+    main -. every release .-> prod[(production<br/>example-webapp)]
 ```
 
 </details>
@@ -283,15 +336,16 @@ pre-push хук, который не пропускает другие ветк�
 Каждый шаг — один change в OpenSpec: сначала спека, потом реализация.
 
 - [x] **0. Ядро платформы**: k3s, Argo CD app-of-apps, CloudNativePG, Gitea, Plane CE ([change](openspec/changes/archive/2026-11-01-platform-core/proposal.md))
-- [ ] **1. Цикл спек (только Plane)**: тикет → PR спеки → уточнения / апрув через статус тикета
-- [ ] **2. Больше каналов**: кнопки и треды в Mattermost, ревью PR в Gitea
-- [ ] **3. Фаза реализации**: одобренная спека → OpenCode в k8s Job → PR с кодом → мёрж человеком, CI на раннере Gitea
-- [ ] **4. Целевое приложение**: бизнес-агент на deepagents с трейсингом в Langfuse
-- [ ] **5. Триаж**: логи (Loki) и трейсы (Langfuse) в контексте агента, пишущего спеки
-- [ ] **6. Автотикеты**: аномалии сами заводят тикеты
-- [ ] **7. Непрерывный деплой и SSO**: синк Argo CD по окружениям, Keycloak
+- [ ] **1. Цикл поставки на `example-webapp`**: тикет в Plane → спека в PR → апрув в тикете → код от OpenCode в k8s Job в том же PR → мёрж человеком, плюс [превью, dev и продакшен](#ветки-и-окружения), релизы и CI на раннере Gitea
+- [ ] **2. Целевой агент**: бизнес-агент на deepagents с трейсингом в Langfuse, в своём репозитории
+- [ ] **3. Триаж**: логи (Loki) и трейсы (Langfuse) в контексте агента, пишущего спеки
+- [ ] **4. Больше каналов**: кнопки и треды в Mattermost, ревью PR в Gitea
+- [ ] **5. Автотикеты**: аномалии сами заводят тикеты
+- [ ] **6. SSO**: Keycloak
 
-Как только заработает шаг 1, изменения самого оркестратора пойдут через оркестратор.
+Порядок меняется по ходу дела. Один раз его уже перетасовали: первым идёт полный цикл на простом
+приложении, потому что именно его меряет главная метрика. Как только заработает шаг 1, изменения
+самого оркестратора пойдут через оркестратор.
 
 ## Как поймём, что работает
 
@@ -310,8 +364,10 @@ openspec/        спеки (источник правды), changes в рабо
 docs/            решения и диаграммы
 platform/        бутстрап, Argo CD apps, Helm values, smoke-проверки
 orchestrator/    SDLC control plane                  (в планах)
-apps/            целевой бизнес-агент                (в планах)
 ```
+
+Целевые приложения живут в своих репозиториях, начиная с `example-webapp`, так что оркестратор
+с самого начала работает с несколькими репозиториями ([D17](docs/decisions.md#d17-target-apps-live-in-their-own-repositories)).
 
 Репозиторий строится так же, как в нём описано: каждое изменение начинается как
 OpenSpec proposal с delta specs и реализуется только после ревью.

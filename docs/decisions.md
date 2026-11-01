@@ -105,6 +105,8 @@ closely.
 OpenSpec root.
 **Consequence.** One history, and specs for infrastructure and for the loop live next to each
 other. Splitting later is a `git filter-repo` away.
+**Revised.** Target apps moved to their own repositories, see D17. The platform and the
+orchestrator stay here.
 
 ### D12. Bootstrap from the local clone, then Argo CD adopts
 
@@ -170,9 +172,69 @@ creates no such interface, because on several nodes it would give every node the
 Nothing under `platform/apps/` refers to it, so moving to the cloud touches only the bootstrap.
 Specified in change `platform-core`.
 
+### D17. Target apps live in their own repositories
+
+Status: **proposed** (roadmap step 1).
+**Context.** D11 put target apps under `apps/` in this repository. The agent would then work
+next to the platform's specs, in the repository Argo CD tracks for the platform. Companies
+also rarely keep a product in one repository with its delivery tooling.
+**Decision.** Each target app gets its own Gitea repository with its own `openspec/`, starting
+with `example-webapp` (Plane project `EWA`). The orchestrator maps a Plane project to a
+repository in its configuration.
+**Consequence.** The orchestrator is multi-repository from the start, and adding a product is
+a configuration entry. The agent's context is one small repository. Changes that span the
+platform and an app become two changes.
+
+### D18. Feature branches, `development` and `main`, each with an environment
+
+Status: **proposed** (roadmap step 1).
+**Context.** The loop has to fit how teams already ship: review before integration, an
+integration environment, deliberate releases.
+**Decision.** The agent branches `feat/EWA-12_<slug>` off `development` and opens a PR into
+it. A PR whose code is in place and whose CI is green gets a preview at
+`ewa-12.qa.example-webapp.sdlc.internal`, deployed by an Argo CD ApplicationSet with the
+pull request generator and removed when the PR closes. `development` deploys to
+`dev.example-webapp.sdlc.internal` on every merge. A person releases by merging `development`
+into `main` in Gitea; CI then tags the next minor version, publishes the release, and `main`
+deploys to `example-webapp.sdlc.internal`. Both long-lived branches are protected.
+**Consequence.** The reviewer gets a running preview at the second gate, not only a diff. The
+host name is derived from the branch name, so the orchestrator's naming is a contract with the
+ApplicationSet. Previews need wildcard names on the host (see Open), and a CI runner that
+executes agent-written code (`npm install` included), which must run without privileged
+Docker-in-Docker and without secrets beyond a registry push token.
+
+### D19. The image tag is the commit SHA
+
+Status: **proposed** (roadmap step 1).
+**Context.** GitOps needs the deployed image to follow from git. The usual ways are a bot
+committing new tags back to git, or a separate image updater.
+**Decision.** CI tags every image with the commit SHA it was built from. Argo CD passes the
+revision it synced (`$ARGOCD_APP_REVISION`) to the chart as the tag. Previews use the PR's
+head SHA. A release adds the version as a second tag on the same image.
+**Consequence.** No write-back commits, no extra controller, and one rule for all three
+environments. Argo CD can sync before CI has pushed the image; the pod then retries the pull
+until the image appears.
+
+### D20. One pull request per work item: the spec first, then the code
+
+Status: **proposed** (roadmap step 1).
+**Context.** Separate spec and code PRs need a bot that merges the spec PR, or a code PR that
+depends on an unmerged one.
+**Decision.** The agent opens one PR with only the OpenSpec change. Approving the ticket
+starts the implementation, which pushes the code and the archived change to the same branch.
+An engineer merges the PR.
+**Consequence.** The bot never merges anything. The PR history shows the spec the code was
+built against, and stale-approval checks compare against the head SHA at approval time.
+Approval in Gitea itself can come later as another channel (roadmap step 4).
+
 ---
 
 ### Open
 
 - **Free model viability.** Long OpenSpec workflows may exceed what free models handle
   reliably. Langfuse traces of harness runs will decide.
+- **Wildcard names on the host.** Previews create host names on the fly, and the managed
+  `/etc/hosts` block from D13 can't hold wildcards. The candidate is a small local resolver for
+  `*.sdlc.internal` that systemd-resolved queries for that domain only, which would replace the
+  `/etc/hosts` block. The VPN client on the author's machine intercepts DNS traffic, so a spike
+  decides whether this works before D13 is revised.
