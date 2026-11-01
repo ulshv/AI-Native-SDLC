@@ -229,7 +229,9 @@ publishing, remove the `github` remote.
   gitleaks the hook says so and checks the exact values only.
 
 Pushes to Gitea are not checked. `git push --no-verify` skips the hook: use it only if you are
-sure.
+sure. The two secret checks live in [`secrets-leak-check.sh`](secrets-leak-check.sh), which
+also runs by hand: with no argument it checks the whole history of `HEAD` and the working
+tree, uncommitted and untracked files included; with a revision range, only those commits.
 
 **When the hook refuses a push**, the secret is in a commit on `main`, so it is in Gitea too.
 Treat it as leaked: rotate it in `secrets.env` and re-run the bootstrap (see Secrets). Then
