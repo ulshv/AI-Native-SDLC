@@ -37,10 +37,12 @@ familiarity and its official Helm chart and MCP server.
 
 **Context.** A ticket can wait days for a human, while a coding run takes minutes.
 **Decision.** The orchestrator (ours, long-lived) is a LangGraph graph per work item with a
-Postgres checkpointer. Human gates are `interrupt()` and resume. The harness
+Postgres checkpointer. Human gates are `interrupt()` and resume (revised below). The harness
 (short-lived) sits behind an `Executor` interface.
-**Consequence.** The harness can start as OpenCode with free models and later be swapped for
+**Consequence.** The harness can start as OpenCode with cheap models and later be swapped for
 a custom LangGraph harness without touching workflow logic.
+**Revised.** Human gates are not `interrupt()` calls. Every event runs the graph one step from
+the saved state, and the phase is an explicit field, see D21.
 
 ### D5. The harness runs as a Kubernetes Job, not a CI job
 
@@ -67,7 +69,8 @@ systems.
 agent with write access to code.
 **Decision.** Content-level guardrails in the orchestrator (injection classifiers, PII
 handling, provenance tags), plus blast-radius limits on the platform (repo-scoped tokens,
-minimal RBAC, egress NetworkPolicy, no production secrets, a bot that cannot merge).
+minimal RBAC, egress NetworkPolicy, no production secrets, agent Jobs that cannot merge, and
+merges into `main` by people only; see D22).
 **Consequence.** Classifiers are probabilistic, which is why the platform layer must not
 rely on them.
 
@@ -196,7 +199,8 @@ it. A PR whose code is in place and whose CI is green gets a preview at
 pull request generator and removed when the PR closes. `development` deploys to
 `dev.example-webapp.sdlc.internal` on every merge. A person releases by merging `development`
 into `main` in Gitea; CI then tags the next minor version, publishes the release, and `main`
-deploys to `example-webapp.sdlc.internal`. Both long-lived branches are protected.
+deploys to `example-webapp.sdlc.internal`. Both long-lived branches are protected; who may
+merge into which is D22.
 **Consequence.** The reviewer gets a running preview at the second gate, not only a diff. The
 host name is derived from the branch name, so the orchestrator's naming is a contract with the
 ApplicationSet. Previews need wildcard names on the host (see Open), and a CI runner that
@@ -220,19 +224,69 @@ until the image appears.
 Status: **proposed** (roadmap step 1).
 **Context.** Separate spec and code PRs need a bot that merges the spec PR, or a code PR that
 depends on an unmerged one.
-**Decision.** The agent opens one PR with only the OpenSpec change. Approving the ticket
-starts the implementation, which pushes the code and the archived change to the same branch.
-An engineer merges the PR.
-**Consequence.** The bot never merges anything. The PR history shows the spec the code was
-built against, and stale-approval checks compare against the head SHA at approval time.
-Approval in Gitea itself can come later as another channel (roadmap step 4).
+**Decision.** The agent opens one PR with only the OpenSpec change. An approval (a comment to
+`@agent` in Plane or Gitea, the ticket status, or an Approve review) starts the implementation,
+which pushes the code and the archived change to the same branch. An engineer merges the PR or
+asks `@agent` to (D22).
+**Consequence.** Nothing has to merge a spec PR on its own. The PR history shows the spec the
+code was built against, and stale-approval checks, planned after step 1, compare against the
+head SHA the agent reported.
+
+### D21. One `@agent`: mentions in, intents out, code decides
+
+Status: **proposed** (roadmap step 1).
+**Context.** People approve, ask for changes and answer questions in plain words, in whichever
+tool they are in, at any moment. A graph that pauses in `interrupt()` expects one known answer
+at one known point, and a node that resumes runs again from its start, repeating its side
+effects.
+**Decision.** The orchestrator appears as one agent, `@agent`, with a service account in each
+system. It takes a ticket only when the ticket is assigned to it, and reads only comments that
+mention it. A model turns such a comment into an intent (`approve`, `request_changes`, `answer`,
+`merge`, `prepare_release`); a policy in code decides whether the intent is allowed, from who
+asked, their role and the work item's phase. Explicit signals (a ticket status, an Approve
+review) skip the model and meet the same policy. Every event runs the graph one step from the
+state saved in the checkpointer; the phase is an explicit field, and the messages are context
+for the model.
+**Consequence.** A misread comment can cost a clarifying question, never an action the policy
+forbids. Nothing stays suspended, so a restart loses nothing and an event can arrive at any
+time. People need one identity across Plane and Gitea, so the orchestrator keeps a mapping of
+accounts to people and roles.
+
+### D22. The agent merges into `development` on request; only people merge into `main`
+
+Status: **proposed** (roadmap step 1).
+**Context.** "@agent, merge it into dev" is convenient, but a gate that rests on a model's
+reading of a comment, or on our own code, is weaker than one the git server enforces.
+**Decision.** Gitea's branch protection decides. `development` accepts merges from the
+orchestrator's account, which merges only when D21's policy allows a person's request. `main`
+accepts merges only from people on a merge allowlist, after a human approval in the PR. For a
+release, the agent at most opens a PR from `development` into `main` with draft release notes
+and posts the link. Agent Jobs push with a second account, `agent-runner`, which is on no merge
+allowlist.
+**Consequence.** Production changes only by a person's hand, even if the model, the policy or
+the orchestrator is wrong. A prompt injection inside a Job can push to a feature branch at
+worst. To people the two accounts look like one agent, since only `agent` writes comments.
+
+### D23. Models through a router, chosen per task
+
+Status: **proposed** (roadmap step 1).
+**Context.** Free tiers can hit rate limits in the middle of a demo, and different tasks need
+different models.
+**Decision.** OpenCode reaches models through RouterAI, an OpenAI-compatible router with a
+spending limit. The provider and the model are configuration of the orchestrator, passed to
+each Job. DeepSeek V4 Flash serves tests and the first demos; coding and review are meant for
+GLM-5.3 or Kimi K3-class models. Jobs get their own minimal OpenCode configuration with no
+plugins.
+**Consequence.** Switching a model is a configuration change. The aim is code of frontier-model
+quality at a fraction of the price; the cost and rework metrics will show whether it holds.
+Job egress has to reach the router.
 
 ---
 
 ### Open
 
-- **Free model viability.** Long OpenSpec workflows may exceed what free models handle
-  reliably. Langfuse traces of harness runs will decide.
+- **Cheap models against quality.** Long OpenSpec workflows may exceed what cheap open models
+  handle reliably. Langfuse traces of harness runs and the rework rate will decide.
 - **Wildcard names on the host.** Previews create host names on the fly, and the managed
   `/etc/hosts` block from D13 can't hold wildcards. The candidate is a small local resolver for
   `*.sdlc.internal` that systemd-resolved queries for that domain only, which would replace the

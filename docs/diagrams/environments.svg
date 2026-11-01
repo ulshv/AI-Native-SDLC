@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 796" width="1240" height="796" role="img" aria-labelledby="title desc">
   <title id="title">Branches and environments</title>
-  <desc id="desc">One ticket from request to release, in three lanes. Ticket statuses in Plane: spec it, drafting, spec review, approved, implementing, code review, on dev, released. Git: the agent branches feat/EWA-12 off development, commits the spec, opens a PR, a human approves the spec, the agent commits code, CI builds an image and the PR gets a preview environment; an engineer merges into development, which deploys to dev; a person merges a release into main, tagged v1.6.0, which deploys to production. Environments: preview per PR, dev from development, production from main.</desc>
+  <desc id="desc">One ticket from request to release, in three lanes. Ticket statuses in Plane: assigned to @agent, drafting, spec review, approved, implementing, code review, on dev, released. Git: the agent branches feat/EWA-12 off development, commits the spec, opens a PR, a human approves the spec, the agent commits code, CI builds an image and the PR gets a preview environment; an engineer, or the agent at their request, merges into development, which deploys to dev; the agent opens a release PR and a person merges it into main, tagged v1.6.0, which deploys to production. Environments: preview per PR, dev from development, production from main.</desc>
   <style>
     .bg { fill: #ffffff; stroke: #e5e7eb; }
     text { font-family: Inter, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -129,7 +129,7 @@
     <rect class="c-sys"   x="918" y="128" width="96" height="30" rx="15"/>
     <rect class="c-sys"  x="1076" y="128" width="96" height="30" rx="15"/>
   </g>
-  <text class="cst" x="220" y="147.5" text-anchor="middle">Spec it</text>
+  <text class="cst" x="220" y="147.5" text-anchor="middle">→ @agent</text>
   <text class="cst" x="334" y="147.5" text-anchor="middle">Drafting</text>
   <text class="cst" x="448" y="147.5" text-anchor="middle">Spec review</text>
   <text class="cst" x="562" y="147.5" text-anchor="middle">Approved</text>
@@ -179,7 +179,7 @@
 
   <path class="gate" d="M562,411 L573,422 L562,433 L551,422 Z"/>
   <text class="lbl-h" x="562" y="450" text-anchor="middle">spec approved</text>
-  <text class="sub" x="562" y="466" text-anchor="middle">in Plane, at the PR head</text>
+  <text class="sub" x="562" y="466" text-anchor="middle">via @agent or a status</text>
 
   <circle class="n-agent" cx="676" cy="422" r="7.5"/>
   <text class="lbl" x="676" y="450" text-anchor="middle">code + archive</text>
@@ -198,7 +198,7 @@
   <rect class="c-dev" x="988" y="335" width="58" height="22" rx="11"/>
   <text class="chip-t t-dev" x="1017" y="350" text-anchor="middle">→ dev</text>
   <text class="lbl-h" x="982" y="378">merge</text>
-  <text class="sub" x="982" y="394">engineer, in Gitea</text>
+  <text class="sub" x="982" y="394">engineer, or @agent on request</text>
 
   <!-- release into main -->
   <path class="gate" d="M1124,259 L1135,270 L1124,281 L1113,270 Z"/>
@@ -207,7 +207,7 @@
   <rect class="c-prod" x="1144" y="259" width="58" height="22" rx="11"/>
   <text class="chip-t t-prod" x="1173" y="274" text-anchor="middle">→ prod</text>
   <text class="lbl-h" x="1086" y="300" text-anchor="end">release</text>
-  <text class="sub" x="1086" y="316" text-anchor="end">a button in Gitea</text>
+  <text class="sub" x="1086" y="316" text-anchor="end">PR by @agent, merged by a person</text>
 
   <!-- ===== environments ===== -->
   <g filter="url(#sh)">
@@ -249,5 +249,5 @@
   <rect class="c-prev" x="594" y="713" width="300" height="27" rx="13.5"/><text class="chip-t mono t-prev" x="744" y="731" text-anchor="middle">ewa-12.qa.example-webapp.sdlc.internal</text>
   <line class="edge" x1="902" y1="726.5" x2="930" y2="726.5" marker-end="url(#ah)"/>
   <rect class="c-prod" x="938" y="713" width="170" height="27" rx="13.5"/><text class="chip-t t-prod" x="1023" y="731" text-anchor="middle">release notes of v1.6.0</text>
-  <text class="txt" x="44" y="760">The image tag is the commit SHA everywhere, and the version is only a label · the bot pushes to feature branches and cannot merge · closing the PR removes its preview</text>
+  <text class="txt" x="44" y="760">The image tag is the commit SHA everywhere, and the version is only a label · agent Jobs cannot merge, and only people merge into main · closing the PR removes its preview</text>
 </svg>

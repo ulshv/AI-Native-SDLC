@@ -51,139 +51,144 @@ SDLC на self-hosted стеке.
 > цикл — следующий шаг [роадмапа](#роадмап). Справляются ли агенты с реальными продуктами
 > с приемлемым качеством и ценой — как раз это и покажут [метрики](#как-поймём-что-работает).
 
-## Цикл
+## Как это работает, на примере
 
-![AI-native цикл поставки](docs/diagrams/loop.svg)
+![Как это работает, на примере](docs/diagrams/example_ru.svg)
 
-1. **Сигнал**: человек заводит тикет, или аномалия в логах/трейсах создаёт его автоматически.
-2. **Триаж**: агент читает связанные логи (Loki) и LLM-трейсы (Langfuse) и разбирается, что на самом деле сломалось.
-3. **Delta spec**: агент предлагает фикс или фичу как change в [OpenSpec](https://github.com/Fission-AI/OpenSpec) — ревьюируемую *дельту* к текущим спекам, оформленную пулл-реквестом.
-4. **Апрув спеки** *(человек)*: разработчик или product owner апрувит, просит доработать или отвечает на уточняющие вопросы агента — из Plane, Gitea или Mattermost.
-5. **Реализация**: одобренная спека уходит кодинг-агенту, который работает в изолированном Kubernetes Job и пушит код в тот же пулл-реквест. У PR появляется превью-окружение.
-6. **Код-ревью** *(человек)*: обычное ревью PR плюс прогулка по превью. Бот смёржить не может.
-7. **Деплой**: мёрж в `development` доезжает до dev-окружения, а релиз, смёрженный в `main`, — до продакшена. Оба синхронизирует Argo CD ([ветки и окружения](#ветки-и-окружения)).
-8. **Наблюдение**: логи и трейсы порождают следующий сигнал.
+Product owner хочет фильтровать заказы по статусу на дашборде `example-webapp`. Вот весь путь
+глазами участников. *(Это целевой флоу шага 1 роадмапа.)* Любое из этих сообщений могло бы
+прийти и из Plane, и из Mattermost, и комментом в Gitea, а агент отвечает там, где его спросили.
+
+1. **Тикет.** Product owner заводит EWA-12 в Plane и назначает его на `@agent`. Больше ничего
+   настраивать не нужно.
+2. **Вопрос.** Агент не уверен, должен ли фильтр переживать перезагрузку страницы, поэтому
+   спрашивает в тикете и останавливается. Product owner отвечает комментом с упоминанием
+   `@agent`.
+3. **Спека.** Job пишет change в OpenSpec, а агент открывает PR #34 в `development`, где пока
+   только спека. Тикет переходит в Spec review.
+4. **Апрув.** «@agent выглядит хорошо, поехали». Модель понимает это как апрув, а код проверяет,
+   что product owner на этом этапе может апрувить спеку. Начинается реализация.
+5. **Код и превью.** Код попадает в тот же PR, CI проходит, и агент кидает ссылку на превью.
+   Инженер в ревью в Gitea просит пустое состояние. Агент отвечает «Implementing a fix», а через
+   несколько минут — «Fix is ready, have a look» со ссылкой на обновлённое превью. Инженер пишет
+   «@agent ок, мёржи в dev».
+6. **Релиз.** В чате product owner просит агента подготовить релиз. Агент открывает релизный
+   PR #35 в `main` с черновиком release notes. Смёржить его может только человек: это делает
+   инженер, CI ставит тег v1.6.0, продакшен обновляется, а EWA-12 становится Released.
+
+Никто не уходил из привычных инструментов, и ничего не попало в продакшен без человека.
 
 <details>
 <summary>Исходник Mermaid</summary>
 
 ```mermaid
-flowchart LR
-    signal([Signal<br/>logs · traces · human]) --> ticket[Ticket<br/>Plane]
-    ticket --> triage[Triage agent<br/>Loki + Langfuse]
-    triage --> spec[Delta spec<br/>OpenSpec change → spec PR]
-    spec --> gate1{{Spec approval<br/>human}}
-    gate1 -- clarify / request changes --> spec
-    gate1 -- approve --> impl[Implementation<br/>OpenCode in k8s Job]
-    impl --> gate2{{Code review<br/>human}}
-    gate2 -- changes requested --> impl
-    gate2 -- merge --> deploy[Deploy<br/>Argo CD]
-    deploy -- observe --> signal
+sequenceDiagram
+    actor PO as Product owner
+    actor EN as Инженер
+    participant Plane
+    participant Gitea
+    participant Chat as Mattermost
+    participant A as @agent
+    Note over Plane,Chat: любое сообщение может прийти из Plane, Mattermost или комментом в Gitea
+    PO->>Plane: EWA-12 «фильтр заказов по статусу», исполнитель @agent
+    Plane->>A: назначен
+    A->>Plane: Фильтр должен переживать перезагрузку страницы?
+    Note over A: Needs info, останавливается
+    PO->>Plane: @agent нет, пусть сбрасывается
+    A->>Gitea: Job пишет спеку, PR #34 в development
+    A->>Plane: Спека готова: PR #34, жду ревью
+    PO->>Plane: @agent выглядит хорошо, поехали
+    Note over A: намерение approve, policy: PO может апрувить
+    A->>Gitea: Job пушит код в PR #34, превью поднято
+    A->>Plane: Попробуйте: ewa-12.qa.example-webapp.sdlc.internal
+    EN->>Gitea: ревью: @agent добавь пустое состояние
+    A->>Gitea: Делаю фикс
+    Note over A: Job пушит фикс
+    A->>Gitea: Фикс готов, смотрите: ewa-12.qa.example-webapp.sdlc.internal
+    EN->>Gitea: @agent ок, мёржи в dev
+    Note over A: намерение merge, policy: инженер может
+    A->>Gitea: мёрж PR #34 в development
+    PO->>Chat: @agent давай готовить релиз
+    A->>Gitea: релизный PR #35 в main
+    A->>Chat: Релиз 1.6.0 готов: PR #35
+    EN->>Gitea: апрувит и мёржит PR #35
+    Note over Gitea: CI ставит тег v1.6.0, продакшен обновляется
+    A->>Plane: EWA-12 Released
 ```
 
 </details>
 
 ## Архитектура
 
-![Архитектура](docs/diagrams/architecture.svg)
+![Архитектура](docs/diagrams/architecture_ru.svg)
+
+**ai-native-sdlc — это платформа, а не продукт.** В этом репозитории живут платформа и
+оркестратор. Продукты, с которыми он работает, — это собственные проекты компании: у каждого
+свой Git-репозиторий и свой проект в трекере в том же кластере, и один оркестратор обслуживает
+сколько угодно таких проектов. Подключить продукт — это одна запись в конфигурации, которая
+связывает проект в трекере с репозиторием ([D17](docs/decisions.md#d17-target-apps-live-in-their-own-repositories)).
+Первый такой продукт — `example-webapp`. То же с инструментами, в которых работают люди: здесь
+развёрнуты Plane, Mattermost и Gitea, а Jira, Trello, Slack, Telegram, GitLab или GitHub
+подключались бы ещё одним адаптером перед тем же оркестратором.
 
 Три слоя:
 
 | Слой | Что это | Кто делает |
 |---|---|---|
-| **Целевое приложение** | Бизнес-агент (LangGraph / deepagents), которого обслуживает цикл. Пишет логи и трейсы в Langfuse. | мы |
-| **SDLC control plane** | Оркестратор, адаптеры каналов, guardrails и executor, запускающий агентские джобы. | мы |
-| **Платформа** | Трекер, git и CI, чат, observability, GitOps, identity — всё на k3s. | готовое, конфигурируется как код |
+| **Целевые проекты** | Продукты компании, сколько бы их ни было, каждый в своём репозитории со своими спеками в OpenSpec. Сначала `example-webapp`, потом бизнес-агент на deepagents, который пишет логи и трейсы в Langfuse. | продуктовые команды вместе с агентом |
+| **SDLC control plane** | Оркестратор, адаптеры каналов, guardrails и executor, запускающий агентские джобы. | мы, в этом репозитории |
+| **Платформа** | Трекер, git и CI, чат, observability, GitOps, identity — всё на k3s. | готовое, конфигурируется как код в этом репозитории |
 
 Две части control plane намеренно разделены:
 
 - **Оркестратор** (долгоживущий, наш): LangGraph-граф на каждый work item с Postgres-
-  чекпоинтером. Может днями ждать человека: человеческие гейты — это `interrupt()` и resume.
+  чекпоинтером. Может днями ждать человека и ничего при этом не держит открытым: каждое событие
+  (коммент, смена статуса, завершённый Job) прогоняет граф на один шаг от сохранённого
+  состояния. Фаза work item — явное поле, а не вывод из переписки.
 - **Харнесс** (короткоживущий, заменяемый): кодинг-агент, который делает работу в
-  Kubernetes Job. Стартуем с **OpenCode на бесплатных моделях** за интерфейсом `Executor`,
-  поэтому позже его можно заменить на свой LangGraph-харнесс, не трогая оркестратор.
+  Kubernetes Job. Стартуем с **OpenCode** и моделями через OpenAI-совместимый роутер, за
+  интерфейсом `Executor`, поэтому позже его можно заменить на свой LangGraph-харнесс, не трогая
+  оркестратор.
 
 <details>
 <summary>Исходник Mermaid</summary>
 
 ```mermaid
 flowchart LR
-    subgraph people[People]
+    subgraph people[Люди]
         po([Product owner])
-        dev([Engineer])
+        dev([Инженер])
     end
-    subgraph surfaces[Collaboration surfaces]
-        plane[Plane CE<br/>tickets]
-        gitea[Gitea<br/>spec & code PRs]
-        mm[Mattermost<br/>summaries · quick approvals]
+    subgraph surfaces[Инструменты команды]
+        plane[Plane / Jira / Trello<br/>тикеты]
+        gitea[Gitea / GitLab / GitHub<br/>PR со спеками и кодом]
+        mm[Mattermost / Slack / Telegram<br/>сводки · быстрые апрувы]
     end
     subgraph cp[SDLC control plane]
-        adapters[Channel adapters] --> norm[Event normalizer]
-        norm --> orch[Orchestrator<br/>LangGraph · Postgres checkpointer]
+        adapters[Адаптеры каналов] --> norm[Нормализатор событий]
+        norm --> orch[Оркестратор<br/>LangGraph · Postgres-чекпоинтер]
         orch --> guard[Guardrails]
         guard --> exec[Executor]
     end
-    subgraph runtime[Execution & runtime]
-        job[k8s Job<br/>OpenCode harness]
-        app[Target app<br/>deepagents]
+    subgraph runtime[Исполнение и рантайм]
+        job[k8s Job<br/>харнесс OpenCode]
+        app[Целевые проекты<br/>example-webapp · агент · любой репо]
         obs[Loki + Grafana<br/>Langfuse]
     end
     po & dev <--> plane & gitea & mm
-    plane & gitea & mm <-- webhooks / API --> adapters
+    plane & gitea & mm <-- вебхуки / API --> adapters
     exec --> job
-    job -- branch + PR --> gitea
+    job -- ветка + PR --> gitea
     app --> obs
-    obs -- context for triage --> orch
-    argo[Argo CD] -- deploys --> app
-```
-
-</details>
-
-## Жизненный цикл work item
-
-![Жизненный цикл work item](docs/diagrams/lifecycle.svg)
-
-Состоянием каждого work item владеет оркестратор. Plane, Gitea и Mattermost — это
-**адаптеры**: каждый превращает свои вебхуки в общее событие
-(`approve | request_changes | reject | answer`) и отражает состояние обратно. Поэтому
-легко соблюдать такие правила:
-
-- **Один источник правды.** Статус в Plane, ревью в Gitea и кнопка в Mattermost ведут к одному и тому же переходу.
-- **Без эхо-петель.** События, которые породил сам бот, отбрасываются. Иначе зеркалирование статуса в Plane вызвало бы ещё один переход.
-- **Без гонок.** Каждое событие несёт ревизию спеки (head SHA пулл-реквеста), к которой относится. Устаревший апрув игнорируется, и его автору приходит уведомление.
-- **Корреляция.** Одна запись связывает тикет в Plane, change в OpenSpec, ветку и её PR, превью, тред в Mattermost и тред в LangGraph.
-- **Возобновляемые уточнения.** Когда агент не уверен, он спрашивает в тикете и в треде чата и ждёт. Ответ из любого места его возобновляет.
-
-<details>
-<summary>Исходник Mermaid</summary>
-
-```mermaid
-stateDiagram-v2
-    direction LR
-    [*] --> TicketOpen
-    TicketOpen --> Triaged: triage agent
-    Triaged --> Drafting
-    Drafting --> AwaitingClarification: needs info
-    AwaitingClarification --> Drafting: answer
-    Drafting --> SpecReview: PR opened with the spec
-    SpecReview --> Drafting: request changes
-    SpecReview --> Closed: reject
-    SpecReview --> SpecApproved: approve
-    SpecApproved --> Implementing: dispatch k8s Job
-    Implementing --> CodeReview: code pushed to the same PR · preview up
-    CodeReview --> Implementing: changes requested
-    CodeReview --> OnDev: human merge into development
-    OnDev --> Released: human release · main tagged
-    Released --> Done: close ticket
-    Closed --> [*]
-    Done --> [*]
+    obs -- контекст для триажа --> orch
+    argo[Argo CD] -- деплоит --> app
 ```
 
 </details>
 
 ## Ветки и окружения
 
-![Ветки и окружения](docs/diagrams/environments.svg)
+![Ветки и окружения](docs/diagrams/environments_ru.svg)
 
 Цикл встраивается в обычную модель веток, а не заменяет её. Первая цель — **`example-webapp`**:
 небольшое React-приложение с формой логина-заглушкой и экранами на моковых данных. У него свой
@@ -198,19 +203,24 @@ stateDiagram-v2
 - **Один тикет — один id.** Оркестратор называет ветку по тикету в Plane, поэтому у тикета,
   ветки, PR и хоста превью один и тот же id. Ссылка на превью приходит в тикет.
 - **Один PR, два гейта.** Агент открывает PR в `development`, в котором поначалу только
-  change в OpenSpec. Апрув в Plane запускает реализацию, и код попадает в тот же PR. Там же агент
-  архивирует change, так что в смёрженном диффе видно и то, как изменились спеки. Ревьюит и мёржит
-  инженер.
+  change в OpenSpec. Апрув (коммент для `@agent`, статус тикета или ревью в Gitea) запускает
+  реализацию, и код попадает в тот же PR. Там же агент архивирует change, так что в смёрженном
+  диффе видно и то, как изменились спеки. Инженер ревьюит и мёржит сам или просит `@agent`.
 - **Превью живёт, пока жив PR.** ApplicationSet в Argo CD следит за PR репозитория и деплоит
   те, на которые оркестратор повесил метку. Закрыли PR — окружение удалилось.
-- **Релиз — это кнопка.** Человек мёржит `development` в `main` в Gitea. CI ставит тег
-  следующей минорной версии (1.5.0 → 1.6.0; мажорную поднимают руками) и публикует релиз со
-  списком тикетов, а оркестратор переводит эти тикеты в Released.
+- **Релиз готовит агент, выкатывает человек.** По просьбе `@agent` открывает релизный PR из
+  `development` в `main` с черновиком release notes (тикеты с прошлого тега) и кидает ссылку в
+  тикет или чат. Человек апрувит и мёржит его в Gitea. Затем CI ставит тег следующей минорной
+  версии (1.5.0 → 1.6.0; мажорную поднимают руками) и публикует релиз, а оркестратор переводит
+  его тикеты в Released.
 - **Тег образа — SHA коммита, везде.** CI собирает каждый запушенный коммит один раз, а Argo CD
   деплоит тот SHA, который синхронизировал, так что ни один бот не коммитит теги образов обратно
   в git. Версия — это ярлык на уже собранном образе.
-- **Бот не может мёржить.** `development` и `main` защищены. Токен агента пушит только в
-  feature-ветки.
+- **Кто может мёржить, решает Gitea, а не агент.** В `main` мёржат только люди и только после
+  человеческого апрува в PR (branch protection и merge allowlist). В `development` мёржит
+  аккаунт оркестратора, и только по просьбе человека с нужной ролью. Агентские Job'ы пушат под
+  отдельным аккаунтом, которого нет ни в одном merge allowlist, так что Job не смёржит ничего,
+  даже если prompt injection его об этом попросит.
 
 > [!NOTE]
 > Этот флоу — дизайн шага 1 роадмапа, он ещё не построен. Превью нужны wildcard-имена на
@@ -222,14 +232,96 @@ stateDiagram-v2
 
 ```mermaid
 flowchart LR
-    ticket([Plane EWA-12]) -- agent branches off --> feat[feat/EWA-12_add-filters]
-    feat -- "PR: spec first, code after approval" --> merge{{merge<br/>engineer}}
+    ticket([Plane EWA-12]) -- агент ответвляет --> feat[feat/EWA-12_add-filters]
+    feat -- "PR: сначала спека, код после апрува" --> merge{{мёрж<br/>инженер или @agent по просьбе}}
     merge --> dev[development]
-    dev -- release PR --> release{{release<br/>a button in Gitea}}
-    release --> main[main<br/>tag v1.6.0]
-    feat -. "code in the PR, CI green" .-> preview[(preview<br/>ewa-12.qa.example-webapp)]
-    dev -. every merge .-> devenv[(dev<br/>dev.example-webapp)]
-    main -. every release .-> prod[(production<br/>example-webapp)]
+    dev -- релизный PR --> release{{релизный PR от @agent<br/>мёржит человек}}
+    release --> main[main<br/>тег v1.6.0]
+    feat -. "код в PR, CI зелёный" .-> preview[(превью<br/>ewa-12.qa.example-webapp)]
+    dev -. каждый мёрж .-> devenv[(dev<br/>dev.example-webapp)]
+    main -. каждый релиз .-> prod[(продакшен<br/>example-webapp)]
+```
+
+</details>
+
+## Цикл
+
+![AI-native цикл поставки](docs/diagrams/loop_ru.svg)
+
+1. **Сигнал**: человек заводит тикет, или аномалия в логах/трейсах создаёт его автоматически.
+2. **Триаж**: агент читает связанные логи (Loki) и LLM-трейсы (Langfuse) и разбирается, что на самом деле сломалось.
+3. **Delta spec**: агент предлагает фикс или фичу как change в [OpenSpec](https://github.com/Fission-AI/OpenSpec) — ревьюируемую *дельту* к текущим спекам, оформленную пулл-реквестом.
+4. **Апрув спеки** *(человек)*: разработчик или product owner апрувит, просит доработать или отвечает на уточняющие вопросы агента, упоминая `@agent` в Plane, Gitea или Mattermost, либо явным сигналом — статусом тикета или ревью в Gitea.
+5. **Реализация**: одобренная спека уходит кодинг-агенту, который работает в изолированном Kubernetes Job и пушит код в тот же пулл-реквест. У PR появляется превью-окружение.
+6. **Код-ревью** *(человек)*: обычное ревью PR плюс прогулка по превью. Просьбы доработать адресуются `@agent` в Gitea или Plane. В `development` агент мёржит только по просьбе человека, а в `main` — никогда.
+7. **Деплой**: мёрж в `development` доезжает до dev-окружения, а релиз, смёрженный в `main`, — до продакшена. Оба синхронизирует Argo CD ([ветки и окружения](#ветки-и-окружения)).
+8. **Наблюдение**: логи и трейсы порождают следующий сигнал.
+
+<details>
+<summary>Исходник Mermaid</summary>
+
+```mermaid
+flowchart LR
+    signal([Сигнал<br/>логи · трейсы · человек]) --> ticket[Тикет<br/>Plane]
+    ticket --> triage[Агент триажа<br/>Loki + Langfuse]
+    triage --> spec[Delta spec<br/>change в OpenSpec → PR спеки]
+    spec --> gate1{{Апрув спеки<br/>человек}}
+    gate1 -- уточнить / доработать --> spec
+    gate1 -- апрув --> impl[Реализация<br/>OpenCode в k8s Job]
+    impl --> gate2{{Код-ревью<br/>человек}}
+    gate2 -- нужны правки --> impl
+    gate2 -- мёрж --> deploy[Деплой<br/>Argo CD]
+    deploy -- наблюдение --> signal
+```
+
+</details>
+
+## Жизненный цикл work item
+
+![Жизненный цикл work item](docs/diagrams/lifecycle_ru.svg)
+
+Состоянием каждого work item владеет оркестратор. Люди общаются с одним агентом —
+**`@agent`**: у него сервисный аккаунт в Plane, Gitea, а позже и в Mattermost, и за каждым стоит
+один и тот же оркестратор. Каждая система — это **адаптер**: он превращает свои вебхуки в общее
+событие и отражает состояние обратно. Поэтому легко соблюдать такие правила:
+
+- **Работает с тем, что ему дали.** Агент берёт тикет, только если тот назначен на `@agent`, и
+  читает только комментарии, в которых его упомянули. Разговоры людей между собой остаются между
+  ними.
+- **Слова на входе, решают правила.** Модель читает коммент вроде «@agent норм, мёржи в dev» и
+  превращает его в намерение: `approve`, `request_changes`, `answer`, `merge` или
+  `prepare_release`. Выполнять ли его, решает код: кто попросил, какая у него роль и в какой фазе
+  work item. Неверно понятый коммент стоит уточняющего вопроса, а не действия без разрешения.
+  Явные сигналы — статус тикета или Approve-ревью в Gitea — проходят те же правила без модели.
+- **Один источник правды.** Коммент в Plane, ревью в Gitea и ответ в Mattermost ведут к одному и тому же переходу.
+- **Без эхо-петель.** Агент никогда не упоминает сам себя, а события, которые он породил, отбрасываются.
+- **Корреляция.** Одна запись связывает тикет в Plane, change в OpenSpec, ветку и её PR, превью, тред в Mattermost и тред в LangGraph.
+- **Уточнения.** Когда агент не уверен, он спрашивает в тикете (позже и в треде чата) и останавливается. Следующий коммент с его упоминанием продолжает работу.
+- **Без устаревших апрувов** *(после шага 1)*. Апрув относится к той ревизии спеки, о которой отчитался агент (head SHA пулл-реквеста). Если спека с тех пор изменилась, апрув игнорируется, и его автору об этом сообщают.
+
+<details>
+<summary>Исходник Mermaid</summary>
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> TicketOpen
+    TicketOpen --> Triaged: агент триажа
+    Triaged --> Drafting
+    Drafting --> AwaitingClarification: нужна инфа
+    AwaitingClarification --> Drafting: ответ
+    Drafting --> SpecReview: открыт PR со спекой
+    SpecReview --> Drafting: доработать
+    SpecReview --> Closed: отказ
+    SpecReview --> SpecApproved: апрув
+    SpecApproved --> Implementing: запуск k8s Job
+    Implementing --> CodeReview: код запушен в тот же PR · превью поднято
+    CodeReview --> Implementing: нужны правки
+    CodeReview --> OnDev: мёрж в development человеком
+    OnDev --> Released: релиз человеком · тег в main
+    Released --> Done: тикет закрыт
+    Closed --> [*]
+    Done --> [*]
 ```
 
 </details>
@@ -238,14 +330,14 @@ flowchart LR
 
 | Задача | Выбор | Почему | Рассматривали |
 |---|---|---|---|
-| Целевое приложение и оркестратор | **Python, LangGraph, deepagents** | Экосистема агентов в первую очередь на Python. `interrupt()` и чекпоинтеры напрямую ложатся на человеческие гейты. | — |
-| Кодинг-харнесс | **OpenCode** + бесплатные модели | Уже связан с командами OpenSpec. Заменяем через интерфейс `Executor`. | свой LangGraph-харнесс (позже) |
+| Оркестратор и бизнес-агент | **Python, LangGraph, deepagents** | Экосистема агентов в первую очередь на Python. Чекпоинтеры хранят состояние work item между событиями, которые бывают разнесены на дни. | — |
+| Кодинг-харнесс | **OpenCode** + модели через RouterAI | Уже связан с командами OpenSpec. Заменяем через интерфейс `Executor`. Модель и провайдер — конфигурация: DeepSeek V4 Flash для тестов и первых демо, для кодинга и ревью — модели класса GLM-5.3 или Kimi K3, цель — код уровня фронтир-моделей в разы дешевле, что должны подтвердить [метрики](#как-поймём-что-работает). | свой LangGraph-харнесс (позже) |
 | Спеки | **OpenSpec** | Delta specs — ревьюируемый контракт между людьми и агентами. | просто промпты / тикеты |
 | Git и CI | **Gitea** + Gitea Actions | ~200 МБ RAM. Обязательные апрувы, allowlist апруверов и сброс устаревших апрувов — бесплатно. Совместим с GitHub Actions. | GitLab CE (4–8 ГБ RAM, в бесплатной версии нет обязательных апрувов), Forgejo, OneDev |
 | Трекер | **Plane CE** | Фичи уровня Jira, REST API и вебхуки в бесплатной редакции. | GitLab Issues, OpenProject, Redmine, Taiga |
 | Чат | **Mattermost TE** | Интерактивные кнопки в сообщениях для быстрых апрувов. | — |
 | Логи | **Loki + Grafana** | Лёгкие, а по LogQL агенту удобно делать запросы. | OpenSearch |
-| LLM-трейсы | **Langfuse** (self-hosted) | Трейсит и целевое приложение, и самих SDLC-агентов. | — |
+| LLM-трейсы | **Langfuse** (self-hosted) | Трейсит самих SDLC-агентов и целевые проекты, которые обращаются к LLM. | — |
 | Деплой | **Argo CD** | GitOps: кластер, включая саму платформу, приводится в состояние из git. | Flux |
 | Кластер | **k3s** прямо на хосте | Настоящий Kubernetes без оверхеда на VM на ноутбуке с 32 ГБ. | minikube, kind |
 | База | **Один Postgres через CloudNativePG** | По базе на сервис в одном кластере, чтобы экономить память. | отдельный Postgres на каждый чарт |
@@ -260,7 +352,7 @@ flowchart LR
 | Слой | Меры |
 |---|---|
 | **Оркестратор** (содержимое) | классификаторы prompt injection, детект и маскирование PII, метки происхождения на недоверенном тексте |
-| **Платформа** (радиус поражения) | отдельный ServiceAccount на Job с минимальным RBAC · токен на один репозиторий · NetworkPolicy, выпускающая только в Gitea и LLM API · никаких продовых секретов в агентских джобах · branch protection, бот не может мёржить |
+| **Платформа** (радиус поражения) | отдельный ServiceAccount на Job с минимальным RBAC · токен на один репозиторий · NetworkPolicy, выпускающая только в Gitea и LLM API · никаких продовых секретов в агентских джобах · Job'ы пушат под аккаунтом, который не может мёржить · в `main` мёржат только люди, это обеспечивает Gitea |
 
 Поверх обоих слоёв — два человеческих гейта: без одобрения человека ни одна спека не
 реализуется и ни один код не мёржится.
@@ -281,7 +373,7 @@ flowchart LR
 | Mattermost, Keycloak | ~1.4 ГБ |
 | Langfuse (с ClickHouse) | ~3 ГБ |
 | Loki, Grafana, Alloy | ~0.8 ГБ |
-| Оркестратор, целевое приложение, агентский Job | ~1.5 ГБ |
+| Оркестратор, целевые проекты, агентский Job | ~1.5 ГБ |
 | **Итого** | **~11–12.5 ГБ**: 3.5 ГБ замерено для того, что уже работает, остальное оценка |
 
 Замер на простаивающем ядре платформы: рабочий набор подов (`kubectl top pods`) плюс память
@@ -336,10 +428,10 @@ pre-push хук, который не пропускает другие ветк�
 Каждый шаг — один change в OpenSpec: сначала спека, потом реализация.
 
 - [x] **0. Ядро платформы**: k3s, Argo CD app-of-apps, CloudNativePG, Gitea, Plane CE ([change](openspec/changes/archive/2026-11-01-platform-core/proposal.md))
-- [ ] **1. Цикл поставки на `example-webapp`**: тикет в Plane → спека в PR → апрув в тикете → код от OpenCode в k8s Job в том же PR → мёрж человеком, плюс [превью, dev и продакшен](#ветки-и-окружения), релизы и CI на раннере Gitea
+- [ ] **1. Цикл поставки на `example-webapp`**: тикет в Plane, назначенный на `@agent` → спека в PR → апрув через `@agent` в Plane или Gitea → код от OpenCode в k8s Job в том же PR → мёрж в `development` человеком или по его просьбе, плюс [превью, dev и продакшен](#ветки-и-окружения), релизы, которые готовит агент, и CI на раннере Gitea
 - [ ] **2. Целевой агент**: бизнес-агент на deepagents с трейсингом в Langfuse, в своём репозитории
 - [ ] **3. Триаж**: логи (Loki) и трейсы (Langfuse) в контексте агента, пишущего спеки
-- [ ] **4. Больше каналов**: кнопки и треды в Mattermost, ревью PR в Gitea
+- [ ] **4. Больше каналов**: треды и кнопки в Mattermost
 - [ ] **5. Автотикеты**: аномалии сами заводят тикеты
 - [ ] **6. SSO**: Keycloak
 
@@ -355,7 +447,7 @@ pre-push хук, который не пропускает другие ветк�
 | Доля спек, одобренных с первого раза | насколько агент понимает намерение |
 | Раундов уточнений на work item | сколько внимания людей съедает цикл |
 | Доля PR с кодом, ушедших на доработку | качество харнесса и моделей |
-| Стоимость и токены на change | хватает ли бесплатных моделей (из Langfuse) |
+| Стоимость и токены на change | хватает ли дешёвых открытых моделей (из Langfuse) |
 
 ## Репозиторий
 

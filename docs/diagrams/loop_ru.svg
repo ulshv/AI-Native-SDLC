@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="ru" viewBox="0 0 1240 570" width="1240" height="570" role="img" aria-labelledby="title desc">
+  <title id="title">AI-native цикл поставки</title>
+  <desc id="desc">Сигнал, тикет, триаж, delta spec, апрув спеки, реализация, код-ревью, деплой и снова сигнал. Два человеческих гейта с обратной связью.</desc>
+  <style>
+    .bg { fill: #ffffff; stroke: #e5e7eb; }
+    text { font-family: Inter, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .h1 { font-size: 24px; font-weight: 700; fill: #0f172a; }
+    .h2 { font-size: 14px; fill: #64748b; }
+    .ttl { font-size: 17px; font-weight: 700; fill: #0f172a; }
+    .txt { font-size: 12.5px; fill: #475569; }
+    .kick { font-size: 10.5px; font-weight: 700; letter-spacing: 1.2px; }
+    .num { font-size: 12px; font-weight: 700; fill: #ffffff; }
+    .lbl { font-size: 11.5px; font-weight: 600; fill: #475569; }
+    .lbl-h { font-size: 11.5px; font-weight: 600; fill: #b45309; }
+    .cap { font-size: 14px; font-weight: 600; fill: #334155; }
+    .cap2 { font-size: 12.5px; fill: #64748b; }
+    .lg { font-size: 12px; fill: #475569; }
+
+    .c-agent { fill: #f5f3ff; stroke: #c4b5fd; }   .a-agent { fill: #7c3aed; }   .k-agent { fill: #6d28d9; }
+    .c-human { fill: #fffbeb; stroke: #fcd34d; }   .a-human { fill: #d97706; }   .k-human { fill: #b45309; }
+    .c-plat  { fill: #f0fdfa; stroke: #99f6e4; }   .a-plat  { fill: #0f766e; }   .k-plat  { fill: #0f766e; }
+    .c-trig  { fill: #f8fafc; stroke: #cbd5e1; }   .a-trig  { fill: #475569; }   .k-trig  { fill: #475569; }
+
+    .edge { stroke: #64748b; stroke-width: 2; fill: none; }
+    .edge-h { stroke: #d97706; stroke-width: 2; fill: none; stroke-dasharray: 6 5; }
+    .ah { fill: #64748b; }
+    .ah-h { fill: #d97706; }
+
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; stroke: #30363d; }
+      .h1, .ttl { fill: #f0f6fc; }
+      .h2, .cap2 { fill: #8b949e; }
+      .txt, .lbl, .lg { fill: #b1bac4; }
+      .cap { fill: #e6edf3; }
+      .lbl-h { fill: #fbbf24; }
+      .c-agent { fill: #1e1633; stroke: #6d28d9; }   .a-agent { fill: #8b5cf6; }   .k-agent { fill: #c4b5fd; }
+      .c-human { fill: #261c0c; stroke: #b45309; }   .a-human { fill: #f59e0b; }   .k-human { fill: #fcd34d; }
+      .c-plat  { fill: #0b2420; stroke: #0f766e; }   .a-plat  { fill: #14b8a6; }   .k-plat  { fill: #5eead4; }
+      .c-trig  { fill: #161b22; stroke: #475569; }   .a-trig  { fill: #64748b; }   .k-trig  { fill: #cbd5e1; }
+      .edge { stroke: #8b949e; }
+      .edge-h { stroke: #f59e0b; }
+      .ah { fill: #8b949e; }
+      .ah-h { fill: #f59e0b; }
+    }
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="ahh" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="ah-h" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.07"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" x="0.5" y="0.5" width="1239" height="569" rx="18"/>
+
+  <!-- header -->
+  <text class="h1" x="40" y="56">AI-native цикл поставки</text>
+  <text class="h2" x="40" y="82">От тикета до задеплоенного изменения: работу делают агенты, решения принимают люди</text>
+
+  <!-- legend -->
+  <g transform="translate(772,52)">
+    <circle class="a-trig" cx="0" cy="0" r="6"/><text class="lg" x="12" y="4">Триггер</text>
+    <circle class="a-agent" cx="88" cy="0" r="6"/><text class="lg" x="100" y="4">Агент</text>
+    <circle class="a-human" cx="166" cy="0" r="6"/><text class="lg" x="178" y="4">Гейт человека</text>
+    <circle class="a-plat" cx="278" cy="0" r="6"/><text class="lg" x="290" y="4">Платформа</text>
+  </g>
+
+  <!-- ===== top row (left to right) ===== -->
+  <!-- 01 Signal -->
+  <g transform="translate(40,120)">
+    <rect class="c-trig" width="232" height="120" rx="14" filter="url(#sh)"/>
+    <circle class="a-trig" cx="30" cy="30" r="13"/><text class="num" x="30" y="34.5" text-anchor="middle">1</text>
+    <text class="kick k-trig" x="52" y="34">ТРИГГЕР</text>
+    <text class="ttl" x="20" y="66">Сигнал</text>
+    <text class="txt" x="20" y="90">Сообщение человека или</text>
+    <text class="txt" x="20" y="107">аномалия в логах и трейсах</text>
+  </g>
+  <!-- 02 Ticket -->
+  <g transform="translate(332,120)">
+    <rect class="c-plat" width="232" height="120" rx="14" filter="url(#sh)"/>
+    <circle class="a-plat" cx="30" cy="30" r="13"/><text class="num" x="30" y="34.5" text-anchor="middle">2</text>
+    <text class="kick k-plat" x="52" y="34">ПЛАТФОРМА</text>
+    <text class="ttl" x="20" y="66">Тикет</text>
+    <text class="txt" x="20" y="90">Work item в Plane,</text>
+    <text class="txt" x="20" y="107">связан во всех системах</text>
+  </g>
+  <!-- 03 Triage -->
+  <g transform="translate(624,120)">
+    <rect class="c-agent" width="232" height="120" rx="14" filter="url(#sh)"/>
+    <circle class="a-agent" cx="30" cy="30" r="13"/><text class="num" x="30" y="34.5" text-anchor="middle">3</text>
+    <text class="kick k-agent" x="52" y="34">АГЕНТ</text>
+    <text class="ttl" x="20" y="66">Триаж</text>
+    <text class="txt" x="20" y="90">Читает логи Loki</text>
+    <text class="txt" x="20" y="107">и трейсы Langfuse</text>
+  </g>
+  <!-- 04 Delta spec -->
+  <g transform="translate(916,120)">
+    <rect class="c-agent" width="232" height="120" rx="14" filter="url(#sh)"/>
+    <circle class="a-agent" cx="30" cy="30" r="13"/><text class="num" x="30" y="34.5" text-anchor="middle">4</text>
+    <text class="kick k-agent" x="52" y="34">АГЕНТ</text>
+    <text class="ttl" x="20" y="66">Delta spec</text>
+    <text class="txt" x="20" y="90">change в OpenSpec,</text>
+    <text class="txt" x="20" y="107">PR со спекой в Gitea</text>
+  </g>
+
+  <!-- ===== bottom row (right to left) ===== -->
+  <!-- 05 Spec approval -->
+  <g transform="translate(916,360)">
+    <rect class="c-human" width="232" height="120" rx="14" filter="url(#sh)"/>
+    <circle class="a-human" cx="30" cy="30" r="13"/><text class="num" x="30" y="34.5" text-anchor="middle">5</text>
+    <text class="kick k-human" x="52" y="34">ГЕЙТ ЧЕЛОВЕКА</text>
+    <text class="ttl" x="20" y="66">Апрув спеки</text>
+    <text class="txt" x="20" y="90">Апрув, правки или ответ</text>
+    <text class="txt" x="20" y="107">в Plane, Gitea, Mattermost</text>
+  </g>
+  <!-- 06 Implementation -->
+  <g transform="translate(624,360)">
+    <rect class="c-agent" width="232" height="120" rx="14" filter="url(#sh)"/>
+    <circle class="a-agent" cx="30" cy="30" r="13"/><text class="num" x="30" y="34.5" text-anchor="middle">6</text>
+    <text class="kick k-agent" x="52" y="34">АГЕНТ</text>
+    <text class="ttl" x="20" y="66">Реализация</text>
+    <text class="txt" x="20" y="90">OpenCode, модели через роутер</text>
+    <text class="txt" x="20" y="107">в изолированном k8s Job</text>
+  </g>
+  <!-- 07 Code review -->
+  <g transform="translate(332,360)">
+    <rect class="c-human" width="232" height="120" rx="14" filter="url(#sh)"/>
+    <circle class="a-human" cx="30" cy="30" r="13"/><text class="num" x="30" y="34.5" text-anchor="middle">7</text>
+    <text class="kick k-human" x="52" y="34">ГЕЙТ ЧЕЛОВЕКА</text>
+    <text class="ttl" x="20" y="66">Код-ревью</text>
+    <text class="txt" x="20" y="90">Обычное ревью PR; в main</text>
+    <text class="txt" x="20" y="107">мёржат только люди</text>
+  </g>
+  <!-- 08 Deploy -->
+  <g transform="translate(40,360)">
+    <rect class="c-plat" width="232" height="120" rx="14" filter="url(#sh)"/>
+    <circle class="a-plat" cx="30" cy="30" r="13"/><text class="num" x="30" y="34.5" text-anchor="middle">8</text>
+    <text class="kick k-plat" x="52" y="34">ПЛАТФОРМА</text>
+    <text class="ttl" x="20" y="66">Деплой</text>
+    <text class="txt" x="20" y="90">Argo CD синхронизирует</text>
+    <text class="txt" x="20" y="107">кластер из git</text>
+  </g>
+
+  <!-- ===== edges ===== -->
+  <!-- top row -->
+  <line class="edge" x1="276" y1="180" x2="327" y2="180" marker-end="url(#ah)"/>
+  <line class="edge" x1="568" y1="180" x2="619" y2="180" marker-end="url(#ah)"/>
+  <line class="edge" x1="860" y1="180" x2="911" y2="180" marker-end="url(#ah)"/>
+
+  <!-- spec -> approval -->
+  <line class="edge" x1="1000" y1="244" x2="1000" y2="355" marker-end="url(#ah)"/>
+  <text class="lbl" x="988" y="304" text-anchor="end">PR спеки</text>
+
+  <!-- approval -> spec (feedback, outer right) -->
+  <path class="edge-h" d="M1152,420 C1208,420 1208,180 1153,180" marker-end="url(#ahh)"/>
+  <text class="lbl-h" transform="translate(1222,300) rotate(-90)" text-anchor="middle">уточнить · доработать</text>
+
+  <!-- bottom row -->
+  <line class="edge" x1="912" y1="420" x2="861" y2="420" marker-end="url(#ah)"/>
+  <text class="lbl" x="886" y="410" text-anchor="middle">апрув</text>
+  <line class="edge" x1="620" y1="420" x2="569" y2="420" marker-end="url(#ah)"/>
+  <text class="lbl" x="594" y="410" text-anchor="middle">PR</text>
+  <line class="edge" x1="328" y1="420" x2="277" y2="420" marker-end="url(#ah)"/>
+  <text class="lbl" x="302" y="410" text-anchor="middle">мёрж</text>
+
+  <!-- code review -> implementation (feedback, below) -->
+  <path class="edge-h" d="M478,484 C478,530 710,530 710,486" marker-end="url(#ahh)"/>
+  <text class="lbl-h" x="594" y="544" text-anchor="middle">нужны правки</text>
+
+  <!-- deploy -> signal (observe) -->
+  <line class="edge" x1="156" y1="356" x2="156" y2="245" marker-end="url(#ah)"/>
+  <text class="lbl" x="170" y="296">наблюдение</text>
+  <text class="cap2" x="170" y="313">логи · трейсы</text>
+
+  <!-- centre caption -->
+  <text class="cap" x="594" y="294" text-anchor="middle">Один work item = один change в OpenSpec</text>
+  <text class="cap2" x="594" y="315" text-anchor="middle">спеки — это контракт между людьми и агентами</text>
+</svg>

@@ -1,0 +1,219 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="en" viewBox="0 0 1240 920" width="1240" height="920" role="img" aria-labelledby="title desc">
+  <title id="title">How it works, by example</title>
+  <desc id="desc">One ticket, EWA-12, from request to release, as a conversation. Any message can come from Plane, Mattermost or a Gitea comment. The product owner files the ticket in Plane and assigns it to @agent. The agent asks whether the filter should survive a reload and waits; the product owner answers. The agent opens PR 34 with the spec; the product owner approves with a comment, and the policy checks that a product owner may approve. The agent posts a preview link. The engineer asks in a Gitea review for an empty state; the agent says it is implementing a fix, then posts the updated preview. The engineer tells the agent to merge into development. In the chat, the product owner asks for a release; the agent opens release PR 35. The engineer approves and merges it, CI tags v1.6.0 and production updates.</desc>
+  <style>
+    .bg { fill: #ffffff; stroke: #e5e7eb; }
+    text { font-family: Inter, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace; }
+    .h1 { font-size: 24px; font-weight: 700; fill: #0f172a; }
+    .h2 { font-size: 14px; fill: #64748b; }
+    .phase { font-size: 11px; font-weight: 700; letter-spacing: 1.4px; fill: #94a3b8; }
+    .msg { font-size: 12.5px; fill: #0f172a; }
+    .msg-m { font-size: 12px; font-weight: 600; fill: #6d28d9; }
+    .act { font-size: 12.5px; font-style: italic; fill: #475569; }
+    .ch { font-size: 10px; font-weight: 700; letter-spacing: 0.4px; fill: #475569; }
+    .av { font-size: 11px; font-weight: 700; fill: #ffffff; }
+    .cst { font-size: 12px; font-weight: 700; fill: #0f172a; }
+    .eff { font-size: 12px; fill: #475569; }
+    .ok { font-size: 12px; font-weight: 700; fill: #15803d; }
+    .lg { font-size: 12px; fill: #475569; }
+    .txt { font-size: 12.5px; fill: #475569; }
+    .kick { font-size: 10.5px; font-weight: 700; letter-spacing: 1.2px; fill: #6d28d9; }
+
+    .band { fill: #f8fafc; }
+    .panel { fill: #faf5ff; stroke: #ddd6fe; }
+    .chp { fill: #ffffff; stroke: #cbd5e1; }
+    .b-po { fill: #f0fdf4; stroke: #86efac; stroke-width: 1.2; }
+    .b-en { fill: #ecfeff; stroke: #67e8f9; stroke-width: 1.2; }
+    .b-act { fill: #ffffff; stroke: #06b6d4; stroke-width: 1.2; stroke-dasharray: 4 3; }
+    .b-a  { fill: #f5f3ff; stroke: #c4b5fd; stroke-width: 1.2; }
+    .av-po { fill: #16a34a; }
+    .av-en { fill: #0891b2; }
+    .av-ag { fill: #7c3aed; }
+    .c-agent { fill: #f5f3ff; stroke: #a78bfa; stroke-width: 1.3; }
+    .c-human { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1.3; }
+    .c-sys   { fill: #f0fdfa; stroke: #5eead4; stroke-width: 1.3; }
+    .tl { stroke: #cbd5e1; stroke-width: 2; }
+    .n-agent { fill: #7c3aed; stroke: #ffffff; stroke-width: 2; }
+    .n-wait  { fill: #ffffff; stroke: #d97706; stroke-width: 2.5; }
+    .n-sys   { fill: #0f766e; stroke: #ffffff; stroke-width: 2; }
+    .gate    { fill: #f59e0b; stroke: #ffffff; stroke-width: 2; }
+    .sep { stroke: #e2e8f0; stroke-width: 1; stroke-dasharray: 3 4; }
+
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; stroke: #30363d; }
+      .h1, .msg, .cst { fill: #f0f6fc; }
+      .h2 { fill: #8b949e; }
+      .phase { fill: #6e7681; }
+      .msg-m { fill: #c4b5fd; }
+      .act, .eff, .lg, .txt, .ch { fill: #b1bac4; }
+      .ok { fill: #4ade80; }
+      .kick { fill: #c4b5fd; }
+      .band { fill: #11161d; }
+      .panel { fill: #140f22; stroke: #3b2a63; }
+      .chp { fill: #0d1117; stroke: #30363d; }
+      .b-po { fill: #0c2216; stroke: #166534; }
+      .b-en { fill: #082a33; stroke: #0e7490; }
+      .b-act { fill: #0d1117; stroke: #06b6d4; }
+      .b-a  { fill: #1e1633; stroke: #5b21b6; }
+      .av-po { fill: #22c55e; }
+      .av-en { fill: #06b6d4; }
+      .av-ag { fill: #8b5cf6; }
+      .c-agent { fill: #1e1633; stroke: #7c3aed; }
+      .c-human { fill: #261c0c; stroke: #d97706; }
+      .c-sys   { fill: #0b2420; stroke: #0f766e; }
+      .tl { stroke: #30363d; }
+      .n-agent { fill: #8b5cf6; stroke: #11161d; }
+      .n-wait  { fill: #11161d; stroke: #f59e0b; }
+      .n-sys   { fill: #14b8a6; stroke: #11161d; }
+      .gate    { stroke: #11161d; }
+      .sep { stroke: #21262d; }
+    }
+  </style>
+
+  <rect class="bg" x="0.5" y="0.5" width="1239" height="919" rx="18"/>
+
+  <!-- header -->
+  <text class="h1" x="40" y="56">How it works, by example</text>
+  <text class="h2" x="40" y="82">EWA-12, "filter orders by status": people talk to @agent in their usual tools, and it does the work in between</text>
+  <g transform="translate(866,52)">
+    <circle class="av-po" cx="0" cy="0" r="9"/><text class="lg" x="15" y="4">Product owner</text>
+    <circle class="av-en" cx="118" cy="0" r="9"/><text class="lg" x="133" y="4">Engineer</text>
+    <circle class="av-ag" cx="208" cy="0" r="9"/><text class="lg" x="223" y="4">@agent</text>
+    <path class="gate" d="M286,-8 L294,0 L286,8 L278,0 Z"/><text class="lg" x="301" y="4">Gate</text>
+  </g>
+
+  <!-- bands -->
+  <rect class="band" x="24" y="104" width="800" height="714" rx="14"/>
+  <rect class="band" x="836" y="104" width="380" height="714" rx="14"/>
+  <text class="phase" x="44" y="130">WHO SAYS WHAT, AND WHERE</text>
+  <text class="eff" x="398" y="130">any message works from</text>
+  <rect class="chp" x="540" y="117" width="44" height="18" rx="9"/><text class="ch" x="562" y="129.5" text-anchor="middle">PLANE</text>
+  <rect class="chp" x="590" y="117" width="86" height="18" rx="9"/><text class="ch" x="633" y="129.5" text-anchor="middle">MATTERMOST</text>
+  <rect class="chp" x="682" y="117" width="122" height="18" rx="9"/><text class="ch" x="743" y="129.5" text-anchor="middle">GITEA COMMENT</text>
+  <text class="phase" x="856" y="130">WHAT HAPPENS</text>
+
+  <line class="sep" x1="44" y1="398" x2="804" y2="398"/>
+  <line class="sep" x1="44" y1="662" x2="804" y2="662"/>
+
+  <!-- timeline -->
+  <line class="tl" x1="868" y1="170" x2="868" y2="794"/>
+
+  <circle class="av-po" cx="58" cy="172" r="14"/><text class="av" x="58" y="176" text-anchor="middle">PO</text>
+  <rect class="b-po" x="82" y="155" width="427" height="34" rx="12"/>
+  <rect class="chp" x="92" y="163" width="44" height="18" rx="9"/><text class="ch" x="114" y="175.5" text-anchor="middle">PLANE</text>
+  <text class="msg" x="146" y="176.5">New ticket EWA-12: filter orders by status ·</text>
+  <text class="msg-m" x="389" y="176.5">assignee: @agent</text>
+  <circle class="n-agent" cx="868" cy="172" r="7"/>
+  <rect class="c-agent" x="884" y="160" width="104" height="24" rx="12"/><text class="cst" x="936" y="176" text-anchor="middle">Drafting</text>
+  <text class="eff" x="1000" y="176">the agent takes it</text>
+
+  <circle class="av-ag" cx="790" cy="219" r="14"/><text class="av" x="790" y="223" text-anchor="middle">@</text>
+  <rect class="b-a" x="446" y="202" width="320" height="34" rx="12"/>
+  <rect class="chp" x="456" y="210" width="44" height="18" rx="9"/><text class="ch" x="478" y="222.5" text-anchor="middle">PLANE</text>
+  <text class="msg" x="510" y="223.5">Should the filter survive a page reload?</text>
+  <circle class="n-wait" cx="868" cy="219" r="6"/>
+  <rect class="c-human" x="884" y="207" width="104" height="24" rx="12"/><text class="cst" x="936" y="223" text-anchor="middle">Needs info</text>
+  <text class="eff" x="1000" y="223">stops and waits</text>
+
+  <circle class="av-po" cx="58" cy="266" r="14"/><text class="av" x="58" y="270" text-anchor="middle">PO</text>
+  <rect class="b-po" x="82" y="249" width="258" height="34" rx="12"/>
+  <rect class="chp" x="92" y="257" width="44" height="18" rx="9"/><text class="ch" x="114" y="269.5" text-anchor="middle">PLANE</text>
+  <text class="msg-m" x="146" y="270.5">@agent</text>
+  <text class="msg" x="196" y="270.5">no, reset it on reload</text>
+  <circle class="n-agent" cx="868" cy="266" r="7"/>
+  <rect class="c-agent" x="884" y="254" width="104" height="24" rx="12"/><text class="cst" x="936" y="270" text-anchor="middle">Drafting</text>
+  <text class="eff" x="1000" y="270">a Job writes the spec</text>
+
+  <circle class="av-ag" cx="790" cy="313" r="14"/><text class="av" x="790" y="317" text-anchor="middle">@</text>
+  <rect class="b-a" x="448" y="296" width="318" height="34" rx="12"/>
+  <rect class="chp" x="458" y="304" width="44" height="18" rx="9"/><text class="ch" x="480" y="316.5" text-anchor="middle">PLANE</text>
+  <text class="msg" x="512" y="317.5">The spec is ready: PR #34, please review</text>
+  <circle class="n-wait" cx="868" cy="313" r="6"/>
+  <rect class="c-human" x="884" y="301" width="104" height="24" rx="12"/><text class="cst" x="936" y="317" text-anchor="middle">Spec review</text>
+  <text class="eff" x="1000" y="317">PR #34, only the spec</text>
+
+  <circle class="av-po" cx="58" cy="360" r="14"/><text class="av" x="58" y="364" text-anchor="middle">PO</text>
+  <rect class="b-po" x="82" y="343" width="250" height="34" rx="12"/>
+  <rect class="chp" x="92" y="351" width="44" height="18" rx="9"/><text class="ch" x="114" y="363.5" text-anchor="middle">PLANE</text>
+  <text class="msg-m" x="146" y="364.5">@agent</text>
+  <text class="msg" x="196" y="364.5">looks good, go ahead</text>
+  <path class="gate" d="M868,350 L878,360 L868,370 L858,360 Z"/>
+  <rect class="c-agent" x="884" y="348" width="104" height="24" rx="12"/><text class="cst" x="936" y="364" text-anchor="middle">Implementing</text>
+  <text class="eff" x="1000" y="364">approve:</text>
+  <text class="ok" x="1053" y="364">PO may approve ✓</text>
+
+  <circle class="av-ag" cx="790" cy="436" r="14"/><text class="av" x="790" y="440" text-anchor="middle">@</text>
+  <rect class="b-a" x="356" y="419" width="410" height="34" rx="12"/>
+  <rect class="chp" x="366" y="427" width="44" height="18" rx="9"/><text class="ch" x="388" y="439.5" text-anchor="middle">PLANE</text>
+  <text class="msg" x="420" y="440.5">Try it:</text>
+  <text class="msg mono" x="458" y="440.5">ewa-12.qa.example-webapp.sdlc.internal</text>
+  <circle class="n-sys" cx="868" cy="436" r="7"/>
+  <rect class="c-human" x="884" y="424" width="104" height="24" rx="12"/><text class="cst" x="936" y="440" text-anchor="middle">Code review</text>
+  <text class="eff" x="1000" y="440">code in PR #34, preview up</text>
+
+  <circle class="av-en" cx="58" cy="483" r="14"/><text class="av" x="58" y="487" text-anchor="middle">EN</text>
+  <rect class="b-en" x="82" y="466" width="378" height="34" rx="12"/>
+  <rect class="chp" x="92" y="474" width="44" height="18" rx="9"/><text class="ch" x="114" y="486.5" text-anchor="middle">GITEA</text>
+  <text class="msg-m" x="146" y="487.5">@agent</text>
+  <text class="msg" x="196" y="487.5">add an empty state when nothing matches</text>
+  <circle class="n-agent" cx="868" cy="483" r="7"/>
+  <rect class="c-agent" x="884" y="471" width="104" height="24" rx="12"/><text class="cst" x="936" y="487" text-anchor="middle">Implementing</text>
+  <text class="eff" x="1000" y="487">changes:</text>
+  <text class="ok" x="1056" y="487">engineer may ✓</text>
+
+  <circle class="av-ag" cx="790" cy="530" r="14"/><text class="av" x="790" y="534" text-anchor="middle">@</text>
+  <rect class="b-a" x="574" y="513" width="192" height="34" rx="12"/>
+  <rect class="chp" x="584" y="521" width="44" height="18" rx="9"/><text class="ch" x="606" y="533.5" text-anchor="middle">GITEA</text>
+  <text class="msg" x="638" y="534.5">Implementing a fix</text>
+  <circle class="n-agent" cx="868" cy="530" r="7"/>
+  <text class="eff" x="884" y="534">a Job pushes the fix</text>
+
+  <circle class="av-ag" cx="790" cy="577" r="14"/><text class="av" x="790" y="581" text-anchor="middle">@</text>
+  <rect class="b-a" x="248" y="560" width="518" height="34" rx="12"/>
+  <rect class="chp" x="258" y="568" width="44" height="18" rx="9"/><text class="ch" x="280" y="580.5" text-anchor="middle">GITEA</text>
+  <text class="msg" x="312" y="581.5">Fix is ready, have a look:</text>
+  <text class="msg mono" x="458" y="581.5">ewa-12.qa.example-webapp.sdlc.internal</text>
+  <circle class="n-sys" cx="868" cy="577" r="7"/>
+  <rect class="c-human" x="884" y="565" width="104" height="24" rx="12"/><text class="cst" x="936" y="581" text-anchor="middle">Code review</text>
+  <text class="eff" x="1000" y="581">preview updated</text>
+
+  <circle class="av-en" cx="58" cy="624" r="14"/><text class="av" x="58" y="628" text-anchor="middle">EN</text>
+  <rect class="b-en" x="82" y="607" width="256" height="34" rx="12"/>
+  <rect class="chp" x="92" y="615" width="44" height="18" rx="9"/><text class="ch" x="114" y="627.5" text-anchor="middle">GITEA</text>
+  <text class="msg-m" x="146" y="628.5">@agent</text>
+  <text class="msg" x="196" y="628.5">ok, merge it into dev</text>
+  <path class="gate" d="M868,614 L878,624 L868,634 L858,624 Z"/>
+  <rect class="c-sys" x="884" y="612" width="104" height="24" rx="12"/><text class="cst" x="936" y="628" text-anchor="middle">On dev</text>
+  <text class="eff" x="1000" y="628">merge:</text>
+  <text class="ok" x="1045" y="628">engineer may ✓</text>
+
+  <circle class="av-po" cx="58" cy="700" r="14"/><text class="av" x="58" y="704" text-anchor="middle">PO</text>
+  <rect class="b-po" x="82" y="683" width="310" height="34" rx="12"/>
+  <rect class="chp" x="92" y="691" width="86" height="18" rx="9"/><text class="ch" x="135" y="703.5" text-anchor="middle">MATTERMOST</text>
+  <text class="msg-m" x="188" y="704.5">@agent</text>
+  <text class="msg" x="238" y="704.5">let's prepare a release</text>
+  <circle class="n-agent" cx="868" cy="700" r="7"/>
+  <text class="eff" x="884" y="704">prepare_release:</text>
+  <text class="ok" x="982" y="704">PO may ✓</text>
+
+  <circle class="av-ag" cx="790" cy="747" r="14"/><text class="av" x="790" y="751" text-anchor="middle">@</text>
+  <rect class="b-a" x="470" y="730" width="296" height="34" rx="12"/>
+  <rect class="chp" x="480" y="738" width="86" height="18" rx="9"/><text class="ch" x="523" y="750.5" text-anchor="middle">MATTERMOST</text>
+  <text class="msg" x="576" y="751.5">Release 1.6.0 is ready: PR #35</text>
+  <circle class="n-wait" cx="868" cy="747" r="6"/>
+  <text class="eff" x="884" y="751">PR #35 → main, notes: EWA-9, EWA-12</text>
+
+  <circle class="av-en" cx="58" cy="794" r="14"/><text class="av" x="58" y="798" text-anchor="middle">EN</text>
+  <rect class="b-act" x="82" y="777" width="294" height="34" rx="12"/>
+  <rect class="chp" x="92" y="785" width="44" height="18" rx="9"/><text class="ch" x="114" y="797.5" text-anchor="middle">GITEA</text>
+  <text class="act" x="146" y="798.5">approves and merges PR #35 by hand</text>
+  <path class="gate" d="M868,784 L878,794 L868,804 L858,794 Z"/>
+  <rect class="c-sys" x="884" y="782" width="104" height="24" rx="12"/><text class="cst" x="936" y="798" text-anchor="middle">Released</text>
+  <text class="eff" x="1000" y="798">v1.6.0 tagged, prod updated</text>
+
+  <!-- rules -->
+  <rect class="panel" x="24" y="832" width="1192" height="66" rx="14"/>
+  <text class="kick" x="44" y="857">THE RULES BEHIND IT</text>
+  <text class="txt" x="44" y="880">@agent reads only what mentions it and answers where it was asked · a model reads the intent, code checks who may do what · only people merge into main</text>
+</svg>

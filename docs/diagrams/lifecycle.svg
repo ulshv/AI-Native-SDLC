@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 690" width="1240" height="690" role="img" aria-labelledby="title desc">
   <title id="title">Work item lifecycle</title>
-  <desc id="desc">State machine owned by the orchestrator. Spec phase: ticket open, triaged, drafting, awaiting answer, spec review, closed or spec approved. Build and release: implementing, code review in the same PR with a preview, on dev after the merge into development, released when a release reaches main, done. Human events from any channel are normalized.</desc>
+  <desc id="desc">State machine owned by the orchestrator. Spec phase: ticket open, triaged, drafting, awaiting answer, spec review, closed or spec approved. Build and release: implementing, code review in the same PR with a preview, on dev after the merge into development, released when a release reaches main, done. Human events count only when they mention @agent; a model reads the intent and code decides whether it is allowed.</desc>
   <style>
     .bg { fill: #ffffff; stroke: #e5e7eb; }
     text { font-family: Inter, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -77,7 +77,7 @@
 
   <!-- header -->
   <text class="h1" x="40" y="56">Work item lifecycle</text>
-  <text class="h2" x="40" y="82">The orchestrator's state machine: every human wait is a resumable interrupt()</text>
+  <text class="h2" x="40" y="82">The orchestrator's state machine: each event moves a work item one step from its saved phase</text>
   <g transform="translate(724,52)">
     <circle class="a-agent" cx="0" cy="0" r="6"/><text class="lg" x="12" y="4">Agent works</text>
     <circle class="a-human" cx="104" cy="0" r="6"/><text class="lg" x="116" y="4">Waits for a human</text>
@@ -203,11 +203,11 @@
 
   <!-- ===== events panel ===== -->
   <rect class="panel" x="24" y="568" width="1192" height="98" rx="14"/>
-  <text class="kick" x="44" y="593">HUMAN EVENTS · FROM ANY CHANNEL</text>
-  <rect class="chip" x="44" y="606" width="176" height="27" rx="13.5"/><text class="chip-t" x="132" y="624" text-anchor="middle">Plane: status · comment</text>
-  <rect class="chip" x="230" y="606" width="132" height="27" rx="13.5"/><text class="chip-t" x="296" y="624" text-anchor="middle">Gitea: PR review</text>
-  <rect class="chip" x="372" y="606" width="204" height="27" rx="13.5"/><text class="chip-t" x="474" y="624" text-anchor="middle">Mattermost: button · thread</text>
-  <line class="edge" x1="588" y1="619.5" x2="630" y2="619.5" marker-end="url(#ah)"/>
-  <rect class="chip-b" x="638" y="606" width="404" height="27" rx="13.5"/><text class="chip-tb" x="840" y="624" text-anchor="middle">approve · request_changes · reject · answer  @ spec rev</text>
-  <text class="txt" x="44" y="654">Bot-authored events are dropped (no echo loops) · events for a stale spec revision are ignored and the author is notified · only mapped identities can approve</text>
+  <text class="kick" x="44" y="593">HUMAN EVENTS · ONLY WHAT MENTIONS @agent</text>
+  <rect class="chip" x="44" y="606" width="176" height="27" rx="13.5"/><text class="chip-t" x="132" y="624" text-anchor="middle">Plane: @agent · status</text>
+  <rect class="chip" x="230" y="606" width="172" height="27" rx="13.5"/><text class="chip-t" x="316" y="624" text-anchor="middle">Gitea: @agent · review</text>
+  <rect class="chip" x="412" y="606" width="204" height="27" rx="13.5"/><text class="chip-t" x="514" y="624" text-anchor="middle">Mattermost: @agent in thread</text>
+  <line class="edge" x1="628" y1="619.5" x2="670" y2="619.5" marker-end="url(#ah)"/>
+  <rect class="chip-b" x="678" y="606" width="420" height="27" rx="13.5"/><text class="chip-tb" x="888" y="624" text-anchor="middle">approve · request_changes · answer · merge · release</text>
+  <text class="txt" x="44" y="654">A model reads the intent, code decides whether it is allowed (who, role, phase) · the agent's own events are dropped · only people merge into main</text>
 </svg>

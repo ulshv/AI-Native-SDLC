@@ -1,0 +1,231 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="ru" viewBox="0 0 1280 820" width="1280" height="820" role="img" aria-labelledby="title desc">
+  <title id="title">Архитектура</title>
+  <desc id="desc">Люди работают в Plane, Mattermost и Gitea или через те же адаптеры в Jira, Trello, Slack, Telegram, GitLab или GitHub. Адаптеры каналов передают события оркестратору на LangGraph, который проходит guardrails и запускает агентов как Kubernetes Jobs. Целевые проекты — продукты компании, сколько угодно, каждый в своём репозитории и проекте трекера; они пишут логи и трейсы для триажа. Всё работает на k3s и синхронизируется Argo CD.</desc>
+  <style>
+    .bg { fill: #ffffff; stroke: #e5e7eb; }
+    text { font-family: Inter, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .h1 { font-size: 24px; font-weight: 700; fill: #0f172a; }
+    .h2 { font-size: 14px; fill: #64748b; }
+    .col { font-size: 11px; font-weight: 700; letter-spacing: 1.4px; fill: #94a3b8; }
+    .ttl { font-size: 16px; font-weight: 700; fill: #0f172a; }
+    .ttl-s { font-size: 14.5px; font-weight: 700; fill: #0f172a; }
+    .txt { font-size: 12.5px; fill: #475569; }
+    .kick { font-size: 10.5px; font-weight: 700; letter-spacing: 1.2px; }
+    .lbl { font-size: 11.5px; font-weight: 600; fill: #475569; }
+    .lg { font-size: 12px; fill: #475569; }
+    .chip-t { font-size: 12px; font-weight: 600; fill: #334155; }
+    .alt { font-size: 13px; font-weight: 500; fill: #64748b; }
+
+    .c-human { fill: #fffbeb; stroke: #fcd34d; }   .a-human { fill: #d97706; }   .k-human { fill: #b45309; }
+    .c-plat  { fill: #f0fdfa; stroke: #99f6e4; }   .a-plat  { fill: #0f766e; }   .k-plat  { fill: #0f766e; }
+    .c-agent { fill: #f5f3ff; stroke: #c4b5fd; }   .a-agent { fill: #7c3aed; }   .k-agent { fill: #6d28d9; }
+    .c-app   { fill: #eff6ff; stroke: #93c5fd; }   .a-app   { fill: #2563eb; }   .k-app   { fill: #1d4ed8; }
+    .c-orch  { fill: #ede9fe; stroke: #7c3aed; stroke-width: 2; }
+    .cp      { fill: #fbfaff; stroke: #a78bfa; stroke-dasharray: 7 5; stroke-width: 1.5; }
+    .found   { fill: #f8fafc; stroke: #cbd5e1; }
+    .chip    { fill: #ffffff; stroke: #cbd5e1; }
+
+    .edge { stroke: #64748b; stroke-width: 2; fill: none; }
+    .edge-s { stroke: #94a3b8; stroke-width: 1.6; fill: none; }
+    .ah { fill: #64748b; }
+    .ah-s { fill: #94a3b8; }
+
+    @media (prefers-color-scheme: dark) {
+      .alt { fill: #8b949e; }
+      .bg { fill: #0d1117; stroke: #30363d; }
+      .h1, .ttl, .ttl-s { fill: #f0f6fc; }
+      .h2 { fill: #8b949e; }
+      .col { fill: #6e7681; }
+      .txt, .lbl, .lg { fill: #b1bac4; }
+      .chip-t { fill: #e6edf3; }
+      .c-human { fill: #261c0c; stroke: #b45309; }   .a-human { fill: #f59e0b; }   .k-human { fill: #fcd34d; }
+      .c-plat  { fill: #0b2420; stroke: #0f766e; }   .a-plat  { fill: #14b8a6; }   .k-plat  { fill: #5eead4; }
+      .c-agent { fill: #1e1633; stroke: #6d28d9; }   .a-agent { fill: #8b5cf6; }   .k-agent { fill: #c4b5fd; }
+      .c-app   { fill: #0c1a33; stroke: #1d4ed8; }   .a-app   { fill: #3b82f6; }   .k-app   { fill: #93c5fd; }
+      .c-orch  { fill: #2a1f4a; stroke: #8b5cf6; }
+      .cp      { fill: #110d1c; stroke: #6d28d9; }
+      .found   { fill: #161b22; stroke: #30363d; }
+      .chip    { fill: #0d1117; stroke: #30363d; }
+      .edge { stroke: #8b949e; }
+      .edge-s { stroke: #6e7681; }
+      .ah { fill: #8b949e; }
+      .ah-s { fill: #6e7681; }
+    }
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="ahs" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+      <path class="ah-s" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.07"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" x="0.5" y="0.5" width="1279" height="819" rx="18"/>
+
+  <!-- header -->
+  <text class="h1" x="40" y="56">Архитектура</text>
+  <text class="h2" x="40" y="82">На входе — инструменты команды, на выходе — запуски агентов; состоянием каждого work item владеет один оркестратор</text>
+  <g transform="translate(838,52)">
+    <circle class="a-human" cx="0" cy="0" r="6"/><text class="lg" x="12" y="4">Люди</text>
+    <circle class="a-plat" cx="62" cy="0" r="6"/><text class="lg" x="74" y="4">Платформа</text>
+    <circle class="a-agent" cx="164" cy="0" r="6"/><text class="lg" x="176" y="4">Наше</text>
+    <circle class="a-app" cx="230" cy="0" r="6"/><text class="lg" x="242" y="4">Целевые проекты</text>
+  </g>
+
+  <!-- column headers -->
+  <text class="col" x="40" y="132">ЛЮДИ</text>
+  <text class="col" x="250" y="132">ИНСТРУМЕНТЫ КОМАНДЫ</text>
+  <text class="col" x="550" y="132">SDLC CONTROL PLANE · НАШЕ</text>
+  <text class="col" x="990" y="132">ИСПОЛНЕНИЕ И РАНТАЙМ</text>
+
+  <!-- ===== people ===== -->
+  <g transform="translate(40,230)">
+    <rect class="c-human" width="150" height="110" rx="14" filter="url(#sh)"/>
+    <circle class="a-human" cx="75" cy="30" r="10"/>
+    <path class="a-human" d="M57,58 Q75,36 93,58 Z"/>
+    <text class="ttl-s" x="75" y="81" text-anchor="middle">Product owner</text>
+    <text class="txt" x="75" y="98" text-anchor="middle">намерение · апрувы</text>
+  </g>
+  <g transform="translate(40,370)">
+    <rect class="c-human" width="150" height="110" rx="14" filter="url(#sh)"/>
+    <circle class="a-human" cx="75" cy="30" r="10"/>
+    <path class="a-human" d="M57,58 Q75,36 93,58 Z"/>
+    <text class="ttl-s" x="75" y="81" text-anchor="middle">Инженер</text>
+    <text class="txt" x="75" y="98" text-anchor="middle">спеки · код-ревью</text>
+  </g>
+
+  <!-- ===== surfaces ===== -->
+  <g transform="translate(250,160)">
+    <rect class="c-plat" width="240" height="110" rx="14" filter="url(#sh)"/>
+    <text class="kick k-plat" x="20" y="28">ТРЕКЕР</text>
+    <text class="ttl" x="20" y="52">Plane<tspan class="alt"> / Jira / Trello</tspan></text>
+    <text class="txt" x="20" y="76">Тикеты, доски, статусы;</text>
+    <text class="txt" x="20" y="93">уточнения в комментариях</text>
+  </g>
+  <g transform="translate(250,300)">
+    <rect class="c-plat" width="240" height="110" rx="14" filter="url(#sh)"/>
+    <text class="kick k-plat" x="20" y="28">ЧАТ</text>
+    <text class="ttl" x="20" y="52">Mattermost<tspan class="alt"> / Slack / Telegram</tspan></text>
+    <text class="txt" x="20" y="76">Сводки, быстрые апрувы;</text>
+    <text class="txt" x="20" y="93">тред на каждый work item</text>
+  </g>
+  <g transform="translate(250,440)">
+    <rect class="c-plat" width="240" height="110" rx="14" filter="url(#sh)"/>
+    <text class="kick k-plat" x="20" y="28">GIT · CI</text>
+    <text class="ttl" x="20" y="52">Gitea<tspan class="alt"> / GitLab / GitHub</tspan></text>
+    <text class="txt" x="20" y="76">PR со спеками и кодом;</text>
+    <text class="txt" x="20" y="93">защита веток, Actions</text>
+  </g>
+
+  <!-- people <-> surfaces -->
+  <path class="edge-s" d="M194,272 C222,272 222,215 246,215" marker-start="url(#ahs)" marker-end="url(#ahs)"/>
+  <path class="edge-s" d="M194,298 C222,298 222,345 246,345" marker-start="url(#ahs)" marker-end="url(#ahs)"/>
+  <path class="edge-s" d="M194,412 C222,412 222,365 246,365" marker-start="url(#ahs)" marker-end="url(#ahs)"/>
+  <path class="edge-s" d="M194,438 C222,438 222,495 246,495" marker-start="url(#ahs)" marker-end="url(#ahs)"/>
+
+  <!-- ===== control plane ===== -->
+  <rect class="cp" x="550" y="150" width="390" height="490" rx="18"/>
+
+  <g transform="translate(570,172)">
+    <rect class="c-agent" width="350" height="66" rx="12"/>
+    <text class="ttl-s" x="18" y="27">Адаптеры каналов</text>
+    <text class="txt" x="18" y="48">вебхуки на входе · API на выходе · без эха бота</text>
+  </g>
+  <g transform="translate(570,268)">
+    <rect class="c-agent" width="350" height="66" rx="12"/>
+    <text class="ttl-s" x="18" y="27">Нормализатор событий</text>
+    <text class="txt" x="18" y="48">@agent → намерение → policy (кто, роль, фаза)</text>
+  </g>
+  <g transform="translate(570,364)">
+    <rect class="c-orch" width="350" height="96" rx="12" filter="url(#sh)"/>
+    <text class="kick k-agent" x="18" y="26">ЯДРО</text>
+    <text class="ttl" x="18" y="49">Оркестратор</text>
+    <text class="txt" x="18" y="70">LangGraph-граф на каждый work item</text>
+    <text class="txt" x="18" y="87">Postgres-чекпоинтер · шаг на событие</text>
+  </g>
+  <g transform="translate(570,488)">
+    <rect class="c-agent" width="350" height="58" rx="12"/>
+    <text class="ttl-s" x="18" y="24">Guardrails</text>
+    <text class="txt" x="18" y="44">классификаторы инъекций · PII · метки источника</text>
+  </g>
+  <g transform="translate(570,568)">
+    <rect class="c-agent" width="350" height="58" rx="12"/>
+    <text class="ttl-s" x="18" y="24">Executor</text>
+    <text class="txt" x="18" y="44">заменяемый интерфейс харнесса · k8s API</text>
+  </g>
+
+  <!-- control plane internal flow -->
+  <line class="edge" x1="745" y1="240" x2="745" y2="264" marker-end="url(#ah)"/>
+  <line class="edge" x1="745" y1="336" x2="745" y2="360" marker-end="url(#ah)"/>
+  <line class="edge" x1="745" y1="462" x2="745" y2="484" marker-end="url(#ah)"/>
+  <line class="edge" x1="745" y1="548" x2="745" y2="564" marker-end="url(#ah)"/>
+
+  <!-- surfaces <-> adapters -->
+  <path class="edge" d="M494,215 C530,215 530,188 566,188" marker-start="url(#ah)" marker-end="url(#ah)"/>
+  <path class="edge" d="M494,355 C540,355 522,205 566,205" marker-start="url(#ah)" marker-end="url(#ah)"/>
+  <path class="edge" d="M494,495 C548,495 518,222 566,222" marker-start="url(#ah)" marker-end="url(#ah)"/>
+
+  <!-- ===== runtime ===== -->
+  <g transform="translate(990,160)">
+    <rect class="c-app" x="-14" y="-14" width="230" height="110" rx="14" opacity="0.45"/>
+    <rect class="c-app" x="-7" y="-7" width="230" height="110" rx="14" opacity="0.75"/>
+    <rect class="c-app" width="230" height="110" rx="14" filter="url(#sh)"/>
+    <text class="kick k-app" x="20" y="28">ЦЕЛЕВЫЕ ПРОЕКТЫ</text>
+    <text class="ttl" x="20" y="52">Продукты компании</text>
+    <text class="txt" x="20" y="76">example-webapp, агент, …</text>
+    <text class="txt" x="20" y="93">у каждого свой репо и проект</text>
+  </g>
+  <g transform="translate(990,320)">
+    <rect class="c-plat" width="230" height="110" rx="14" filter="url(#sh)"/>
+    <text class="kick k-plat" x="20" y="28">НАБЛЮДАЕМОСТЬ</text>
+    <text class="ttl" x="20" y="52">Loki · Langfuse</text>
+    <text class="txt" x="20" y="76">логи с Grafana;</text>
+    <text class="txt" x="20" y="93">LLM-трейсы приложений и агентов</text>
+  </g>
+  <g transform="translate(990,540)">
+    <rect class="c-agent" width="230" height="110" rx="14" filter="url(#sh)"/>
+    <text class="kick k-agent" x="20" y="28">ЗАПУСК АГЕНТА</text>
+    <text class="ttl" x="20" y="52">k8s Job · OpenCode</text>
+    <text class="txt" x="20" y="76">агент спеки или кода;</text>
+    <text class="txt" x="20" y="93">узкий токен, egress-политика</text>
+  </g>
+
+  <!-- app -> observability -->
+  <line class="edge" x1="1105" y1="274" x2="1105" y2="316" marker-end="url(#ah)"/>
+  <text class="lbl" x="1117" y="299">логи · трейсы</text>
+
+  <!-- observability -> orchestrator -->
+  <path class="edge" d="M986,380 C962,380 950,405 924,405" marker-end="url(#ah)"/>
+  <text class="lbl" x="965" y="352" text-anchor="middle">для</text>
+  <text class="lbl" x="965" y="366" text-anchor="middle">триажа</text>
+
+  <!-- executor -> job -->
+  <line class="edge" x1="924" y1="597" x2="986" y2="597" marker-end="url(#ah)"/>
+  <text class="lbl" x="965" y="573" text-anchor="middle">создать</text>
+  <text class="lbl" x="965" y="587" text-anchor="middle">Job</text>
+
+  <!-- job -> gitea -->
+  <path class="edge" d="M1105,654 V678 H370 V555" marker-end="url(#ah)"/>
+  <text class="lbl" x="740" y="697" text-anchor="middle">пуш ветки · открыть PR</text>
+
+  <!-- argo -> app -->
+  <path class="edge" d="M1240,752 H1252 V215 H1225" marker-end="url(#ah)"/>
+  <text class="lbl" transform="translate(1266,480) rotate(-90)" text-anchor="middle">деплой через GitOps</text>
+
+  <!-- ===== platform foundation ===== -->
+  <rect class="found" x="40" y="712" width="1200" height="82" rx="14"/>
+  <text class="kick k-plat" x="60" y="738">ФУНДАМЕНТ ПЛАТФОРМЫ</text>
+  <text class="txt" x="232" y="738">k3s на одном ноутбуке с 32 ГБ · всё синхронизирует из git Argo CD (app-of-apps)</text>
+  <g>
+    <rect class="chip" x="60" y="752" width="112" height="28" rx="14"/><text class="chip-t" x="116" y="770.5" text-anchor="middle">k3s + Traefik</text>
+    <rect class="chip" x="184" y="752" width="167" height="28" rx="14"/><text class="chip-t" x="267.5" y="770.5" text-anchor="middle">Argo CD · app-of-apps</text>
+    <rect class="chip" x="363" y="752" width="235" height="28" rx="14"/><text class="chip-t" x="480.5" y="770.5" text-anchor="middle">CloudNativePG · общий Postgres</text>
+    <rect class="chip" x="610" y="752" width="126" height="28" rx="14"/><text class="chip-t" x="673" y="770.5" text-anchor="middle">Keycloak · OIDC</text>
+    <rect class="chip" x="748" y="752" width="180" height="28" rx="14"/><text class="chip-t" x="838" y="770.5" text-anchor="middle">cert-manager · свой CA</text>
+    <rect class="chip" x="940" y="752" width="167" height="28" rx="14"/><text class="chip-t" x="1023.5" y="770.5" text-anchor="middle">Gitea act_runner · CI</text>
+  </g>
+</svg>

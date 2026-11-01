@@ -1,0 +1,214 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="ru" viewBox="0 0 1240 690" width="1240" height="690" role="img" aria-labelledby="title desc">
+  <title id="title">Жизненный цикл work item</title>
+  <desc id="desc">Машина состояний, которой владеет оркестратор. Фаза спеки: ticket open, triaged, drafting, awaiting answer, spec review, closed или spec approved. Сборка и релиз: implementing, code review в том же PR с превью, on dev после мёржа в development, released, когда релиз доходит до main, done. События от людей учитываются, только если упоминают @agent; модель понимает намерение, а код решает, можно ли его выполнить.</desc>
+  <style>
+    .bg { fill: #ffffff; stroke: #e5e7eb; }
+    text { font-family: Inter, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .h1 { font-size: 24px; font-weight: 700; fill: #0f172a; }
+    .h2 { font-size: 14px; fill: #64748b; }
+    .phase { font-size: 11px; font-weight: 700; letter-spacing: 1.4px; fill: #94a3b8; }
+    .st { font-size: 15px; font-weight: 700; fill: #0f172a; }
+    .sub { font-size: 11.5px; fill: #64748b; }
+    .lbl { font-size: 11.5px; font-weight: 600; fill: #475569; }
+    .lbl-h { font-size: 11.5px; font-weight: 600; fill: #b45309; }
+    .lg { font-size: 12px; fill: #475569; }
+    .txt { font-size: 12.5px; fill: #475569; }
+    .kick { font-size: 10.5px; font-weight: 700; letter-spacing: 1.2px; fill: #6d28d9; }
+    .chip-t { font-size: 12px; font-weight: 600; fill: #334155; }
+    .chip-tb { font-size: 12px; font-weight: 700; fill: #5b21b6; }
+
+    .band { fill: #f8fafc; }
+    .c-agent { fill: #f5f3ff; stroke: #a78bfa; stroke-width: 1.5; }   .a-agent { fill: #7c3aed; }
+    .c-human { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1.5; }   .a-human { fill: #d97706; }
+    .c-sys   { fill: #f0fdfa; stroke: #5eead4; stroke-width: 1.5; }   .a-sys   { fill: #0f766e; }
+    .c-term  { fill: #f1f5f9; stroke: #64748b; stroke-width: 1.5; }   .a-term  { fill: #475569; }
+    .c-term2 { fill: none; stroke: #64748b; stroke-width: 1; }
+    .panel { fill: #faf5ff; stroke: #ddd6fe; }
+    .chip  { fill: #ffffff; stroke: #cbd5e1; }
+    .chip-b { fill: #ede9fe; stroke: #a78bfa; }
+    .dot { fill: #334155; }
+    .ring { fill: none; stroke: #334155; stroke-width: 2; }
+
+    .edge { stroke: #64748b; stroke-width: 2; fill: none; }
+    .edge-h { stroke: #d97706; stroke-width: 2; fill: none; stroke-dasharray: 6 5; }
+    .ah { fill: #64748b; }
+    .ah-h { fill: #d97706; }
+
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; stroke: #30363d; }
+      .h1, .st { fill: #f0f6fc; }
+      .h2, .sub { fill: #8b949e; }
+      .phase { fill: #6e7681; }
+      .lbl, .lg, .txt { fill: #b1bac4; }
+      .lbl-h { fill: #fbbf24; }
+      .kick { fill: #c4b5fd; }
+      .chip-t { fill: #e6edf3; }
+      .chip-tb { fill: #ddd6fe; }
+      .band { fill: #11161d; }
+      .c-agent { fill: #1e1633; stroke: #7c3aed; }   .a-agent { fill: #8b5cf6; }
+      .c-human { fill: #261c0c; stroke: #d97706; }   .a-human { fill: #f59e0b; }
+      .c-sys   { fill: #0b2420; stroke: #0f766e; }   .a-sys   { fill: #14b8a6; }
+      .c-term  { fill: #161b22; stroke: #6e7681; }   .a-term  { fill: #8b949e; }
+      .c-term2 { stroke: #6e7681; }
+      .panel { fill: #140f22; stroke: #3b2a63; }
+      .chip  { fill: #0d1117; stroke: #30363d; }
+      .chip-b { fill: #2a1f4a; stroke: #6d28d9; }
+      .dot { fill: #c9d1d9; }
+      .ring { stroke: #c9d1d9; }
+      .edge { stroke: #8b949e; }
+      .edge-h { stroke: #f59e0b; }
+      .ah { fill: #8b949e; }
+      .ah-h { fill: #f59e0b; }
+    }
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <marker id="ahh" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="ah-h" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#0f172a" flood-opacity="0.07"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" x="0.5" y="0.5" width="1239" height="689" rx="18"/>
+
+  <!-- header -->
+  <text class="h1" x="40" y="56">Жизненный цикл work item</text>
+  <text class="h2" x="40" y="82">Машина состояний оркестратора: каждое событие сдвигает work item на шаг от сохранённой фазы</text>
+  <g transform="translate(724,52)">
+    <circle class="a-agent" cx="0" cy="0" r="6"/><text class="lg" x="12" y="4">Работает агент</text>
+    <circle class="a-human" cx="114" cy="0" r="6"/><text class="lg" x="126" y="4">Ждёт человека</text>
+    <circle class="a-sys" cx="226" cy="0" r="6"/><text class="lg" x="238" y="4">Система</text>
+    <circle class="a-term" cx="302" cy="0" r="6"/><text class="lg" x="314" y="4">Финал</text>
+  </g>
+
+  <!-- phase bands -->
+  <rect class="band" x="24" y="102" width="1192" height="262" rx="14"/>
+  <rect class="band" x="24" y="380" width="1192" height="172" rx="14"/>
+  <text class="phase" x="44" y="124">ФАЗА СПЕКИ</text>
+  <text class="phase" x="44" y="402">СБОРКА И РЕЛИЗ</text>
+
+  <!-- start -->
+  <circle class="dot" cx="128" cy="150" r="7"/>
+  <text class="lbl" x="142" y="154">тикет создан</text>
+  <line class="edge" x1="128" y1="160" x2="128" y2="225" marker-end="url(#ah)"/>
+
+  <!-- ===== spec phase states ===== -->
+  <g transform="translate(40,230)" filter="url(#sh)">
+    <rect class="c-sys" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">Ticket open</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">вебхук Plane</text>
+  </g>
+  <g transform="translate(262,230)" filter="url(#sh)">
+    <rect class="c-agent" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">Triaged</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">прочитаны логи и трейсы</text>
+  </g>
+  <g transform="translate(494,230)" filter="url(#sh)">
+    <rect class="c-agent" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">Drafting</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">агент спеки в Job</text>
+  </g>
+  <g transform="translate(494,120)" filter="url(#sh)">
+    <rect class="c-human" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">Awaiting answer</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">вопрос в тикете и чате</text>
+  </g>
+  <g transform="translate(754,230)" filter="url(#sh)">
+    <rect class="c-human" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">Spec review</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">в PR пока только спека</text>
+  </g>
+  <g transform="translate(754,120)" filter="url(#sh)">
+    <rect class="c-term" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">Closed</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">отклонён</text>
+  </g>
+  <g transform="translate(1014,230)" filter="url(#sh)">
+    <rect class="c-sys" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">Spec approved</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">ревизия спеки закреплена</text>
+  </g>
+
+  <!-- spec phase edges -->
+  <line class="edge" x1="220" y1="258" x2="257" y2="258" marker-end="url(#ah)"/>
+  <line class="edge" x1="442" y1="258" x2="489" y2="258" marker-end="url(#ah)"/>
+  <line class="edge" x1="674" y1="258" x2="749" y2="258" marker-end="url(#ah)"/>
+  <text class="lbl" x="712" y="248" text-anchor="middle">PR спеки</text>
+  <line class="edge" x1="934" y1="258" x2="1009" y2="258" marker-end="url(#ah)"/>
+  <text class="lbl" x="972" y="248" text-anchor="middle">апрув</text>
+
+  <line class="edge-h" x1="562" y1="226" x2="562" y2="181" marker-end="url(#ahh)"/>
+  <text class="lbl-h" x="554" y="207" text-anchor="end">нужна инфа</text>
+  <line class="edge-h" x1="602" y1="180" x2="602" y2="225" marker-end="url(#ahh)"/>
+  <text class="lbl-h" x="610" y="207">ответ</text>
+
+  <line class="edge" x1="842" y1="226" x2="842" y2="181" marker-end="url(#ah)"/>
+  <text class="lbl" x="850" y="207">отказ</text>
+  <line class="edge" x1="934" y1="148" x2="947" y2="148" marker-end="url(#ah)"/>
+  <circle class="ring" cx="961" cy="148" r="9"/><circle class="dot" cx="961" cy="148" r="4.5"/>
+
+  <path class="edge-h" d="M812,290 C812,338 612,338 612,291" marker-end="url(#ahh)"/>
+  <text class="lbl-h" x="712" y="351" text-anchor="middle">доработать</text>
+
+  <!-- spec approved -> implementing -->
+  <line class="edge" x1="1102" y1="290" x2="1102" y2="415" marker-end="url(#ah)"/>
+  <text class="lbl" x="1112" y="344">запуск</text>
+  <text class="lbl" x="1112" y="359">k8s Job</text>
+
+  <!-- ===== build & release states (right to left) ===== -->
+  <g transform="translate(1014,420)" filter="url(#sh)">
+    <rect class="c-agent" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">Implementing</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">кодинг-агент в Job</text>
+  </g>
+  <g transform="translate(754,420)" filter="url(#sh)">
+    <rect class="c-human" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">Code review</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">тот же PR · превью</text>
+  </g>
+  <g transform="translate(494,420)" filter="url(#sh)">
+    <rect class="c-sys" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">On dev</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">development задеплоен</text>
+  </g>
+  <g transform="translate(262,420)" filter="url(#sh)">
+    <rect class="c-sys" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">Released</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">тег в main · прод обновлён</text>
+  </g>
+  <g transform="translate(40,420)" filter="url(#sh)">
+    <rect class="c-term" width="176" height="56" rx="12"/>
+    <text class="st" x="88" y="25" text-anchor="middle">Done</text>
+    <text class="sub" x="88" y="43" text-anchor="middle">тикет закрыт</text>
+  </g>
+
+  <!-- build & release edges -->
+  <line class="edge" x1="1010" y1="448" x2="935" y2="448" marker-end="url(#ah)"/>
+  <text class="lbl" x="972" y="438" text-anchor="middle">код запушен</text>
+  <line class="edge" x1="750" y1="448" x2="675" y2="448" marker-end="url(#ah)"/>
+  <text class="lbl" x="712" y="438" text-anchor="middle">мёрж</text>
+  <text class="lbl" x="712" y="468" text-anchor="middle">человеком</text>
+  <line class="edge" x1="490" y1="448" x2="443" y2="448" marker-end="url(#ah)"/>
+  <text class="lbl" x="466" y="438" text-anchor="middle">релиз</text>
+  <line class="edge" x1="258" y1="448" x2="221" y2="448" marker-end="url(#ah)"/>
+
+  <path class="edge-h" d="M842,480 C842,528 1102,528 1102,481" marker-end="url(#ahh)"/>
+  <text class="lbl-h" x="972" y="540" text-anchor="middle">нужны правки</text>
+
+  <line class="edge" x1="128" y1="480" x2="128" y2="499" marker-end="url(#ah)"/>
+  <circle class="ring" cx="128" cy="513" r="9"/><circle class="dot" cx="128" cy="513" r="4.5"/>
+
+  <!-- ===== events panel ===== -->
+  <rect class="panel" x="24" y="568" width="1192" height="98" rx="14"/>
+  <text class="kick" x="44" y="593">СОБЫТИЯ ОТ ЛЮДЕЙ · ТОЛЬКО С УПОМИНАНИЕМ @agent</text>
+  <rect class="chip" x="44" y="606" width="176" height="27" rx="13.5"/><text class="chip-t" x="132" y="624" text-anchor="middle">Plane: @agent · статус</text>
+  <rect class="chip" x="230" y="606" width="172" height="27" rx="13.5"/><text class="chip-t" x="316" y="624" text-anchor="middle">Gitea: @agent · ревью</text>
+  <rect class="chip" x="412" y="606" width="204" height="27" rx="13.5"/><text class="chip-t" x="514" y="624" text-anchor="middle">Mattermost: @agent в треде</text>
+  <line class="edge" x1="628" y1="619.5" x2="670" y2="619.5" marker-end="url(#ah)"/>
+  <rect class="chip-b" x="678" y="606" width="420" height="27" rx="13.5"/><text class="chip-tb" x="888" y="624" text-anchor="middle">approve · request_changes · answer · merge · release</text>
+  <text class="txt" x="44" y="654">Модель понимает намерение, код решает, можно ли (кто, роль, фаза) · события самого агента отбрасываются · в main мёржат только люди</text>
+</svg>

@@ -1,0 +1,253 @@
+<svg xmlns="http://www.w3.org/2000/svg" lang="ru" viewBox="0 0 1240 796" width="1240" height="796" role="img" aria-labelledby="title desc">
+  <title id="title">Ветки и окружения</title>
+  <desc id="desc">Один тикет от запроса до релиза в трёх дорожках. Статусы тикета в Plane: назначен на @agent, drafting, spec review, approved, implementing, code review, on dev, released. Git: агент ответвляет feat/EWA-12 от development, коммитит спеку, открывает PR, человек апрувит спеку, агент коммитит код, CI собирает образ, и у PR появляется превью; инженер или агент по его просьбе мёржит в development, который деплоится в dev; агент открывает релизный PR, а человек мёржит его в main с тегом v1.6.0, который деплоится в продакшен. Окружения: превью на каждый PR, dev из development, продакшен из main.</desc>
+  <style>
+    .bg { fill: #ffffff; stroke: #e5e7eb; }
+    text { font-family: Inter, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .mono { font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace; }
+    .h1 { font-size: 24px; font-weight: 700; fill: #0f172a; }
+    .h2 { font-size: 14px; fill: #64748b; }
+    .phase { font-size: 11px; font-weight: 700; letter-spacing: 1.4px; fill: #94a3b8; }
+    .st { font-size: 15px; font-weight: 700; fill: #0f172a; }
+    .cst { font-size: 12.5px; font-weight: 700; fill: #0f172a; }
+    .sub { font-size: 11.5px; fill: #64748b; }
+    .lbl { font-size: 11.5px; font-weight: 600; fill: #475569; }
+    .lbl-h { font-size: 11.5px; font-weight: 700; fill: #b45309; }
+    .lg { font-size: 12px; fill: #475569; }
+    .txt { font-size: 12.5px; fill: #475569; }
+    .key { font-size: 12px; fill: #94a3b8; }
+    .val { font-size: 12px; fill: #334155; }
+    .br { font-size: 12px; font-weight: 600; fill: #334155; }
+    .kick { font-size: 10.5px; font-weight: 700; letter-spacing: 1.2px; fill: #6d28d9; }
+    .chip-t { font-size: 12px; font-weight: 600; fill: #334155; }
+    .tag-t { font-size: 11px; font-weight: 600; fill: #334155; }
+
+    .band { fill: #f8fafc; }
+    .panel { fill: #faf5ff; stroke: #ddd6fe; }
+    .chip  { fill: #ffffff; stroke: #cbd5e1; }
+    .tag   { fill: #f1f5f9; stroke: #94a3b8; }
+    .guide { stroke: #cbd5e1; stroke-width: 1.2; stroke-dasharray: 2 4; fill: none; }
+
+    .c-agent { fill: #f5f3ff; stroke: #a78bfa; stroke-width: 1.5; }   .a-agent { fill: #7c3aed; }
+    .c-human { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1.5; }   .a-human { fill: #d97706; }
+    .c-sys   { fill: #f0fdfa; stroke: #5eead4; stroke-width: 1.5; }   .a-sys   { fill: #0f766e; }
+
+    .c-prev { fill: #f0f9ff; stroke: #7dd3fc; stroke-width: 1.5; }   .t-prev { fill: #0369a1; }
+    .c-dev  { fill: #f0fdfa; stroke: #5eead4; stroke-width: 1.5; }   .t-dev  { fill: #0f766e; }
+    .c-prod { fill: #f0fdf4; stroke: #86efac; stroke-width: 1.5; }   .t-prod { fill: #15803d; }
+    .b-prev { stroke: #0ea5e9; stroke-width: 3; fill: none; stroke-linecap: round; }
+    .b-dev  { stroke: #14b8a6; stroke-width: 3; fill: none; stroke-linecap: round; }
+    .b-prod { stroke: #22c55e; stroke-width: 3; fill: none; stroke-linecap: round; }
+    .n-dev  { fill: #ffffff; stroke: #14b8a6; stroke-width: 2.5; }
+    .n-prod { fill: #ffffff; stroke: #22c55e; stroke-width: 2.5; }
+    .n-ghost { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; }
+    .n-agent { fill: #7c3aed; stroke: #ffffff; stroke-width: 2; }
+    .n-ci    { fill: #0f766e; stroke: #ffffff; stroke-width: 1.5; }
+    .gate    { fill: #f59e0b; stroke: #ffffff; stroke-width: 2; }
+
+    .edge { stroke: #64748b; stroke-width: 1.5; fill: none; }
+    .ah { fill: #64748b; }
+
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; stroke: #30363d; }
+      .h1, .st, .cst { fill: #f0f6fc; }
+      .h2, .sub { fill: #8b949e; }
+      .phase, .key { fill: #6e7681; }
+      .lbl, .lg, .txt { fill: #b1bac4; }
+      .val, .br, .chip-t, .tag-t { fill: #e6edf3; }
+      .lbl-h { fill: #fbbf24; }
+      .kick { fill: #c4b5fd; }
+      .band { fill: #11161d; }
+      .panel { fill: #140f22; stroke: #3b2a63; }
+      .chip { fill: #0d1117; stroke: #30363d; }
+      .tag  { fill: #161b22; stroke: #6e7681; }
+      .guide { stroke: #30363d; }
+      .c-agent { fill: #1e1633; stroke: #7c3aed; }   .a-agent { fill: #8b5cf6; }
+      .c-human { fill: #261c0c; stroke: #d97706; }   .a-human { fill: #f59e0b; }
+      .c-sys   { fill: #0b2420; stroke: #0f766e; }   .a-sys   { fill: #14b8a6; }
+      .c-prev { fill: #0b1d2b; stroke: #0369a1; }   .t-prev { fill: #38bdf8; }
+      .c-dev  { fill: #0b2420; stroke: #0f766e; }   .t-dev  { fill: #2dd4bf; }
+      .c-prod { fill: #0c2216; stroke: #15803d; }   .t-prod { fill: #4ade80; }
+      .n-dev, .n-prod, .n-ghost { fill: #11161d; }
+      .n-ghost { stroke: #6e7681; }
+      .n-agent, .n-ci, .gate { stroke: #11161d; }
+      .n-agent { fill: #8b5cf6; }
+      .n-ci { fill: #14b8a6; }
+      .edge { stroke: #8b949e; }
+      .ah { fill: #8b949e; }
+    }
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#0f172a" flood-opacity="0.07"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" x="0.5" y="0.5" width="1239" height="795" rx="18"/>
+
+  <!-- header -->
+  <text class="h1" x="40" y="56">Ветки и окружения</text>
+  <text class="h2" x="40" y="82">Один тикет от запроса до релиза: что видно в тикете, что происходит в git, куда кликнуть</text>
+  <g transform="translate(866,52)">
+    <circle class="a-agent" cx="0" cy="0" r="6"/><text class="lg" x="12" y="4">Работает агент</text>
+    <path class="gate" d="M106,-7 L113,0 L106,7 L99,0 Z"/><text class="lg" x="120" y="4">Решает человек</text>
+    <circle class="a-sys" cx="234" cy="0" r="6"/><text class="lg" x="246" y="4">CI · Argo CD</text>
+  </g>
+
+  <!-- lane bands -->
+  <rect class="band" x="24" y="104" width="1192" height="78" rx="14"/>
+  <rect class="band" x="24" y="196" width="1192" height="288" rx="14"/>
+  <rect class="band" x="24" y="498" width="1192" height="164" rx="14"/>
+
+  <text class="phase" x="44" y="139">ТИКЕТ</text>
+  <text class="sub" x="44" y="157">Plane · EWA-12</text>
+  <text class="phase" x="44" y="224">GIT</text>
+  <text class="sub" x="44" y="242">example-webapp</text>
+  <text class="phase" x="44" y="526">ДЕПЛОЙ</text>
+  <text class="sub" x="44" y="544">Argo CD</text>
+
+  <!-- timeline guides: ticket status -> git event -->
+  <line class="guide" x1="334" y1="162" x2="334" y2="412"/>
+  <line class="guide" x1="448" y1="162" x2="448" y2="410"/>
+  <line class="guide" x1="562" y1="162" x2="562" y2="410"/>
+  <line class="guide" x1="676" y1="162" x2="676" y2="412"/>
+  <line class="guide" x1="790" y1="162" x2="790" y2="410"/>
+  <line class="guide" x1="966" y1="162" x2="966" y2="334"/>
+  <line class="guide" x1="1124" y1="162" x2="1124" y2="234"/>
+
+  <!-- ===== ticket lane ===== -->
+  <g filter="url(#sh)">
+    <rect class="c-human" x="172" y="128" width="96" height="30" rx="15"/>
+    <rect class="c-agent" x="286" y="128" width="96" height="30" rx="15"/>
+    <rect class="c-human" x="400" y="128" width="96" height="30" rx="15"/>
+    <rect class="c-sys"   x="514" y="128" width="96" height="30" rx="15"/>
+    <rect class="c-agent" x="628" y="128" width="96" height="30" rx="15"/>
+    <rect class="c-human" x="742" y="128" width="96" height="30" rx="15"/>
+    <rect class="c-sys"   x="918" y="128" width="96" height="30" rx="15"/>
+    <rect class="c-sys"  x="1076" y="128" width="96" height="30" rx="15"/>
+  </g>
+  <text class="cst" x="220" y="147.5" text-anchor="middle">→ @agent</text>
+  <text class="cst" x="334" y="147.5" text-anchor="middle">Drafting</text>
+  <text class="cst" x="448" y="147.5" text-anchor="middle">Spec review</text>
+  <text class="cst" x="562" y="147.5" text-anchor="middle">Approved</text>
+  <text class="cst" x="676" y="147.5" text-anchor="middle">Implementing</text>
+  <text class="cst" x="790" y="147.5" text-anchor="middle">Code review</text>
+  <text class="cst" x="966" y="147.5" text-anchor="middle">On dev</text>
+  <text class="cst" x="1124" y="147.5" text-anchor="middle">Released</text>
+  <line class="edge" x1="270" y1="143" x2="284" y2="143" marker-end="url(#ah)"/>
+  <line class="edge" x1="384" y1="143" x2="398" y2="143" marker-end="url(#ah)"/>
+  <line class="edge" x1="498" y1="143" x2="512" y2="143" marker-end="url(#ah)"/>
+  <line class="edge" x1="612" y1="143" x2="626" y2="143" marker-end="url(#ah)"/>
+  <line class="edge" x1="726" y1="143" x2="740" y2="143" marker-end="url(#ah)"/>
+  <line class="edge" x1="840" y1="143" x2="916" y2="143" marker-end="url(#ah)"/>
+  <line class="edge" x1="1016" y1="143" x2="1074" y2="143" marker-end="url(#ah)"/>
+
+  <!-- ===== git lane ===== -->
+  <text class="br mono" x="44" y="274">main</text>
+  <text class="br mono" x="44" y="350">development</text>
+  <text class="br mono" x="44" y="426">feat/EWA-12_*</text>
+  <line class="guide" x1="148" y1="422" x2="300" y2="422"/>
+
+  <!-- branch lines -->
+  <line class="b-prod" x1="172" y1="270" x2="1212" y2="270"/>
+  <line class="b-dev" x1="172" y1="346" x2="1212" y2="346"/>
+  <path class="b-prev" d="M262,346 C292,346 292,422 322,422 L908,422 C938,422 936,346 966,346"/>
+  <path class="b-dev" d="M1072,346 C1098,346 1098,270 1124,270"/>
+
+  <!-- main: previous release -->
+  <circle class="n-prod" cx="214" cy="270" r="6"/>
+  <rect class="tag" x="189" y="236" width="50" height="20" rx="10"/>
+  <text class="tag-t mono" x="214" y="250" text-anchor="middle">v1.5.0</text>
+
+  <!-- development: base, other tickets -->
+  <circle class="n-dev" cx="214" cy="346" r="6"/>
+  <circle class="n-dev" cx="262" cy="346" r="6"/>
+  <circle class="n-ghost" cx="604" cy="346" r="5"/>
+  <circle class="n-ghost" cx="636" cy="346" r="5"/>
+  <text class="sub" x="620" y="333" text-anchor="middle">другие тикеты</text>
+
+  <!-- feature branch events -->
+  <circle class="n-agent" cx="334" cy="422" r="7.5"/>
+  <text class="lbl" x="334" y="450" text-anchor="middle">коммит спеки</text>
+  <text class="sub" x="334" y="466" text-anchor="middle">proposal · specs · tasks</text>
+
+  <rect class="chip" x="384" y="411" width="128" height="22" rx="11"/>
+  <text class="chip-t" x="448" y="426" text-anchor="middle">PR → development</text>
+
+  <path class="gate" d="M562,411 L573,422 L562,433 L551,422 Z"/>
+  <text class="lbl-h" x="562" y="450" text-anchor="middle">спека одобрена</text>
+  <text class="sub" x="562" y="466" text-anchor="middle">через @agent или статус</text>
+
+  <circle class="n-agent" cx="676" cy="422" r="7.5"/>
+  <text class="lbl" x="676" y="450" text-anchor="middle">код + архив</text>
+  <text class="sub" x="676" y="466" text-anchor="middle">apply в k8s Job</text>
+
+  <rect class="n-ci" x="728" y="417" width="10" height="10" rx="2"/>
+  <text class="lbl" x="733" y="404" text-anchor="middle">CI · image :sha</text>
+
+  <rect class="c-prev" x="752" y="411" width="76" height="22" rx="11"/>
+  <text class="chip-t t-prev" x="790" y="426" text-anchor="middle">→ превью</text>
+  <text class="lbl" x="806" y="450" text-anchor="middle">превью поднято</text>
+  <text class="sub" x="806" y="466" text-anchor="middle">ссылка ушла в тикет</text>
+
+  <!-- merge into development -->
+  <path class="gate" d="M966,335 L977,346 L966,357 L955,346 Z"/>
+  <rect class="c-dev" x="988" y="335" width="58" height="22" rx="11"/>
+  <text class="chip-t t-dev" x="1017" y="350" text-anchor="middle">→ dev</text>
+  <text class="lbl-h" x="982" y="378">мёрж</text>
+  <text class="sub" x="982" y="394">инженер или @agent по просьбе</text>
+
+  <!-- release into main -->
+  <path class="gate" d="M1124,259 L1135,270 L1124,281 L1113,270 Z"/>
+  <rect class="tag" x="1099" y="236" width="50" height="20" rx="10"/>
+  <text class="tag-t mono" x="1124" y="250" text-anchor="middle">v1.6.0</text>
+  <rect class="c-prod" x="1144" y="259" width="58" height="22" rx="11"/>
+  <text class="chip-t t-prod" x="1173" y="274" text-anchor="middle">→ prod</text>
+  <text class="lbl-h" x="1086" y="300" text-anchor="end">релиз</text>
+  <text class="sub" x="1086" y="316" text-anchor="end">PR от @agent, мёржит человек</text>
+
+  <!-- ===== environments ===== -->
+  <g filter="url(#sh)">
+    <rect class="c-prev" x="176" y="514" width="330" height="134" rx="12"/>
+    <rect class="c-dev"  x="523" y="514" width="330" height="134" rx="12"/>
+    <rect class="c-prod" x="870" y="514" width="330" height="134" rx="12"/>
+  </g>
+
+  <text class="st" x="196" y="542">Превью</text>
+  <text class="sub" x="486" y="542" text-anchor="end">живёт, пока жив PR</text>
+  <text class="cst mono t-prev" x="196" y="566">ewa-12.qa.example-webapp.sdlc.internal</text>
+  <text class="key" x="196" y="592">ветка</text><text class="val" x="262" y="592">head PR из feat/EWA-12_*</text>
+  <text class="key" x="196" y="611">деплой</text><text class="val" x="262" y="611">код в PR и CI зелёный</text>
+  <text class="key" x="196" y="630">через</text><text class="val" x="262" y="630">ApplicationSet, PR generator</text>
+
+  <text class="st" x="543" y="542">Dev</text>
+  <text class="sub" x="833" y="542" text-anchor="end">работает всегда</text>
+  <text class="cst mono t-dev" x="543" y="566">dev.example-webapp.sdlc.internal</text>
+  <text class="key" x="543" y="592">ветка</text><text class="val" x="609" y="592">development</text>
+  <text class="key" x="543" y="611">деплой</text><text class="val" x="609" y="611">на каждый мёрж</text>
+  <text class="key" x="543" y="630">образ</text><text class="val" x="609" y="630">SHA коммита, который синкнул Argo CD</text>
+
+  <text class="st" x="890" y="542">Продакшен</text>
+  <text class="sub" x="1180" y="542" text-anchor="end">работает всегда</text>
+  <text class="cst mono t-prod" x="890" y="566">example-webapp.sdlc.internal</text>
+  <text class="key" x="890" y="592">ветка</text><text class="val" x="956" y="592">main</text>
+  <text class="key" x="890" y="611">деплой</text><text class="val" x="956" y="611">человек мёржит релизный PR</text>
+  <text class="key" x="890" y="630">версия</text><text class="val" x="956" y="630">тег v1.6.0: minor на каждый релиз</text>
+
+  <!-- ===== one id across systems ===== -->
+  <rect class="panel" x="24" y="676" width="1192" height="96" rx="14"/>
+  <text class="kick" x="44" y="701">ОДИН ID ВО ВСЕХ СИСТЕМАХ</text>
+  <rect class="chip" x="44" y="713" width="104" height="27" rx="13.5"/><text class="chip-t" x="96" y="731" text-anchor="middle">Plane · EWA-12</text>
+  <line class="edge" x1="156" y1="726.5" x2="184" y2="726.5" marker-end="url(#ah)"/>
+  <rect class="chip" x="192" y="713" width="186" height="27" rx="13.5"/><text class="chip-t mono" x="285" y="731" text-anchor="middle">feat/EWA-12_add-filters</text>
+  <line class="edge" x1="386" y1="726.5" x2="414" y2="726.5" marker-end="url(#ah)"/>
+  <rect class="chip" x="422" y="713" width="128" height="27" rx="13.5"/><text class="chip-t" x="486" y="731" text-anchor="middle">PR → development</text>
+  <line class="edge" x1="558" y1="726.5" x2="586" y2="726.5" marker-end="url(#ah)"/>
+  <rect class="c-prev" x="594" y="713" width="300" height="27" rx="13.5"/><text class="chip-t mono t-prev" x="744" y="731" text-anchor="middle">ewa-12.qa.example-webapp.sdlc.internal</text>
+  <line class="edge" x1="902" y1="726.5" x2="930" y2="726.5" marker-end="url(#ah)"/>
+  <rect class="c-prod" x="938" y="713" width="170" height="27" rx="13.5"/><text class="chip-t t-prod" x="1023" y="731" text-anchor="middle">release notes v1.6.0</text>
+  <text class="txt" x="44" y="760">Тег образа — везде SHA коммита, версия — лишь ярлык · агентские Job’ы не мёржат, в main мёржат только люди · закрыли PR — превью удалилось</text>
+</svg>

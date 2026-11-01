@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 820" width="1280" height="820" role="img" aria-labelledby="title desc">
   <title id="title">Architecture</title>
-  <desc id="desc">People use Plane, Mattermost and Gitea. Channel adapters feed an orchestrator built on LangGraph, which passes guardrails and launches agent runs as Kubernetes Jobs. The target app emits logs and traces used for triage. Everything runs on k3s, reconciled by Argo CD.</desc>
+  <desc id="desc">People use Plane, Mattermost and Gitea, or Jira, Trello, Slack, Telegram, GitLab or GitHub through the same adapters. Channel adapters feed an orchestrator built on LangGraph, which passes guardrails and launches agent runs as Kubernetes Jobs. The target projects are the company's products, any number of them, each in its own repository and tracker project; they emit logs and traces used for triage. Everything runs on k3s, reconciled by Argo CD.</desc>
   <style>
     .bg { fill: #ffffff; stroke: #e5e7eb; }
     text { font-family: Inter, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -14,6 +14,7 @@
     .lbl { font-size: 11.5px; font-weight: 600; fill: #475569; }
     .lg { font-size: 12px; fill: #475569; }
     .chip-t { font-size: 12px; font-weight: 600; fill: #334155; }
+    .alt { font-size: 13px; font-weight: 500; fill: #64748b; }
 
     .c-human { fill: #fffbeb; stroke: #fcd34d; }   .a-human { fill: #d97706; }   .k-human { fill: #b45309; }
     .c-plat  { fill: #f0fdfa; stroke: #99f6e4; }   .a-plat  { fill: #0f766e; }   .k-plat  { fill: #0f766e; }
@@ -30,6 +31,7 @@
     .ah-s { fill: #94a3b8; }
 
     @media (prefers-color-scheme: dark) {
+      .alt { fill: #8b949e; }
       .bg { fill: #0d1117; stroke: #30363d; }
       .h1, .ttl, .ttl-s { fill: #f0f6fc; }
       .h2 { fill: #8b949e; }
@@ -71,7 +73,7 @@
     <circle class="a-human" cx="0" cy="0" r="6"/><text class="lg" x="12" y="4">People</text>
     <circle class="a-plat" cx="82" cy="0" r="6"/><text class="lg" x="94" y="4">Platform</text>
     <circle class="a-agent" cx="174" cy="0" r="6"/><text class="lg" x="186" y="4">Ours</text>
-    <circle class="a-app" cx="240" cy="0" r="6"/><text class="lg" x="252" y="4">Target app</text>
+    <circle class="a-app" cx="240" cy="0" r="6"/><text class="lg" x="252" y="4">Target projects</text>
   </g>
 
   <!-- column headers -->
@@ -100,21 +102,21 @@
   <g transform="translate(250,160)">
     <rect class="c-plat" width="240" height="110" rx="14" filter="url(#sh)"/>
     <text class="kick k-plat" x="20" y="28">TRACKER</text>
-    <text class="ttl" x="20" y="52">Plane CE</text>
+    <text class="ttl" x="20" y="52">Plane<tspan class="alt"> / Jira / Trello</tspan></text>
     <text class="txt" x="20" y="76">Tickets, boards, statuses;</text>
     <text class="txt" x="20" y="93">clarifications in comments</text>
   </g>
   <g transform="translate(250,300)">
     <rect class="c-plat" width="240" height="110" rx="14" filter="url(#sh)"/>
     <text class="kick k-plat" x="20" y="28">CHAT</text>
-    <text class="ttl" x="20" y="52">Mattermost</text>
+    <text class="ttl" x="20" y="52">Mattermost<tspan class="alt"> / Slack / Telegram</tspan></text>
     <text class="txt" x="20" y="76">Summaries, quick approvals;</text>
     <text class="txt" x="20" y="93">one thread per work item</text>
   </g>
   <g transform="translate(250,440)">
     <rect class="c-plat" width="240" height="110" rx="14" filter="url(#sh)"/>
     <text class="kick k-plat" x="20" y="28">GIT · CI</text>
-    <text class="ttl" x="20" y="52">Gitea</text>
+    <text class="ttl" x="20" y="52">Gitea<tspan class="alt"> / GitLab / GitHub</tspan></text>
     <text class="txt" x="20" y="76">Spec PRs and code PRs;</text>
     <text class="txt" x="20" y="93">branch protection, Actions</text>
   </g>
@@ -136,14 +138,14 @@
   <g transform="translate(570,268)">
     <rect class="c-agent" width="350" height="66" rx="12"/>
     <text class="ttl-s" x="18" y="27">Event normalizer</text>
-    <text class="txt" x="18" y="48">approve · request_changes · reject · answer @ rev</text>
+    <text class="txt" x="18" y="48">@agent mention → intent → policy (who · role · phase)</text>
   </g>
   <g transform="translate(570,364)">
     <rect class="c-orch" width="350" height="96" rx="12" filter="url(#sh)"/>
     <text class="kick k-agent" x="18" y="26">CORE</text>
     <text class="ttl" x="18" y="49">Orchestrator</text>
     <text class="txt" x="18" y="70">LangGraph graph per work item</text>
-    <text class="txt" x="18" y="87">Postgres checkpointer · interrupt() = human gate</text>
+    <text class="txt" x="18" y="87">Postgres checkpointer · one step per event</text>
   </g>
   <g transform="translate(570,488)">
     <rect class="c-agent" width="350" height="58" rx="12"/>
@@ -169,18 +171,20 @@
 
   <!-- ===== runtime ===== -->
   <g transform="translate(990,160)">
+    <rect class="c-app" x="-14" y="-14" width="230" height="110" rx="14" opacity="0.45"/>
+    <rect class="c-app" x="-7" y="-7" width="230" height="110" rx="14" opacity="0.75"/>
     <rect class="c-app" width="230" height="110" rx="14" filter="url(#sh)"/>
-    <text class="kick k-app" x="20" y="28">TARGET APP</text>
-    <text class="ttl" x="20" y="52">Business agent</text>
-    <text class="txt" x="20" y="76">LangGraph · deepagents;</text>
-    <text class="txt" x="20" y="93">what the loop maintains</text>
+    <text class="kick k-app" x="20" y="28">TARGET PROJECTS</text>
+    <text class="ttl" x="20" y="52">Company products</text>
+    <text class="txt" x="20" y="76">example-webapp, agent app, …</text>
+    <text class="txt" x="20" y="93">own repo + tracker project each</text>
   </g>
   <g transform="translate(990,320)">
     <rect class="c-plat" width="230" height="110" rx="14" filter="url(#sh)"/>
     <text class="kick k-plat" x="20" y="28">OBSERVABILITY</text>
     <text class="ttl" x="20" y="52">Loki · Langfuse</text>
     <text class="txt" x="20" y="76">logs with Grafana;</text>
-    <text class="txt" x="20" y="93">LLM traces of app and agents</text>
+    <text class="txt" x="20" y="93">LLM traces of apps and agents</text>
   </g>
   <g transform="translate(990,540)">
     <rect class="c-agent" width="230" height="110" rx="14" filter="url(#sh)"/>
