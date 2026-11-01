@@ -189,17 +189,22 @@ a person approving it.
 The whole platform targets a single 32 GB machine. Components arrive **just in time**:
 each one lands with the first change that needs it, not up front.
 
-| Component | Est. RAM |
+| Component | RAM |
 |---|---|
-| k3s, Traefik, Argo CD | ~1.4 GB |
-| Postgres (CNPG, shared) | ~0.8 GB |
-| Gitea and its runner | ~0.8–2.3 GB |
-| Plane CE | ~2.5 GB |
+| k3s itself: API server, containerd, one shim per pod | 1.9 GB *(measured)* |
+| Argo CD, Traefik, cert-manager, CloudNativePG operator, CoreDNS | 0.5 GB *(measured)* |
+| Postgres (CNPG, shared) | 0.1 GB *(measured, databases still empty)* |
+| Gitea | 0.1 GB *(measured)* |
+| Plane CE | 1.0 GB *(measured)* |
+| Gitea runner | ~0.7–2.2 GB |
 | Mattermost, Keycloak | ~1.4 GB |
 | Langfuse (with ClickHouse) | ~3 GB |
 | Loki, Grafana, Alloy | ~0.8 GB |
 | Orchestrator, target app, agent Job | ~1.5 GB |
-| **Total** | **~12–14 GB** *(estimate)* |
+| **Total** | **~11–12.5 GB**: 3.5 GB measured for what runs today, the rest estimated |
+
+Measured with the platform core idle: the pods' working set (`kubectl top pods`) plus the
+memory of the k3s, containerd and shim processes on the host.
 
 LLMs are remote, and running models locally on top of this would not fit.
 

@@ -80,7 +80,9 @@ Phase 2 changes the host, and each change is checked first and skipped when alre
 | What | Where |
 |---|---|
 | k3s, pinned in `bootstrap.sh`, bundled Traefik disabled | system service `k3s`, `/usr/local/bin/{k3s,kubectl}`, `/etc/rancher/`, `/var/lib/rancher/` |
-| Traffic to pods bypasses VPN routing rules, so a VPN in TUN mode cannot capture pods' DNS | `ip rule` priority 100 for `10.42.0.0/16`, re-added on every k3s start by `/etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf` |
+| The node's own address `10.254.0.1`, which stays the same offline and on any network, so the operators and Argo CD never lose the Kubernetes API | dummy interface `sdlc0`, and k3s's flags in `/etc/rancher/k3s/config.yaml` |
+| Traffic to pods bypasses VPN routing rules, so a VPN in TUN mode cannot capture pods' DNS | `ip rule` priority 100 for `10.42.0.0/16` |
+| Both of the above come back on every k3s start, including after a reboot | `/etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf` |
 | Cluster access for you | `~/.kube/config`; a config that was already there is kept as `~/.kube/config.before-ai-native-sdlc` |
 | Service names from [`hosts.txt`](hosts.txt) → `127.0.0.1` | a block between `# BEGIN ai-native-sdlc` and `# END ai-native-sdlc` in `/etc/hosts`; the original is kept as `/etc/hosts.before-ai-native-sdlc` |
 | Root CA trusted by the system (curl, git, most tools) | `/usr/local/share/ca-certificates/ai-native-sdlc.crt` |
@@ -107,8 +109,9 @@ sudo rm -f /usr/local/share/ca-certificates/ai-native-sdlc.crt /etc/firefox/poli
      | sudo tee /etc/firefox/policies/policies.json.new >/dev/null \
   && sudo mv /etc/firefox/policies/policies.json.new /etc/firefox/policies/policies.json
 
-# 3. the routing rule for pods
+# 3. the node's interface and the routing rule for pods
 sudo rm -f /etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf \
+  && sudo ip link del sdlc0 \
   && sudo ip rule del to 10.42.0.0/16 lookup main priority 100
 ```
 

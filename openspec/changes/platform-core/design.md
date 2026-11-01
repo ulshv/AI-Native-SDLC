@@ -124,6 +124,14 @@ through the Gitea API.
   (`traefik.traefik.svc.cluster.local`, answer rewritten automatically).
 - Both paths end at the same Traefik and the same certificate, and neither depends on the
   host's network address. This is what the offline and network-switch scenarios require.
+- **The control plane does not depend on it either.** k3s would take the Wi-Fi address as the
+  node's, and the Kubernetes API Service points at the node's address: offline it disappears,
+  on another network it changes, and the operators and Argo CD lose the API (found in the
+  offline test). The node therefore gets `10.254.0.1` on a dummy interface `sdlc0`
+  (`node-ip` and `flannel-iface` in k3s's `config.yaml`), created by the k3s drop-in below on
+  every start. This is for the laptop only: a cloud or multi-node host uses its own stable
+  address as the node's and creates no such interface (on several nodes it would give every
+  node the same address). Nothing under `platform/apps/` refers to it.
 - **VPN clients on the host.** A VPN in TUN mode (sing-box, Clash, WireGuard, Tailscale) adds
   policy routing rules that can capture pod traffic: sing-box sends all port 53 traffic into
   its tunnel, so pods' DNS queries never reach CoreDNS once the Service IP is translated. The

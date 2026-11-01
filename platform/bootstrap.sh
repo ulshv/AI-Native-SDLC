@@ -31,6 +31,11 @@ FIREFOX_CA=/etc/firefox/policies/$TRUST_NAME-ca.crt
 POD_CIDR=10.42.0.0/16
 POD_ROUTE_PRIORITY=100
 K3S_ROUTING_DROPIN=/etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf
+K3S_CONFIG=/etc/rancher/k3s/config.yaml
+# The node's address lives on a dummy interface of its own, so it stays the same offline and
+# on every network. Pods reach the Kubernetes API through it.
+NODE_IFACE=sdlc0
+NODE_IP=10.254.0.1
 GITEA_HOST=https://gitea.sdlc.internal
 GITEA_REPO=sdlc/ai-native-sdlc
 GITEA_REMOTE=$GITEA_HOST/$GITEA_REPO.git
@@ -212,13 +217,35 @@ k3s_installed() {
   [[ $(k3s --version 2>/dev/null) == *"$K3S_VERSION"* ]] && systemctl is-active -q k3s
 }
 
+# k3s reads its flags from config.yaml. The node address is the dummy interface's, never the
+# Wi-Fi's: otherwise the Kubernetes API Service points at an address that disappears offline or
+# changes on another network, and the operators and Argo CD lose the API. Bundled Traefik is
+# disabled because Argo CD installs its own; ServiceLB and local-path stay.
+k3s_config() {
+  printf '%s\n' \
+    "# Managed by ai-native-sdlc platform/bootstrap.sh" \
+    "disable: [traefik]" \
+    "node-ip: $NODE_IP" \
+    "flannel-iface: $NODE_IFACE"
+}
+
+k3s_config_current() { cmp -s <(k3s_config) "$K3S_CONFIG"; }
+
+# A running k3s picks up a changed config only on restart.
+write_k3s_config() {
+  sudo mkdir -p "$(dirname "$K3S_CONFIG")"
+  k3s_config | sudo tee "$K3S_CONFIG" >/dev/null
+  if systemctl is-active -q k3s; then
+    sudo systemctl restart k3s
+  fi
+}
+
 # The install script comes from the pinned release tag, not from the moving get.k3s.io.
-# Bundled Traefik is disabled because Argo CD installs its own; ServiceLB and local-path stay.
 install_k3s() {
   local script
   script=$(mktemp)
   curl -sfL "https://raw.githubusercontent.com/k3s-io/k3s/$K3S_VERSION/install.sh" -o "$script"
-  sudo env INSTALL_K3S_VERSION="$K3S_VERSION" sh "$script" --disable traefik
+  sudo env INSTALL_K3S_VERSION="$K3S_VERSION" sh "$script"
   rm -f "$script"
 }
 
@@ -236,29 +263,37 @@ write_kubeconfig() {
   (umask 077 && sudo cat /etc/rancher/k3s/k3s.yaml >"$KUBECONFIG")
 }
 
-# VPN clients in TUN mode (sing-box, Clash, WireGuard, Tailscale) add policy routing rules that
-# can steer pod traffic into their tunnel: sing-box sends all port 53 traffic there, so pods'
-# DNS queries never reach CoreDNS. A rule ahead of theirs keeps traffic to pods on the main
-# table. Traffic from pods to the internet still goes through the VPN.
+# The drop-in prepares the host's network each time k3s starts, including after a reboot:
+# - the dummy interface with the node's address (see k3s_config);
+# - a routing rule for VPN clients in TUN mode (sing-box, Clash, WireGuard, Tailscale), whose
+#   policy rules can steer pod traffic into their tunnel: sing-box sends all port 53 traffic
+#   there, so pods' DNS queries never reach CoreDNS. A rule ahead of theirs keeps traffic to
+#   pods on the main table. Traffic from pods to the internet still goes through the VPN.
 routing_dropin() {
   local rule="to $POD_CIDR lookup main priority $POD_ROUTE_PRIORITY"
   printf '%s\n' \
-    "# Managed by ai-native-sdlc platform/bootstrap.sh: traffic to pods bypasses VPN routing rules." \
+    "# Managed by ai-native-sdlc platform/bootstrap.sh: the node's own address, and traffic to pods" \
+    "# bypasses VPN routing rules." \
     "[Service]" \
+    "ExecStartPre=/bin/sh -c '/usr/sbin/ip link show $NODE_IFACE >/dev/null 2>&1 || /usr/sbin/ip link add $NODE_IFACE type dummy; /usr/sbin/ip addr replace $NODE_IP/32 dev $NODE_IFACE && /usr/sbin/ip link set $NODE_IFACE up'" \
     "ExecStartPre=-/bin/sh -c '/usr/sbin/ip rule del $rule 2>/dev/null; /usr/sbin/ip rule add $rule'"
 }
 
-pod_routing_in_place() {
+node_network_in_place() {
   cmp -s <(routing_dropin) "$K3S_ROUTING_DROPIN" &&
+    ip -4 -o addr show dev "$NODE_IFACE" 2>/dev/null | grep -qF " $NODE_IP/32 " &&
     ip rule show pref "$POD_ROUTE_PRIORITY" | grep -qE "^$POD_ROUTE_PRIORITY:\s+from all to $POD_CIDR lookup main"
 }
 
-# The drop-in re-adds the rule whenever k3s starts, including after a reboot.
-set_pod_routing() {
+# Writes the drop-in and does now what it does on every k3s start.
+set_node_network() {
   local rule="to $POD_CIDR lookup main priority $POD_ROUTE_PRIORITY"
   sudo mkdir -p "$(dirname "$K3S_ROUTING_DROPIN")"
   routing_dropin | sudo tee "$K3S_ROUTING_DROPIN" >/dev/null
   sudo systemctl daemon-reload
+  ip link show "$NODE_IFACE" >/dev/null 2>&1 || sudo ip link add "$NODE_IFACE" type dummy
+  sudo ip addr replace "$NODE_IP/32" dev "$NODE_IFACE"
+  sudo ip link set "$NODE_IFACE" up
   sudo ip rule del $rule 2>/dev/null || true
   sudo ip rule add $rule
 }
@@ -426,8 +461,9 @@ reissue_wildcard() { kubectl delete secret -n traefik wildcard-sdlc-internal-tls
 
 # Installs k3s, the /etc/hosts block and host CA trust, and applies Kubernetes Secrets.
 phase_host() {
+  step "node address $NODE_IP on $NODE_IFACE; traffic to pods bypasses VPN rules" node_network_in_place set_node_network
+  step "k3s config: node address $NODE_IP, bundled Traefik off" k3s_config_current write_k3s_config
   step "k3s $K3S_VERSION installed and running" k3s_installed install_k3s
-  step "traffic to pods bypasses VPN routing rules" pod_routing_in_place set_pod_routing
   step "~/.kube/config points at k3s" kubeconfig_works write_kubeconfig
   step "node is Ready" node_ready wait_node_ready
   step "/etc/hosts block matches platform/hosts.txt" hosts_current write_hosts
@@ -549,9 +585,10 @@ gitea_api() {
     "${GITEA_URL:?}/api/v1$2"
 }
 
-# gitea_token_works <token>: the token can read the repository.
+# gitea_token_works <token>: the token can read the repository. A yes/no check: a token from
+# an earlier cluster gets 401, which is expected and not printed.
 gitea_token_works() {
-  [[ -n $1 ]] && curl -fsS --max-time 20 -o /dev/null \
+  [[ -n $1 ]] && curl -fs --max-time 20 -o /dev/null \
     -H @<(printf 'Authorization: token %s\n' "$1") "${GITEA_URL:?}/api/v1/repos/$GITEA_REPO"
 }
 

@@ -100,11 +100,11 @@
 
 ## 12. End-to-end verification
 
-- [ ] 12.1 Fresh host: run `k3s-uninstall.sh`, then `platform/bootstrap.sh`, and verify every smoke check passes with no manual step besides the documented ones
-- [ ] 12.2 Rebuild: repeat 12.1 and verify the Gitea `main` matches the local clone, the credentials are unchanged, and the browser trusts the certificates without re-importing anything
-- [ ] 12.3 Reboot the host and verify the platform comes back, and that a repository, a user and a work item created before the reboot are still present
-- [ ] 12.4 Turn the network off, then switch to another network, and verify every service name keeps working from the host and from a pod
-- [ ] 12.5 Measure RAM with the platform idle and update the "Platform on one laptop" estimate in `README.md` and `README_ru.md` with the measured values
+- [x] 12.1 Fresh host: run `k3s-uninstall.sh`, then `platform/bootstrap.sh`, and verify every smoke check passes with no manual step besides the documented ones
+- [x] 12.2 Rebuild: repeat 12.1 and verify the Gitea `main` matches the local clone, the credentials are unchanged, and the browser trusts the certificates without re-importing anything
+- [x] 12.3 Reboot the host and verify the platform comes back, and that a repository, a user and a work item created before the reboot are still present
+- [x] 12.4 Turn the network off, then switch to another network, and verify every service name keeps working from the host and from a pod
+- [x] 12.5 Measure RAM with the platform idle and update the "Platform on one laptop" estimate in `README.md` and `README_ru.md` with the measured values
 
 ## Workflow follow-up
 
