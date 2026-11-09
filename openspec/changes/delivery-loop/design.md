@@ -270,6 +270,12 @@ need to know.
   enforces NetworkPolicies with its built-in controller.
 - **RBAC:** the orchestrator's ServiceAccount may create, watch and delete Jobs and ConfigMaps
   and read pods in `sdlc-agents`; nothing else.
+- **Pod security:** non-root, `seccompProfile: RuntimeDefault`, all capabilities dropped, no
+  privilege escalation, and containerd's default AppArmor profile. OpenCode is a Bun binary,
+  which suspends its own threads with signals; on this host's kernel that needs the profile fix
+  from the bootstrap (Risks), not an `Unconfined` override. OpenCode's `question` tool is allowed
+  by default and would wait forever in a Job, so the agent config denies it, along with
+  `doom_loop`, `external_directory`, `webfetch` and `websearch` (spike 1.1).
 
 ### 8. Gitea accounts and branch protection
 
@@ -447,6 +453,16 @@ orchestrator moves every listed ticket to Released and comments the version.
   it.
 - [Argo CD syncs before the image exists] → The pod retries the pull and starts when CI has
   pushed it (D19).
+- [Ubuntu's kernels from 7.0.0-42 stack containerd's AppArmor profile
+  (`kernel.apparmor_restrict_unprivileged_unconfined=1`), so container processes run as
+  `cri-containerd.apparmor.d//&unconfined` and may no longer signal each other: OpenCode
+  core-dumps, Postgres latches and Go preemption are denied (containerd#14485, fix in the open
+  PR #14487, no k3s release has it)] → The bootstrap installs containerd's own profile with the two
+  stacked-peer rules from that PR into `/etc/apparmor.d/`, where it loads before k3s and
+  containerd keeps it; AppArmor stays enforcing and nothing else is allowed. A smoke check shows
+  whether it is still needed, and it is removed once the pinned k3s has the fix. The
+  alternatives were weaker: the sysctl set to 0 relaxes the whole host, and `Unconfined` per pod
+  drops AppArmor for that pod.
 - [A model misreads a comment] → The policy table and Gitea's protections bound the damage to a
   wrong but permitted step in `development`, which the next comment can undo.
 - [This change edits a second repository] → The `example-webapp` tasks are a separate group, and
@@ -455,8 +471,8 @@ orchestrator moves every listed ticket to Released and comments the version.
 ## Migration Plan
 
 New components only; nothing that runs today changes behavior, except `bootstrap.sh` gaining
-steps (registries file, agent accounts, runner registrations, the Argo CD credential template,
-resolver) that check before they act. Target projects
+steps (the AppArmor profile, registries file, agent accounts, runner registrations, the Argo CD
+credential template, resolver) that check before they act. Target projects
 are seeded by `seed-projects.sh` after the bootstrap.
 Rollout follows the task groups; each group ends with its smoke checks. Rollback is reverting the
 group's commits: Argo CD prunes the removed apps, and `platform/README.md` lists how to undo the

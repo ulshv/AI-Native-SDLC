@@ -14,7 +14,7 @@ SECRETS_FILE=$SECRETS_DIR/secrets.env
 CA_KEY=$SECRETS_DIR/ca.key
 CA_CRT=$SECRETS_DIR/ca.crt
 MANIFEST=platform/secrets.manifest
-TOOLS=(helm git openssl jq yq curl certutil)
+TOOLS=(helm git openssl jq yq curl certutil aa-exec apparmor_parser)
 PORTS=(80 443)
 
 # The script always talks to this cluster, whatever KUBECONFIG the shell had.
@@ -36,6 +36,10 @@ K3S_CONFIG=/etc/rancher/k3s/config.yaml
 # on every network. Pods reach the Kubernetes API through it.
 NODE_IFACE=sdlc0
 NODE_IP=10.254.0.1
+# containerd's container profile with the fix for stacked labels (see the file's header).
+APPARMOR_PROFILE=platform/apparmor/cri-containerd.apparmor.d
+APPARMOR_TARGET=/etc/apparmor.d/cri-containerd.apparmor.d
+APPARMOR_NAME=cri-containerd.apparmor.d
 GITEA_HOST=https://gitea.sdlc.internal
 GITEA_REPO=sdlc/ai-native-sdlc
 GITEA_REMOTE=$GITEA_HOST/$GITEA_REPO.git
@@ -298,6 +302,24 @@ set_node_network() {
   sudo ip rule add $rule
 }
 
+# Two processes under the container profile can signal and trace each other. aa-exec gives a
+# process of your own user the same stacked label that containers get, so this needs no sudo
+# and fails while the profile is missing or lacks the fix.
+container_signals_work() {
+  aa-exec -p "$APPARMOR_NAME" -- sh -c \
+    'sleep 5 & p=$!; kill -URG $p && cat /proc/$p/environ >/dev/null; r=$?; kill $p; exit $r' 2>/dev/null
+}
+
+apparmor_profile_current() { cmp -s "$APPARMOR_PROFILE" "$APPARMOR_TARGET" && container_signals_work; }
+
+# Replacing the loaded profile also applies it to containers that are already running.
+install_apparmor_profile() {
+  apparmor_parser -Q -K -T "$APPARMOR_PROFILE"
+  sudo install -m 0644 "$APPARMOR_PROFILE" "$APPARMOR_TARGET"
+  sudo apparmor_parser -r -W "$APPARMOR_TARGET"
+  container_signals_work || { echo "error: container processes still cannot signal each other" >&2; return 1; }
+}
+
 node_ready() { kubectl get nodes --no-headers 2>/dev/null | grep -qw Ready; }
 
 wait_node_ready() {
@@ -463,6 +485,7 @@ reissue_wildcard() { kubectl delete secret -n traefik wildcard-sdlc-internal-tls
 phase_host() {
   step "node address $NODE_IP on $NODE_IFACE; traffic to pods bypasses VPN rules" node_network_in_place set_node_network
   step "k3s config: node address $NODE_IP, bundled Traefik off" k3s_config_current write_k3s_config
+  step "AppArmor lets processes of one container signal each other (containerd#14485)" apparmor_profile_current install_apparmor_profile
   step "k3s $K3S_VERSION installed and running" k3s_installed install_k3s
   step "~/.kube/config points at k3s" kubeconfig_works write_kubeconfig
   step "node is Ready" node_ready wait_node_ready

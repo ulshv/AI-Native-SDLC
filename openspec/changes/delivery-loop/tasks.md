@@ -1,14 +1,14 @@
 # Tasks
 
 > **TL;DR**
-> - **12 groups, 63 tasks:** spikes → platform additions → CI → Plane setup → `example-webapp` → agent runs → orchestrator → the loop end to end → environments → releases → hardening → docs and final checks.
+> - **12 groups, 64 tasks:** spikes → platform additions → CI → Plane setup → `example-webapp` → agent runs → orchestrator → the loop end to end → environments → releases → hardening → docs and final checks.
 > - **CI comes early,** because it builds the orchestrator and the agent image: from group 3 on, a push to `main` builds the platform's images and Argo CD rolls them out.
 > - **The loop works after group 8:** a ticket goes from assignment to a merge into `development` with both gates; previews and releases come after it, so a demo can happen there.
 > - **Spikes first (group 1):** OpenCode unattended with an OpenAI-compatible provider, the wildcard resolver against the VPN client, Plane's setup by script and its webhook payloads, Gitea's merge allowlists, the ApplicationSet matrix, the runner in host mode with BuildKit. Any of them can send us back to the design.
 > - **Verified at the end:** a full rebuild with both clones builds its own images, passes every smoke check and runs a ticket to On dev; a release reaches production and marks its tickets Released.
 > - **Manual steps for you:**
 >   - `LLM_API_KEY` in `secrets.env` (your RouterAI key);
->   - the sudo password for bootstrap runs (k3s `registries.yaml`, the wildcard resolver) and for the resolver spike;
+>   - the sudo password for bootstrap runs (the AppArmor profile, k3s `registries.yaml`, the wildcard resolver) and for the resolver spike;
 >   - reviewing and committing the seed in `~/Projects/sdlc/example-webapp`, a second repository;
 >   - any Plane step the setup script cannot do (spike 1.3);
 >   - turning the VPN client on and off and going offline in the resolver checks;
@@ -17,7 +17,7 @@
 
 ## 1. Spikes
 
-- [ ] 1.1 Run `opencode run` headless in a container with one OpenAI-compatible provider block (RouterAI, DeepSeek V4 Flash), on a scratch repository with OpenSpec initialised for OpenCode, for `/opsx:propose` and `/opsx:apply`. Verify both finish without a prompt, record duration and token cost, and confirm the questions-file convention from design decision 7 works. Report back before building further if the model cannot finish either command
+- [x] 1.1 Run `opencode run` headless in a container with one OpenAI-compatible provider block (RouterAI, DeepSeek V4 Flash), on a scratch repository with OpenSpec initialised for OpenCode, for `/opsx:propose` and `/opsx:apply`. Verify both finish without a prompt, record duration and token cost, and confirm the questions-file convention from design decision 7 works. Report back before building further if the model cannot finish either command
 - [ ] 1.2 Prepare a reversible script for the operator that starts `dnsmasq` on `127.0.0.2:53` only, answering `*.sdlc.internal` with `127.0.0.1`, and routes `~sdlc.internal` to it with a systemd-resolved drop-in. Verify, with the VPN client on and then offline, that `a.b.c.sdlc.internal` resolves to `127.0.0.1` on the host, then undo it. Report back if the VPN client intercepts it (fallback in design decision 13)
 - [ ] 1.3 In a throwaway run of Plane's API image, check with a Django-shell script what design decision 14 needs: create a user and its API token, a project with custom states, members, and a webhook. Capture real webhook payloads for an assignee change, a state change (to Approved and to Closed) and a comment that mentions a user, and save them as test fixtures. Report back on anything that needs a manual step
 - [ ] 1.4 On Gitea, check branch protection with a merge allowlist (a test user allowed on one branch and refused on another, through the API), and that a branch with a required approval refuses a merge without one. Capture the `pull_request` (closed and merged), `pull_request_review` (approved and request changes), `issue_comment` and `release` (published) webhook payloads as fixtures. Undo the test changes afterwards
@@ -33,6 +33,7 @@
 - [ ] 2.4 Add an Argo CD credential template for `http://gitea-http.gitea.svc:3000/sdlc/` in the gitops phase. Verify Argo CD can read a second repository in the `sdlc` organization without a per-repository secret
 - [ ] 2.5 Add the `orchestrator` database and role to `platform/apps/databases/`. Verify the orchestrator's credentials open only their own database, extending the existing isolation smoke check
 - [ ] 2.6 Document the registry, the agent accounts and the new secrets in `platform/README.md`, including how to undo `registries.yaml`, and verify every command it lists runs as written
+- [x] 2.7 Add `platform/apparmor/cri-containerd.apparmor.d` (containerd v2.3.4's default container profile plus the two stacked-peer rules from containerd#14487) and a host-phase step that installs it into `/etc/apparmor.d/` and reloads it, ahead of the k3s install, with an `aa-exec` check that needs no sudo; add the `container_signals` smoke check and the host-change row and removal step to `platform/README.md`. Verify the smoke check fails before and passes after, that the kernel logs no more AppArmor signal denials for Postgres and Gitea, that CNPG reports the cluster healthy, and that OpenCode runs in a pod under the default profile with no `appArmorProfile` override
 
 ## 3. CI
 

@@ -70,6 +70,19 @@ check_pod_dns() {
       { echo 'kubernetes.default.svc.cluster.local does not resolve to $want from a pod'; exit 1; }"
 }
 
+# Processes in one container can signal and inspect each other under the default AppArmor
+# profile. Fails when the host's kernel stacks container profiles and the profile from
+# platform/apparmor/ is not loaded (containerd#14485): Postgres and Go programs then degrade.
+register container_signals
+check_container_signals() {
+  run_pod default smoke-container-signals \
+    --image=docker.io/rancher/mirrored-library-busybox:1.37.0 --image-pull-policy=IfNotPresent -- \
+    sh -c 'sleep 30 & p=$!
+      kill -URG $p || { echo "a container process cannot signal another one (AppArmor)"; exit 1; }
+      cat /proc/$p/environ >/dev/null || { echo "a container process cannot read another one (AppArmor)"; exit 1; }
+      kill $p'
+}
+
 # Runs psql in a throwaway pod with the gitea role's password from its Secret, so the password
 # never appears on a command line.
 register database_isolation
