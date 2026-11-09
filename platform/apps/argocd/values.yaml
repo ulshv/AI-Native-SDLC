@@ -31,13 +31,21 @@ configs:
       end
       return hs
 
-# Not used: SSO is out of scope, nothing sends notifications, and no ApplicationSets exist.
+# Not used: SSO is out of scope and nothing sends notifications.
 dex:
   enabled: false
 notifications:
   enabled: false
+# ApplicationSets generate the dev, prod and preview environments of every target project from
+# platform/projects/ and the open pull requests.
 applicationSet:
-  replicas: 0
+  replicas: 1
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
 
 controller:
   resources:

@@ -62,6 +62,11 @@ gitea:
     service:
       # Accounts are created by the admin, not by whoever reaches the page first.
       DISABLE_REGISTRATION: true
+    webhook:
+      # Webhooks may target the cluster's pod and service networks, such as the orchestrator's
+      # Service, and nothing else (Gitea's default allows only external hosts). Plane's
+      # WEBHOOK_ALLOWED_IPS lists the same networks.
+      ALLOWED_HOST_LIST: 10.42.0.0/16,10.43.0.0/16
 
   # Secret values from the gitea-secrets Secret. The chart writes them into app.ini on the
   # first start and never overwrites SECRET_KEY or INTERNAL_TOKEN afterwards.
