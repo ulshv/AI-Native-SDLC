@@ -103,9 +103,10 @@ release, rather than a description of one.
   its Helm chart and CI workflows. It sits outside this repository, so applying this change
   writes there too.
 - **Host (requires sudo):** `/etc/rancher/k3s/registries.yaml` for the Gitea registry;
-  `dnsmasq` listening on `127.0.0.2` only, plus a systemd-resolved drop-in that sends just
-  `sdlc.internal` to it, if the spike confirms the VPN client leaves it alone (the `/etc/hosts`
-  block stays as a fallback).
+  `dnsmasq` listening on `127.0.0.2` only, plus a systemd-resolved DNS delegate that sends just
+  `sdlc.internal` to it (the `/etc/hosts` block stays as a fallback); AppArmor profiles in
+  `/etc/apparmor.d/` (containerd's container profile with the fix for this kernel, and BuildKit's)
+  and BuildKit's seccomp profile under `/var/lib/kubelet/seccomp/`.
 - **Resources:** about 2–4 GB more RAM while a Job and a CI build run (orchestrator, two runners
   with BuildKit, agent Job, a few small web servers).
 - **External:** calls to the model provider with the operator's key and spending limit (RouterAI

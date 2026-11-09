@@ -1,0 +1,74 @@
+{
+  "headers": {
+    "X-Plane-Delivery": "a8c0a6b1-8edd-421d-9da9-99abb4de2608",
+    "X-Plane-Event": "project"
+  },
+  "body": {
+    "event": "project",
+    "action": "created",
+    "webhook_id": "ac1dbcf5-3bd4-4023-9eb3-a4e3a0feb6ed",
+    "workspace_id": "33d65e2b-eb39-4162-be7c-6f9b9cff8dab",
+    "workspace_slug": "sdlc",
+    "data": {
+      "id": "72de36e4-09bb-4182-9176-097a5a93da7a",
+      "cover_image_url": null,
+      "created_at": "2026-11-09T19:03:08.245528Z",
+      "updated_at": "2026-11-09T19:03:08.245544Z",
+      "deleted_at": null,
+      "name": "example-webapp",
+      "description": "",
+      "description_text": null,
+      "description_html": null,
+      "network": 2,
+      "identifier": "EWA",
+      "emoji": null,
+      "icon_prop": null,
+      "module_view": false,
+      "cycle_view": false,
+      "issue_views_view": false,
+      "page_view": true,
+      "intake_view": false,
+      "is_time_tracking_enabled": false,
+      "is_issue_type_enabled": false,
+      "guest_view_all_features": false,
+      "cover_image": null,
+      "archive_in": 0,
+      "close_in": 0,
+      "logo_props": {
+        "icon": {
+          "name": "gavel",
+          "color": "#f38e82"
+        },
+        "in_use": "icon"
+      },
+      "archived_at": null,
+      "timezone": "UTC",
+      "external_source": null,
+      "external_id": null,
+      "created_by": "525f2c23-8de0-439d-b238-577d889c9918",
+      "updated_by": null,
+      "workspace": "33d65e2b-eb39-4162-be7c-6f9b9cff8dab",
+      "default_assignee": null,
+      "project_lead": null,
+      "cover_image_asset": null,
+      "estimate": null,
+      "default_state": null
+    },
+    "activity": {
+      "field": null,
+      "new_value": null,
+      "old_value": null,
+      "actor": {
+        "id": "525f2c23-8de0-439d-b238-577d889c9918",
+        "first_name": "PO",
+        "last_name": "",
+        "email": "po@example.invalid",
+        "avatar": "",
+        "avatar_url": null,
+        "display_name": "po"
+      },
+      "old_identifier": null,
+      "new_identifier": null
+    }
+  }
+}

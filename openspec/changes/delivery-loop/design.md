@@ -5,8 +5,9 @@
 > - **Words in, rules decide:** one model call, through a client chosen by the model's prefix, turns a comment into an intent; a policy table over role and phase decides, and Gitea's branch protection has the final word on merges (decisions 5, 8).
 > - **Agent runs are Jobs:** OpenCode with any OpenAI-compatible provider in a fresh clone, pushing as `agent-runner`, which cannot merge; the result comes back as a termination message (decision 7).
 > - **A project is one directory:** `platform/projects/<name>/project.yaml` feeds both the orchestrator and Argo CD's ApplicationSets for dev, prod and previews (decisions 10, 11).
-> - **Every image is built by CI and tagged with its commit:** the platform's on a runner limited to this repository, so the orchestrator deploys through GitOps like a product; the products' on their own runner; both push to Gitea's registry, which k3s pulls directly (decisions 2, 3, 12).
-> - **Biggest risk:** the time (about 30–45 hours) and the VPN client's effect on wildcard DNS; the loop up to the merge into `development` comes first, and the spikes run before anything is built.
+> - **Every image is built by CI and tagged with its commit:** the platform's on a runner limited to this repository, so the orchestrator deploys through GitOps like a product; the products' on their own runner; BuildKit runs in each runner pod's own user namespace under AppArmor and seccomp profiles of its own; both push to Gitea's registry, which k3s pulls directly (decisions 2, 3, 12).
+> - **Spikes done (group 1):** every assumption held or got a recorded fix: OpenCode runs unattended, the resolver works with the VPN client, Plane needs no manual step, Gitea enforces the merge rules, previews come and go with their PRs, and CI builds and pushes without privileges; the host's AppArmor quirk got a profile fix instead of switching AppArmor off.
+> - **Biggest risk:** the time (about 30–45 hours); the loop up to the merge into `development` comes first.
 
 ## Context
 
@@ -66,6 +67,7 @@ platform/apps/orchestrator/      Deployment, ConfigMaps, RBAC, Database (namespa
 platform/apps/agents/            namespace sdlc-agents, ServiceAccount, NetworkPolicy, OpenCode config
 platform/apps/ci/                two Actions runners with BuildKit sidecars (namespace ci)
 platform/apps/environments/      ApplicationSets for dev, prod and previews of every project
+platform/apparmor/, seccomp/     host profiles the bootstrap installs: containerd's fix, BuildKit's (decision 12)
 ~/Projects/sdlc/example-webapp   the product, a separate repository (decision 9)
 ```
 
@@ -77,6 +79,11 @@ with the local CA and a read-only pull token for `gitea.sdlc.internal`, and rest
 the file changed. containerd on the host resolves the name through `/etc/hosts` to Traefik, so
 pulls work offline, and no namespace needs an `imagePullSecret`.
 
+- **Who may push and pull (spike 1.6):** packages belong to the organization, not to a
+  repository, so a repository collaborator gets `401`. Both the pull account and the push
+  account are members of an `sdlc` team with package access (read for the pull token, write for
+  CI). Gitea Actions' own job token is refused by the registry, so CI pushes with a token of its
+  own (decision 12). `registries.yaml` names the local CA as `ca_file`.
 - **Alternatives:** a separate `registry:2` (one more component with its own auth and storage);
   pushing to Gitea's in-cluster HTTP service (the image name would differ from the pull name, and
   Gitea's token realm redirects to `https://gitea.sdlc.internal` anyway).
@@ -228,10 +235,25 @@ need to know.
 - **Plane:** webhooks for work items (assignees, state) and comments. A mention is recognised by
   the agent's user id in the comment's mention markup (format confirmed by a spike). The agent
   uses its own API key to set states, comment and read the item. Replies go to the item.
-- **Gitea:** repository webhooks for `pull_request` (closed, merged), `pull_request_review`
-  (approved, rejected, comment), `issue_comment` on PRs and `release` (published). The
-  orchestrator registers them for every project on start, idempotently by URL. Replies go to the
-  PR. Mentions are the literal `@agent`.
+  Spike 1.3: the body is `{event, action, workspace_slug, data, activity}`; `activity` holds the
+  changed `field`, old and new values and the `actor`; an assignment is `issue`/`updated` with
+  field `assignees`, a status change has field `state`; a comment carries
+  `<mention-component entity_identifier="<user id>">` in `comment_html` and the author's id in
+  `actor`. The work item has `sequence_id` and the project's UUID but not its identifier, so the
+  key (`EWA-12`) is built with the identifier from `project.yaml`. `X-Plane-Delivery` is the
+  delivery id for deduplication.
+- **Gitea:** repository webhooks for `pull_request` (opened, synchronized, closed with `merged`),
+  the review events (approved, rejected, comment), `issue_comment` on PRs and `release`
+  (published). The orchestrator registers them for every project on start, idempotently by URL.
+  Replies go to the PR. Mentions are the literal `@agent`. Spike 1.4: a review event carries the
+  review's text and the reviewed `commit_id` but neither the review's id nor its inline comments,
+  so the adapter reads the PR's latest review by that person and its comments through the API.
+  An approving review whose text mentions `@agent` is both an approval and a request to read.
+  `html_url` follows the host a request came through, so links are built from configuration.
+  `X-Gitea-Delivery` is the delivery id. Gitea's default `webhook.ALLOWED_HOST_LIST` allows only
+  external hosts; the platform allows the cluster's pod and service networks, as for Plane.
+- **Payloads carry people's e-mail addresses.** Test fixtures are scrubbed before they enter
+  this public repository.
 - **Echo:** an event whose actor is the agent's Plane user or Gitea's `agent` or `agent-runner`
   is recorded and dropped.
 - **Signatures:** Plane's `X-Plane-Signature` and Gitea's `X-Gitea-Signature` are HMAC-SHA256
@@ -260,6 +282,12 @@ need to know.
   #<n> on <key> were not archived and asks for an archive PR. When an engineer answers
   "@agent ok, create archive PR" (intent `archive`), it runs `archive` on a new branch
   `archive/<key>` from `development` and opens a PR with only that commit.
+- **Running OpenCode (spike 1.1):** `opencode run --pure --format json --model <provider>/<model>
+  --command opsx-propose|opsx-apply "<arguments>" </dev/null`, with an `@ai-sdk/openai-compatible`
+  provider block whose key is `{env:LLM_API_KEY}`. On a small change with DeepSeek V4 Flash
+  through RouterAI: propose 85 s and about 0.9 RUB, apply 41 s and about 0.7 RUB, a vague task
+  36 s ending in a questions file. The JSON events carry token counts per step; the cost comes
+  from the provider's prices, since OpenCode's config holds none.
 - **Result:** the entrypoint writes one JSON to `/dev/termination-log` (`spec_ready`,
   `code_ready`, `archived`, `questions`, `failed`, plus the pushed commit). The watcher reads it from the
   pod status, so no log parsing and no extra storage.
@@ -289,6 +317,12 @@ no required review in Gitea: the gate there is a person's request checked by the
 `main` disallows pushes, requires one approving review by a person, and allows merges only by the
 people on the project's merge allowlist. `agent-runner` is on no merge allowlist, so a Job cannot merge, and
 nothing but people can reach `main`.
+
+Spike 1.4 confirmed each rule through the API, with one addition: "a review by a person" needs
+Gitea's approvals allowlist (`enable_approvals_whitelist` with the project's people), because
+otherwise an approval by any account with write access counts, `agent-runner` included. Gitea
+also refuses an approval of one's own pull request, so `agent` cannot approve the release PR it
+opened.
 
 ### 9. `example-webapp` lives in its own clone, seeded by its own script
 
@@ -335,11 +369,16 @@ an environment without a commit in the product's repository.
   `deploy/chart` at that branch, with `image.tag=$ARGOCD_APP_REVISION` (D19), into
   `<project>-<env>`.
 - **Previews:** one ApplicationSet with a matrix of the git files generator and the
-  `pullRequest` generator for Gitea (in-cluster API URL, a token, `labels: [preview]`,
-  `requeueAfterSeconds: 60`). With `goTemplate`, the preview id is
-  `regexFind "[A-Z]+-[0-9]+" .branch | lower`, the host is `<id>.qa.<domain>`, the image tag is
-  `.head_sha`, and the namespace is `<project>-<id>`. Closing the PR drops it from the generator,
-  and Argo CD deletes the Application and its resources.
+  `pullRequest` generator for Gitea (in-cluster API URL, a token with `read:repository` and
+  `read:issue`, `labels: [preview]`, `requeueAfterSeconds: 60`). With `goTemplate`, the preview id
+  is `regexFind "[A-Z]+-[0-9]+" .branch | lower`, the host is `<id>.qa.<domain>`, the image tag is
+  `.head_sha`, and the Helm release name is the id. Closing the PR drops it from the generator,
+  and Argo CD deletes the Application and its resources (spike 1.5: about 20 s).
+- **One preview namespace per project,** `<project>-preview`. Argo CD never deletes a namespace it
+  created with `CreateNamespace`, so a namespace per preview would stay behind empty after every
+  PR, with the TLS Secrets that cert-manager made in it. Release names keep previews apart, and
+  cert-manager's `enableCertificateOwnerRef` removes a preview's Secret with its Certificate.
+- **The ApplicationSet controller** ran with zero replicas in `platform-core`; it is now on.
 - **The label and the QA stand:** when the apply run reports `code_ready`, the orchestrator adds
   `preview` to the PR and moves the item to Deploying to QA. It polls the preview's in-cluster
   service for `/version.json`, which every image of the product serves with the commit it was
@@ -353,49 +392,74 @@ an environment without a commit in the product's repository.
   (`ewa-12`), taken from the branch name the orchestrator chose.
 - **Repository access:** the bootstrap adds an Argo CD credential template for the prefix
   `http://gitea-http.gitea.svc:3000/sdlc/`, so every project repository is readable without a
-  per-repo secret.
+  per-repo secret. Its account needs read access to every repository (Gitea answers `404`
+  otherwise), so it belongs to an `sdlc` team that covers all repositories.
 - **Fallback if the matrix spike fails:** one ApplicationSet per project, generated from the same
   directory by a small script; the spec's "one configuration entry" is then kept by the script.
 
-### 12. CI: two act_runners in host mode, each with its own rootless BuildKit
+### 12. CI: two act_runners in host mode, each with its own BuildKit in a user namespace
 
 - **No custom runner image.** Each runner pod uses a public Ubuntu runner image (Gitea's
-  `runner-images`, which has Node, git and curl) and gets the `act_runner` binary from the
+  `runner-images:ubuntu-26.04`: Node 24, npm, git, curl) and gets the `act_runner` binary from the
   official image through an init container. Steps run in host mode, inside the runner's own
   container, so there is no Docker daemon and no privileged Docker-in-Docker. Workflows download
   pinned `buildctl` and `crane` binaries and check their checksums. One job at a time per runner.
+  `actions/checkout` clones over the runner's in-cluster instance URL, so it needs no CA.
 - **Two runners in namespace `ci`:** `ci-platform`, registered on `sdlc/ai-native-sdlc` with the
   label `platform`, and `ci-products`, registered on the `sdlc` organization with the label
   `ubuntu-latest` (decision 3). Registration tokens come from Gitea's admin API in the bootstrap.
-- **BuildKit is a sidecar of each runner:** rootless `buildkitd` with unconfined seccomp and
-  AppArmor, not privileged, reached on `localhost`. Separate sidecars keep the products' build
-  cache away from the platform's. `buildkitd` pushes to `gitea.sdlc.internal`, which is the one
-  place where a pod trusts the local CA: the CA certificate is mounted into it.
+- **BuildKit is a sidecar of each runner, in the pod's own user namespace** (`hostUsers: false`):
+  `moby/buildkit` in its regular (not rootless) mode with `--oci-worker-no-process-sandbox` and
+  `SYS_ADMIN`, which holds only inside that namespace (root in the pod is an unprivileged uid on
+  the host). It is not privileged and is reached on a shared socket. Separate sidecars keep the
+  products' build cache away from the platform's. `buildkitd` pushes to `gitea.sdlc.internal`,
+  which is the one place where a pod trusts the local CA: the public CA certificate comes from a
+  ConfigMap.
+- **Its own AppArmor and seccomp profiles, both enforcing** (spike 1.6). `sdlc-buildkit` is
+  containerd's container profile plus `mount`, `remount` and `pivot_root`; the seccomp profile is
+  Docker's default plus `add_key`, `keyctl` and `request_key` (runc creates a session keyring per
+  build step; keyrings belong to the pod's user namespace) and `pivot_root` under `SYS_ADMIN`. The
+  bootstrap's host phase installs both, as `/etc/apparmor.d/sdlc-buildkit` and
+  `/var/lib/kubelet/seccomp/profiles/sdlc-buildkit.json`; the runner container keeps the defaults.
+- **Why not rootless BuildKit:** it creates a user namespace of its own, and on this host's kernel
+  a container's profile is stacked with `unconfined` (the cause of containerd#14485), which
+  Ubuntu's `apparmor_restrict_unprivileged_userns` then refuses, whatever our profile allows.
+  Unconfined AppArmor and seccomp, the usual advice, were rejected.
+- **Pushing:** a `ci` account in an `sdlc` team with write access to packages and releases; its
+  token is an organization Actions secret. Gitea's job token is refused by the registry.
 - **Workflows in the product repository:** `ci.yaml` on every push: `npm ci`, tests, build, image
   `:<sha>`. `release.yaml` on push to `main`: next minor tag from the latest `v*` tag, a Gitea
   release whose notes list the `EWA-*` ids from the merge commits since the previous tag, and the
   version as a second tag on the commit's image (`crane tag`).
 - A NetworkPolicy keeps `ci` away from the database, Plane and the orchestrator; a runner's only
-  credentials are its registration and the workflow token Gitea gives each job.
-- **Spike 1.6** confirms host mode on the public image, the init-container binary and the push
-  from the sidecar before the rest of the CI is built.
+  credentials are its registration, the `ci` push token and the workflow token Gitea gives each
+  job.
+- **Spike 1.6** ran the whole chain: a push, a job on the runner, a Dockerfile with a `RUN` step,
+  the push to the registry, a pull by k3s without a pull secret, and `/version.json` with the
+  commit, in about 25 s from push to image.
 
 ### 13. Names and certificates for environments
 
 - **Pods:** nothing to do; the CoreDNS rewrite already matches names at any depth.
 - **Host:** `dnsmasq` listens on `127.0.0.2:53` only and answers every name under
-  `sdlc.internal`, at any depth, with `127.0.0.1` (`address=/sdlc.internal/127.0.0.1`).
-  systemd-resolved sends only that domain to it, through a drop-in
-  `/etc/systemd/resolved.conf.d/sdlc.conf` with `DNS=127.0.0.2` and `Domains=~sdlc.internal`;
-  all other lookups are untouched, and nothing depends on the cluster running. The existing
-  `/etc/hosts` block stays as a fallback. The bootstrap's host phase installs both (sudo).
+  `sdlc.internal`, at any depth, with `127.0.0.1` (`address=/sdlc.internal/127.0.0.1`). It runs
+  as a systemd unit of our own from the `dnsmasq-base` package that Ubuntu already has; the
+  `dnsmasq` package is not installed, since its service would take port 53. systemd-resolved
+  sends only that domain to it through a DNS delegate (systemd 258+),
+  `/etc/systemd/dns-delegate.d/sdlc.dns-delegate` with `DNS=127.0.0.2` and
+  `Domains=~sdlc.internal`, which is not a default route; all other lookups are untouched, and
+  nothing depends on the cluster running. The existing `/etc/hosts` block stays as a fallback.
+  The bootstrap's host phase installs both (sudo).
+- **The tilde matters (spike 1.2):** without it the domain is also a search domain, so every
+  failed lookup, offline or a typo, is retried as `<name>.sdlc.internal` and answered with
+  `127.0.0.1`. The spike verified the resolver with the VPN client on, off, offline and back.
 - **Alternatives:** a daemon that rewrites `/etc/hosts` from the cluster's Ingresses (runs as
   root and lags behind); exposing the cluster's CoreDNS to the host (names die with the cluster,
   and answers point at ClusterIPs, the path the VPN client broke before); NetworkManager's
   dnsmasq mode (takes over the host's whole DNS).
-- **Spike 1.2** checks that the VPN client leaves resolved's queries to `127.0.0.2` alone. If it
-  does not, the fallback is a bootstrap step that writes the current preview names into
-  `/etc/hosts`, run by the operator.
+- **Spike 1.2** confirmed that the VPN client leaves queries to `127.0.0.2` alone: the local
+  routing table answers before its rules. The fallback (preview names written into `/etc/hosts`)
+  is not needed.
 - **Certificates:** each environment's Ingress carries `cert-manager.io/cluster-issuer: local-ca`
   and a TLS secret in its own namespace, so cert-manager issues a certificate for exactly that
   host. No per-project change on the platform side.
@@ -408,6 +472,13 @@ script that, idempotently, creates the `agent` user and its API token (stored as
 orchestrator), the workspace and project `EWA` with the loop's states, adds `agent` and the
 project's people as members, and registers the webhook to the orchestrator. The spike confirms
 what the script can do; anything it cannot becomes a documented manual step.
+
+Spike 1.3 found no manual step. The user, its API key and the webhook (`WebhookSerializer`, with
+`issue`, `issue_comment` and `project`) need the Django shell; the project, its states and its
+members go through Plane's public API with an admin key, as the orchestrator itself will call
+it. The default states except Backlog are deleted; Backlog stays the default state, where new
+tickets land before intake moves them to Drafting. Plane e-mails assignees and mentioned users,
+so the Job turns the agent's e-mail notifications off.
 
 ### 15. Releases are prepared by the orchestrator itself
 
@@ -434,9 +505,13 @@ orchestrator moves every listed ticket to Released and comments the version.
   the loop from ticket to merge into `development` works first (groups 1–8, CI included because
   it builds the orchestrator). Previews and releases follow. If the demo comes before them, the
   README shows the rest.
-- [The VPN client breaks the wildcard resolver or Job egress] → Spike first (group 1). Fallbacks:
-  preview names written to `/etc/hosts` by a bootstrap step; Job egress is ordinary HTTPS through
-  the node, the same path the host already uses.
+- [The VPN client breaks the wildcard resolver or Job egress] → Spikes 1.1 and 1.2 showed neither:
+  the resolver works with the VPN client on and off and offline, and a Job reached the model
+  provider through the node. The `/etc/hosts` fallback stays documented in decision 13.
+- [The host's kernel stacks container profiles with `unconfined`, so rootless tools cannot
+  create user namespaces in pods] → BuildKit runs in its regular mode in a pod with its own user
+  namespace, under AppArmor and seccomp profiles of its own (decision 12). Anything else that
+  needs a user namespace in a pod meets the same limit.
 - [A cheap model writes a poor spec or code] → Both gates are human; the model is configuration,
   and the step up for coding and review is a GLM-5.3 or Kimi K3-class model, as the README plans;
   tasks on `example-webapp` are deliberately small.
@@ -446,7 +521,7 @@ orchestrator moves every listed ticket to Released and comments the version.
   decision 11.
 - [CI runs agent-written code in the runner's container] → The products' runner never builds
   platform images; own BuildKit, own namespace policy, no platform secrets, no host socket, one
-  job at a time. The worst case is a poisoned image of the product, which a person still reviews
+  job at a time, and the pod's own user namespace, so root in it is not root on the host. The worst case is a poisoned image of the product, which a person still reviews
   before `main`.
 - [A broken commit on `main` stops the orchestrator's build] → The new pod never becomes ready,
   the old one keeps running, and the failed run is visible in Gitea; the next good commit fixes
@@ -471,8 +546,8 @@ orchestrator moves every listed ticket to Released and comments the version.
 ## Migration Plan
 
 New components only; nothing that runs today changes behavior, except `bootstrap.sh` gaining
-steps (the AppArmor profile, registries file, agent accounts, runner registrations, the Argo CD
-credential template, resolver) that check before they act. Target projects
+steps (the AppArmor and seccomp profiles, registries file, agent and CI accounts, runner
+registrations, the Argo CD credential template, resolver) that check before they act. Target projects
 are seeded by `seed-projects.sh` after the bootstrap.
 Rollout follows the task groups; each group ends with its smoke checks. Rollback is reverting the
 group's commits: Argo CD prunes the removed apps, and `platform/README.md` lists how to undo the

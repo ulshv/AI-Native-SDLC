@@ -1,0 +1,77 @@
+{
+  "headers": {
+    "X-Plane-Delivery": "b1eecb69-768c-4711-a7a3-64da3bdd30fc",
+    "X-Plane-Event": "issue"
+  },
+  "body": {
+    "event": "issue",
+    "action": "updated",
+    "webhook_id": "ac1dbcf5-3bd4-4023-9eb3-a4e3a0feb6ed",
+    "workspace_id": "33d65e2b-eb39-4162-be7c-6f9b9cff8dab",
+    "workspace_slug": "sdlc",
+    "data": {
+      "id": "d71d47ba-8b66-45ce-bd4d-8cffb7a1c48a",
+      "labels": [],
+      "assignees": [
+        {
+          "id": "acf51e1d-b7bc-4e95-a61d-9deba97c5a30",
+          "first_name": "agent",
+          "last_name": "",
+          "email": "agent@example.invalid",
+          "avatar": "",
+          "avatar_url": null,
+          "display_name": "agent"
+        }
+      ],
+      "state": {
+        "id": "113bab89-06da-4fb8-833d-4814b9909e05",
+        "name": "Approved",
+        "color": "#22c55e",
+        "group": "started"
+      },
+      "description": {},
+      "created_at": "2026-11-09T19:03:22.281264Z",
+      "updated_at": "2026-11-09T19:03:42.037398Z",
+      "deleted_at": null,
+      "point": null,
+      "name": "Orders: filter by status",
+      "description_json": {},
+      "description_html": "<p></p>",
+      "description_stripped": "",
+      "description_binary": null,
+      "priority": "none",
+      "start_date": null,
+      "target_date": null,
+      "sequence_id": 1,
+      "sort_order": 65535.0,
+      "completed_at": null,
+      "archived_at": null,
+      "is_draft": false,
+      "external_source": null,
+      "external_id": null,
+      "created_by": "525f2c23-8de0-439d-b238-577d889c9918",
+      "updated_by": "525f2c23-8de0-439d-b238-577d889c9918",
+      "project": "72de36e4-09bb-4182-9176-097a5a93da7a",
+      "workspace": "33d65e2b-eb39-4162-be7c-6f9b9cff8dab",
+      "parent": null,
+      "estimate_point": null,
+      "type": null
+    },
+    "activity": {
+      "field": "state",
+      "new_value": "113bab89-06da-4fb8-833d-4814b9909e05",
+      "old_value": "117f5ed4-1067-443c-ae29-b0d458831ae3",
+      "actor": {
+        "id": "525f2c23-8de0-439d-b238-577d889c9918",
+        "first_name": "PO",
+        "last_name": "",
+        "email": "po@example.invalid",
+        "avatar": "",
+        "avatar_url": null,
+        "display_name": "po"
+      },
+      "old_identifier": null,
+      "new_identifier": null
+    }
+  }
+}

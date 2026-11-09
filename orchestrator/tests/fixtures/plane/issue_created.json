@@ -1,0 +1,67 @@
+{
+  "headers": {
+    "X-Plane-Delivery": "fb09b929-a20f-4738-a9eb-fe7272a93c17",
+    "X-Plane-Event": "issue"
+  },
+  "body": {
+    "event": "issue",
+    "action": "created",
+    "webhook_id": "ac1dbcf5-3bd4-4023-9eb3-a4e3a0feb6ed",
+    "workspace_id": "33d65e2b-eb39-4162-be7c-6f9b9cff8dab",
+    "workspace_slug": "sdlc",
+    "data": {
+      "id": "d71d47ba-8b66-45ce-bd4d-8cffb7a1c48a",
+      "labels": [],
+      "assignees": [],
+      "state": {
+        "id": "117f5ed4-1067-443c-ae29-b0d458831ae3",
+        "name": "Backlog",
+        "color": "#60646C",
+        "group": "backlog"
+      },
+      "description": {},
+      "created_at": "2026-11-09T19:03:22.281264Z",
+      "updated_at": "2026-11-09T19:03:22.320877Z",
+      "deleted_at": null,
+      "point": null,
+      "name": "Orders: filter by status",
+      "description_json": {},
+      "description_html": "<p></p>",
+      "description_stripped": "",
+      "description_binary": null,
+      "priority": "none",
+      "start_date": null,
+      "target_date": null,
+      "sequence_id": 1,
+      "sort_order": 65535.0,
+      "completed_at": null,
+      "archived_at": null,
+      "is_draft": false,
+      "external_source": null,
+      "external_id": null,
+      "created_by": "525f2c23-8de0-439d-b238-577d889c9918",
+      "updated_by": null,
+      "project": "72de36e4-09bb-4182-9176-097a5a93da7a",
+      "workspace": "33d65e2b-eb39-4162-be7c-6f9b9cff8dab",
+      "parent": null,
+      "estimate_point": null,
+      "type": null
+    },
+    "activity": {
+      "field": null,
+      "new_value": null,
+      "old_value": null,
+      "actor": {
+        "id": "525f2c23-8de0-439d-b238-577d889c9918",
+        "first_name": "PO",
+        "last_name": "",
+        "email": "po@example.invalid",
+        "avatar": "",
+        "avatar_url": null,
+        "display_name": "po"
+      },
+      "old_identifier": null,
+      "new_identifier": null
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "headers": {
+    "X-Plane-Delivery": "518b64ca-6da7-4314-8c13-170d57202286",
+    "X-Plane-Event": "issue_comment"
+  },
+  "body": {
+    "event": "issue_comment",
+    "action": "created",
+    "webhook_id": "ac1dbcf5-3bd4-4023-9eb3-a4e3a0feb6ed",
+    "workspace_id": "33d65e2b-eb39-4162-be7c-6f9b9cff8dab",
+    "workspace_slug": "sdlc",
+    "data": {
+      "id": "1334b917-3683-4795-81c4-00173ccd8017",
+      "created_at": "2026-11-09T19:03:58.375201Z",
+      "updated_at": "2026-11-09T19:03:58.370165Z",
+      "deleted_at": null,
+      "comment_html": "<p>Working on it.</p>",
+      "attachments": [],
+      "access": "INTERNAL",
+      "external_source": null,
+      "external_id": null,
+      "edited_at": null,
+      "created_by": "acf51e1d-b7bc-4e95-a61d-9deba97c5a30",
+      "updated_by": null,
+      "project": "72de36e4-09bb-4182-9176-097a5a93da7a",
+      "workspace": "33d65e2b-eb39-4162-be7c-6f9b9cff8dab",
+      "description": "eb988518-78cd-4fab-a496-713561f39bcb",
+      "issue": "d71d47ba-8b66-45ce-bd4d-8cffb7a1c48a",
+      "actor": "acf51e1d-b7bc-4e95-a61d-9deba97c5a30",
+      "parent": null
+    },
+    "activity": {
+      "field": null,
+      "new_value": null,
+      "old_value": null,
+      "actor": {
+        "id": "acf51e1d-b7bc-4e95-a61d-9deba97c5a30",
+        "first_name": "agent",
+        "last_name": "",
+        "email": "agent@example.invalid",
+        "avatar": "",
+        "avatar_url": null,
+        "display_name": "agent"
+      },
+      "old_identifier": null,
+      "new_identifier": null
+    }
+  }
+}
