@@ -169,6 +169,16 @@ worker: take the oldest unprocessed row for a thread not being handled (FOR UPDA
   what it is linked to.
 - **Restart:** unprocessed inbox rows are simply picked up again; the Job watcher lists existing
   Jobs on start and enqueues results it has not recorded.
+- **Alternatives:** LangChain DeepAgents (`create_deep_agent` with its middleware), dropping to
+  LangGraph only where the middleware falls short. It is a harness for an agent that loops and
+  picks its own next tool, while the orchestrator is a state machine with one model call to read
+  an intent. With merges and comments as an agent's tools, the model would decide whether to call
+  them, against decision 5; a loop with any number of tool calls is harder to make safe for a
+  redelivered event than fixed side-effect nodes with markers; and its human-in-the-loop
+  middleware is built on `interrupt()`, which D21 rules out. Its planning, file system, sub-agents
+  and context summarizing are what OpenCode already does inside the Jobs. A deep agent compiles to
+  a LangGraph graph, so it can still become one node of this graph where open-ended reasoning
+  pays off, such as the Mattermost status threads or triage, without changing the core.
 
 ### 5. Reading intents and deciding what is allowed
 
