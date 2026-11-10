@@ -110,13 +110,20 @@ opencode_run() {
     >/tmp/opencode.jsonl 2>/tmp/opencode.err ||
     fail "opencode exited with $?: $(tail -c 400 /tmp/opencode.err)"
   log "opencode took $((SECONDS - started)) s, $(jq -s '[.[] | select(.type == "step_finish")] | length' /tmp/opencode.jsonl) steps"
+  log "the agent's last words: $(last_words)"
+}
+
+# The model's final message, for the log and for a failure's reason.
+last_words() {
+  jq -rs '[.[] | select(.type == "text") | .part.text // empty] | last // "(none)"' /tmp/opencode.jsonl 2>/dev/null |
+    tr '\n' ' ' | cut -c1-600
 }
 
 # The agent asks by writing .agent/result.json (AGENTS.md of the target project); the run then
 # pushes nothing.
 questions_asked() { [[ -f .agent/result.json ]] && jq -e '.status == "questions"' .agent/result.json >/dev/null 2>&1; }
 answer_with_questions() {
-  result "$(jq -c '{result: "questions", questions: ((.questions // [])[:10] | map(tostring | .[0:300]))}' .agent/result.json)"
+  result "$(jq -c '{result: "questions", questions: ((.questions // [])[:6] | map(tostring | .[0:550]))}' .agent/result.json)"
   exit 0
 }
 
@@ -139,7 +146,7 @@ commit_push() {
     log "left out, outside what this mode may change:"
     log "$(git status --porcelain --untracked-files=all | grep -v '^[MADRC] ' | sed 's/^/  /')"
   fi
-  git diff --cached --quiet && fail "the run changed nothing it may commit"
+  git diff --cached --quiet && fail "the run changed nothing it may commit; the agent's last words: $(last_words)"
   git commit --quiet -m "$message"
   git push --quiet origin "HEAD:refs/heads/$BRANCH"
   COMMIT=$(git rev-parse HEAD)

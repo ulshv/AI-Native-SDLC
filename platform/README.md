@@ -332,8 +332,15 @@ platform/run-agent.sh example-webapp archive EWA-0 --slug orders-filter
 ```
 
 It builds the task from the project file, starts the Job with the image of `origin/main`
-(`--image-tag` for another), waits, and prints the run's log lines and its result. The branch
-stays in Gitea; delete it when done.
+(`--image-tag` for another), waits, and prints the run's log lines, among them the agent's last
+words, and its result. `--entrypoint agent-runner/entrypoint.sh` runs the local entrypoint instead
+of the image's, to try a change to it without a commit. The branch stays in Gitea; delete it when
+done.
+
+**Reading a failure.** The result's `reason` says what failed: a check with the end of its output,
+OpenCode's own error, or "changed nothing it may commit" with the agent's last words, which a
+cheap model sometimes ends on (start the run again). The entrypoint removes the model provider's
+key from everything it writes.
 
 ## Changing the platform through git
 

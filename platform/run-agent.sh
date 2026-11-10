@@ -12,16 +12,18 @@
 #     --answers FILE     a JSON list of {"question", "answer"}
 #     --model MODEL      default llm/deepseek/deepseek-v4-flash-0731 (listed in apps/agents)
 #     --image-tag TAG    default: the commit origin/main points at (built by images.yaml)
+#     --entrypoint FILE  run this local agent-runner/entrypoint.sh instead of the image's, to try
+#                        a change to it without a new image
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 export KUBECONFIG=$HOME/.kube/config
 NS=sdlc-agents
 
-usage() { sed -n '4,16s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; }
+usage() { sed -n '4,18s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; }
 (($# >= 3)) || { usage >&2; exit 2; }
 PROJECT=$1 MODE=$2 KEY=$3
 shift 3
-TITLE="" TEXT="" SLUG="" BRANCH="" FEEDBACK="" ANSWERS="[]"
+TITLE="" TEXT="" SLUG="" BRANCH="" FEEDBACK="" ANSWERS="[]" ENTRYPOINT=""
 MODEL=llm/deepseek/deepseek-v4-flash-0731
 TAG=$(git rev-parse origin/main)
 while (($#)); do
@@ -34,6 +36,7 @@ while (($#)); do
     --answers) ANSWERS=$(jq -c . "$2") ;;
     --model) MODEL=$2 ;;
     --image-tag) TAG=$2 ;;
+    --entrypoint) ENTRYPOINT=$2 ;;
     *) usage >&2; exit 2 ;;
   esac
   shift 2
@@ -79,15 +82,21 @@ jq -n --arg name "$NAME" --arg ns "$NS" --arg image "gitea.sdlc.internal/platfor
       volumes: [{name: "task", configMap: {name: $name}}, {name: "config", configMap: {name: "opencode-config"}},
         {name: "gitea", secret: {secretName: "gitea-agent-runner", items: [{key: "token", path: "token"}]}},
         {name: "work", emptyDir: {}}, {name: "home", emptyDir: {}}, {name: "tmp", emptyDir: {}}]}}}}' |
-  kubectl apply -f - >/dev/null
+  if [[ -n $ENTRYPOINT ]]; then
+    jq '.spec.template.spec.containers[0].command = ["bash", "/task/entrypoint.sh"]'
+  else
+    cat
+  fi | kubectl apply -f - >/dev/null
 
 # The task goes in a ConfigMap owned by the Job, so it goes when the Job does.
 uid=$(kubectl get job -n "$NS" "$NAME" -o jsonpath='{.metadata.uid}')
-jq -n --arg name "$NAME" --arg ns "$NS" --arg uid "$uid" --arg task "$task" --argjson labels "$labels" '{
+jq -n --arg name "$NAME" --arg ns "$NS" --arg uid "$uid" --arg task "$task" --argjson labels "$labels" \
+  --rawfile entrypoint "${ENTRYPOINT:-/dev/null}" '{
   apiVersion: "v1", kind: "ConfigMap",
   metadata: {name: $name, namespace: $ns, labels: $labels,
     ownerReferences: [{apiVersion: "batch/v1", kind: "Job", name: $name, uid: $uid}]},
-  data: {"task.json": $task}}' | kubectl apply -f - >/dev/null
+  data: ({"task.json": $task} + (if $entrypoint == "" then {} else {"entrypoint.sh": $entrypoint} end))}' |
+  kubectl apply -f - >/dev/null
 echo "job $NS/$NAME: $MODE $KEY on $BRANCH (image $TAG)"
 
 started=$SECONDS

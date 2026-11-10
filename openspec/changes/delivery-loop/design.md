@@ -299,6 +299,13 @@ need to know.
   through RouterAI: propose 85 s and about 0.9 RUB, apply 41 s and about 0.7 RUB, a vague task
   36 s ending in a questions file. The JSON events carry token counts per step; the cost comes
   from the provider's prices, since OpenCode's config holds none.
+- **Built in group 6:** the first real runs on `example-webapp` with DeepSeek V4 Flash: propose
+  101 s, apply 188 s with its checks, archive 15 s, and a vague ticket ended in two sensible
+  questions after 52 s. One apply stopped after 8 steps having changed nothing, so the entrypoint
+  ends such a run with `failed` and the agent's last words, and the orchestrator may start it
+  again. A provider key written into `secrets.env` with quotes broke OpenCode's config, whose
+  parse error quoted the key into the pod's status: the entrypoint now redacts the key from
+  everything it writes, and the bootstrap's preflight refuses quoted values.
 - **Result:** the entrypoint writes one JSON to `/dev/termination-log` (`spec_ready`,
   `code_ready`, `archived`, `questions`, `failed`, plus the pushed commit). The watcher reads it from the
   pod status, so no log parsing and no extra storage.
