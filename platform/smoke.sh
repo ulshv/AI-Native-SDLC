@@ -232,6 +232,26 @@ check_ci_unprivileged() {
   [[ -n $(kubectl get pods -n ci -o name) ]] || { echo "no pods in ci"; return 1; }
 }
 
+# Agent runs (namespace sdlc-agents) reach Gitea and the model provider, and nothing private: not
+# the database, Plane, Traefik (and the web UIs behind it) or the Kubernetes API (design decision
+# 7). A pod there tries each with a TCP connect.
+register agents_network
+check_agents_network() {
+  local provider
+  provider=$(kubectl get configmap -n sdlc-agents opencode-config -o jsonpath='{.data.opencode\.json}' |
+    jq -r '.provider.llm.options.baseURL' | sed -E 's#^https?://([^/:]+).*#\1#') || return 1
+  run_pod sdlc-agents smoke-agents-network \
+    --image=docker.io/rancher/mirrored-library-busybox:1.37.0 --image-pull-policy=IfNotPresent -- \
+    sh -c "fail=0
+      for ok in gitea-http.gitea.svc:3000 $provider:443; do
+        nc -z -w 5 \${ok%:*} \${ok#*:} || { echo \"cannot reach \$ok\"; fail=1; }
+      done
+      for no in platform-pg-rw.databases.svc:5432 plane-api.plane.svc:8000 traefik.traefik.svc:443 kubernetes.default.svc:443; do
+        ! nc -z -w 3 \${no%:*} \${no#*:} || { echo \"reached \$no, which agent runs must not\"; fail=1; }
+      done
+      exit \$fail"
+}
+
 register gitea_admin_login
 check_gitea_admin_login() { with_gitea gitea_admin_is_admin; }
 

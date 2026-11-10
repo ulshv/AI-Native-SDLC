@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agents
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sdlc-agents
+  source:
+    repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
+    targetRevision: main
+    path: platform/apps/agents
+    directory:
+      exclude: app.yaml
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true

@@ -1,0 +1,27 @@
+# Agent runs reach the cluster's DNS, Gitea (clone and push over its in-cluster service) and the
+# internet (the model provider, npm), and nothing else: no private network, so neither the
+# database, Plane, the orchestrator, Traefik, the node nor the local network (design decision 7).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress
+  namespace: sdlc-agents
+spec:
+  podSelector: {}
+  policyTypes: [Egress, Ingress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: gitea}}
+      ports:
+        - {protocol: TCP, port: 3000}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]

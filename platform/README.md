@@ -289,6 +289,52 @@ The clone's place is `repository.clone` in the project file (`~/Projects/sdlc/ex
 3. push this repository: Plane's setup Job creates the Plane project;
 4. run `platform/seed-projects.sh`.
 
+## Agent runs
+
+Each agent run is a Kubernetes Job in namespace `sdlc-agents` (design decision 7), started by
+the orchestrator, or by hand with [`run-agent.sh`](run-agent.sh). Its image,
+[`agent-runner/`](../agent-runner/), is OpenCode and the OpenSpec CLI, pinned, with an entrypoint
+that does everything around the model: it clones the target project over Gitea's in-cluster
+service, checks out the ticket's branch (`feat/EWA-12_<slug>`, from `development` when new), runs
+one OpenCode command, runs the project's checks, commits, pushes, and ends with one result.
+
+| Mode | What it does | Commits | Result |
+|---|---|---|---|
+| `propose` | `/opsx:propose` for the ticket, with the answers and feedback so far | only `openspec/changes/<change>/`, validated | `spec_ready` |
+| `apply` | `/opsx:apply` of the change, then the project's `checks` (`npm ci`, tests, ...) | the code, never `.gitea/`; the change stays unarchived | `code_ready` |
+| `fix` | the same, with the review's feedback | the same | `code_ready` |
+| `archive` | `openspec archive` without a model, then validates every spec | `openspec/` | `archived` |
+
+When the agent lacks information it writes its questions to `.agent/result.json`, as the target
+project's `AGENTS.md` asks, and the run ends with `questions` and pushes nothing. Anything else
+ends with `failed` and a reason. The result is the pod's termination message, so nothing parses
+logs: `kubectl get pod -n sdlc-agents -l job-name=<job>
+-o jsonpath='{.status.containerStatuses[0].state.terminated.message}'`.
+
+**Limits and isolation.** 30 minutes, no retry, the Job kept for an hour. The pod runs as a
+user, with no capabilities, a read-only root file system and no Kubernetes token. Its only
+secrets are the model provider's key (`sdlc-agents/llm-api-key`) and `agent-runner`'s Gitea
+token, which may push branches but merge nothing. A NetworkPolicy lets it reach DNS, Gitea and
+the internet, and no private network: neither the database, Plane, Traefik nor the Kubernetes
+API, which the smoke check `agents_network` tries.
+
+**The model** is configuration: [`apps/agents/opencode-config.yaml`](apps/agents/opencode-config.yaml)
+has one OpenAI-compatible provider block (RouterAI) and the models a run may use; the run picks
+one with `--model llm/<model>`. Another provider is another `baseURL` and key, with the same image.
+
+**By hand:**
+
+```bash
+platform/run-agent.sh example-webapp propose EWA-0 --title "Orders filter" \
+  --text "Filter the orders table by status."
+platform/run-agent.sh example-webapp apply EWA-0 --slug orders-filter
+platform/run-agent.sh example-webapp archive EWA-0 --slug orders-filter
+```
+
+It builds the task from the project file, starts the Job with the image of `origin/main`
+(`--image-tag` for another), waits, and prints the run's log lines and its result. The branch
+stays in Gitea; delete it when done.
+
 ## Changing the platform through git
 
 After the bootstrap, Argo CD owns every component, itself included. The root Application

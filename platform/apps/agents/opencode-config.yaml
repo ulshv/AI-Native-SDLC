@@ -1,0 +1,30 @@
+# OpenCode's configuration for agent runs: one OpenAI-compatible provider, "llm", whose key comes
+# from the Secret llm-api-key (LLM_API_KEY in secrets.env). Any OpenAI-compatible provider works:
+# change baseURL and the models, and the next run uses them with the same image. The orchestrator
+# picks the model per run (--model llm/<model>), so a model it uses must be listed here.
+# The question tool would wait for an answer nobody gives, so it is denied with the tools that
+# reach outside the repository (spike 1.1).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opencode-config
+  namespace: sdlc-agents
+data:
+  opencode.json: |
+    {
+      "$schema": "https://opencode.ai/config.json",
+      "autoupdate": false,
+      "share": "disabled",
+      "provider": {
+        "llm": {
+          "name": "LLM",
+          "npm": "@ai-sdk/openai-compatible",
+          "options": {"baseURL": "https://routerai.ru/api/v1", "apiKey": "{env:LLM_API_KEY}"},
+          "models": {
+            "deepseek/deepseek-v4-flash-0731": {"name": "DeepSeek V4 Flash", "tool_call": true, "limit": {"context": 1000000, "output": 8192}},
+            "z-ai/glm-5.2": {"name": "GLM 5.2", "tool_call": true, "limit": {"context": 200000, "output": 8192}}
+          }
+        }
+      },
+      "permission": {"question": "deny", "doom_loop": "deny", "external_directory": "deny", "webfetch": "deny", "websearch": "deny"}
+    }

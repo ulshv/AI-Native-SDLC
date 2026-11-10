@@ -21,6 +21,13 @@ domain: example-webapp.sdlc.internal
 # Previews and the Deploying to QA phase come with group 9.
 previews: false
 
+# What an implementation run must pass before it pushes (design decision 7).
+checks:
+  - npm ci
+  - npm run typecheck
+  - npm test
+  - npm run build
+
 # People and their roles in the loop (design decision 5): product_owner, engineer. Engineers may
 # merge into development (with agent) and into main; product owners and engineers approve on
 # main. Usernames only, never e-mail addresses: this repository is public. Plane's `admin` and

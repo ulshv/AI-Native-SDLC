@@ -5,45 +5,125 @@
   "description": "platform/projects/<name>/project.yaml (design decision 10). Read by Plane's setup Job, the orchestrator, seed-projects.sh and Argo CD's ApplicationSets.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "tracker", "repository", "domain", "previews", "people"],
+  "required": [
+    "name",
+    "tracker",
+    "repository",
+    "domain",
+    "previews",
+    "people",
+    "checks"
+  ],
   "properties": {
-    "name": {"description": "The project's name, also the directory's.", "type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "name": {
+      "description": "The project's name, also the directory's.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
     "tracker": {
       "description": "The Plane project the loop takes tickets from.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["workspace", "identifier", "name"],
+      "required": [
+        "workspace",
+        "identifier",
+        "name"
+      ],
       "properties": {
-        "workspace": {"type": "string", "pattern": "^[a-z0-9-]+$"},
-        "identifier": {"description": "Ticket keys and branch names start with it, such as EWA-12.", "type": "string", "pattern": "^[A-Z][A-Z0-9]{1,11}$"},
-        "name": {"description": "Plane allows no special characters in it.", "type": "string", "pattern": "^[A-Za-z0-9 ]+$"}
+        "workspace": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "identifier": {
+          "description": "Ticket keys and branch names start with it, such as EWA-12.",
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9]{1,11}$"
+        },
+        "name": {
+          "description": "Plane allows no special characters in it.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9 ]+$"
+        }
       }
     },
     "repository": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["gitea", "clone", "base", "release"],
+      "required": [
+        "gitea",
+        "clone",
+        "base",
+        "release"
+      ],
       "properties": {
-        "gitea": {"description": "owner/name on the platform's Gitea; target projects live in the sdlc organization.", "type": "string", "pattern": "^sdlc/[A-Za-z0-9._-]+$"},
-        "clone": {"description": "The local clone seed-projects.sh pushes when the repository is missing; ~ is the operator's home. <NAME>_CLONE in the environment overrides it, such as EXAMPLE_WEBAPP_CLONE.", "type": "string"},
-        "base": {"description": "Feature branches start here and merge back here.", "type": "string"},
-        "release": {"description": "Releases merge into this branch, which production runs.", "type": "string"}
+        "gitea": {
+          "description": "owner/name on the platform's Gitea; target projects live in the sdlc organization.",
+          "type": "string",
+          "pattern": "^sdlc/[A-Za-z0-9._-]+$"
+        },
+        "clone": {
+          "description": "The local clone seed-projects.sh pushes when the repository is missing; ~ is the operator's home. <NAME>_CLONE in the environment overrides it, such as EXAMPLE_WEBAPP_CLONE.",
+          "type": "string"
+        },
+        "base": {
+          "description": "Feature branches start here and merge back here.",
+          "type": "string"
+        },
+        "release": {
+          "description": "Releases merge into this branch, which production runs.",
+          "type": "string"
+        }
       }
     },
-    "domain": {"description": "Production's host; dev is dev.<domain>, a preview <key>.qa.<domain>.", "type": "string", "pattern": "^[a-z0-9.-]+\\.sdlc\\.internal$"},
-    "previews": {"description": "A preview per pull request, and the Deploying to QA phase.", "type": "boolean"},
+    "domain": {
+      "description": "Production's host; dev is dev.<domain>, a preview <key>.qa.<domain>.",
+      "type": "string",
+      "pattern": "^[a-z0-9.-]+\\.sdlc\\.internal$"
+    },
+    "previews": {
+      "description": "A preview per pull request, and the Deploying to QA phase.",
+      "type": "boolean"
+    },
+    "checks": {
+      "description": "Commands an implementation run must pass in the clone, in order, before it pushes, such as the tests.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
     "people": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "roles"],
+        "required": [
+          "name",
+          "roles"
+        ],
         "properties": {
-          "name": {"type": "string"},
-          "roles": {"type": "array", "uniqueItems": true, "items": {"enum": ["product_owner", "engineer"]}},
-          "plane": {"description": "Plane username; it must not change across rebuilds.", "type": "string"},
-          "gitea": {"description": "Gitea username.", "type": "string"}
+          "name": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "product_owner",
+                "engineer"
+              ]
+            }
+          },
+          "plane": {
+            "description": "Plane username; it must not change across rebuilds.",
+            "type": "string"
+          },
+          "gitea": {
+            "description": "Gitea username.",
+            "type": "string"
+          }
         }
       }
     }
