@@ -3,6 +3,7 @@ are a command of their own, and the service starts against Postgres."""
 
 import json
 import os
+from pathlib import Path
 import socket
 import subprocess
 import sys
@@ -57,7 +58,7 @@ def test_unknown_sources_and_bodies_that_are_not_json_are_refused(pool):
 
 
 def run(args, database_url, **kwargs):
-    env = {**os.environ, "DATABASE_URL": database_url, "ORCHESTRATOR_CONFIG": "/nonexistent"}
+    env = {**os.environ, "DATABASE_URL": database_url, "ORCHESTRATOR_CONFIG": "/nonexistent", "LLM_API_KEY": "test"}
     return subprocess.run([sys.executable, "-m", "orchestrator.main", *args], env=env, capture_output=True,
                           text=True, timeout=120, **kwargs)
 
@@ -78,9 +79,10 @@ def test_the_service_refuses_to_start_before_the_migration_and_starts_after_it(d
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    env = {**os.environ, "DATABASE_URL": database_url, "ORCHESTRATOR_CONFIG": "/nonexistent"}
+    env = {**os.environ, "DATABASE_URL": database_url, "ORCHESTRATOR_CONFIG": "/nonexistent",
+           "LLM_API_KEY": "test", "PROJECTS_DIR": str(Path(__file__).parents[2] / "platform" / "projects")}
     service = subprocess.Popen([sys.executable, "-m", "orchestrator.main", "serve", "--host", "127.0.0.1",
-                                "--port", str(port)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                                "--port", str(port)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     try:
         for _ in range(60):
             try:
@@ -89,7 +91,8 @@ def test_the_service_refuses_to_start_before_the_migration_and_starts_after_it(d
             except httpx.HTTPError:
                 time.sleep(0.5)
         else:
-            raise AssertionError("the service did not answer /healthz")
+            service.terminate()
+            raise AssertionError("the service did not answer /healthz: " + service.communicate(timeout=20)[1][-1500:])
     finally:
         service.terminate()
         service.wait(timeout=20)

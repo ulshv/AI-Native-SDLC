@@ -1,6 +1,12 @@
 # Every target project's file as one ConfigMap, target-projects, for whoever includes this
-# directory as a resource: Plane's setup Job now, the orchestrator later. A new project adds one
-# line here. Argo CD's ApplicationSets read the files directly, not through this.
+# directory: Plane's setup Job, and the orchestrator's Application as a source of its own. A new
+# project adds one line here. Argo CD's ApplicationSets read the files directly, not through this.
+#
+# The name has no hash: the orchestrator's chart is another source and cannot follow a hashed
+# name. The orchestrator reads the files again when the kubelet updates them, so a change needs
+# no restart.
+generatorOptions:
+  disableNameSuffixHash: true
 configMapGenerator:
   - name: target-projects
     files:

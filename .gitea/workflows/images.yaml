@@ -1,4 +1,4 @@
-# Builds the platform's own images on every push to main and pushes them as
+# Tests the orchestrator, then builds the platform's own images on every push to main and pushes them as
 # gitea.sdlc.internal/platform/<directory>:<commit> (design decision 3). Runs only on ci-platform,
 # the runner registered on this repository alone, and pushes with ci-platform's token, a secret
 # of this repository that the target projects' workflows cannot read. A directory without a
@@ -8,7 +8,31 @@ on:
   push:
     branches: [main]
 jobs:
+  # The orchestrator's tests, before any image is built: they need a real Postgres, which runs in
+  # the runner's own container for the job. The schema of the cluster's database is migrated later,
+  # by the orchestrator's PreSync Job in Argo CD; CI never reaches that database.
+  test:
+    runs-on: platform
+    steps:
+      - uses: actions/checkout@v4
+      - name: Postgres for the tests
+        run: |
+          command -v pg_ctlcluster >/dev/null || { apt-get update -qq && apt-get install -y -qq postgresql >/dev/null; }
+          version=$(ls /usr/lib/postgresql | sort -n | tail -1)
+          pg_ctlcluster "$version" main start 2>/dev/null || pg_ctlcluster "$version" main status
+          su postgres -c "psql -qc \"ALTER USER postgres PASSWORD 'test'\""
+      - name: uv
+        run: |
+          curl -fsSL -o /tmp/uv.tgz https://github.com/astral-sh/uv/releases/download/0.11.22/uv-x86_64-unknown-linux-gnu.tar.gz
+          echo "30075b14624a62021198319f22e08f1651a97d4026a8c84dab6abcbfaba0d81c  /tmp/uv.tgz" | sha256sum -c -
+          tar -xzf /tmp/uv.tgz -C /usr/local/bin --strip-components=1
+      - name: orchestrator tests
+        working-directory: orchestrator
+        env:
+          ORCHESTRATOR_TEST_DSN: postgresql://postgres:test@127.0.0.1:5432/postgres
+        run: uv run --locked pytest
   images:
+    needs: test
     runs-on: platform
     steps:
       - uses: actions/checkout@v4

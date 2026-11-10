@@ -1,0 +1,10 @@
+# Plane's and Gitea's webhooks reach http://orchestrator.sdlc.svc/hooks/{plane,gitea}.
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestrator
+  labels: {{- include "orchestrator.labels" . | nindent 4 }}
+spec:
+  selector: {app.kubernetes.io/name: orchestrator}
+  ports:
+    - {name: http, port: 80, targetPort: http}

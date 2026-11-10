@@ -13,15 +13,10 @@ import threading
 
 from . import config, db
 from .links import Links
-from .queue import Delivery, PostgresQueue
+from .queue import PostgresQueue
 from .worker import Workers
 
 log = logging.getLogger("orchestrator")
-
-
-def handle(delivery: Delivery) -> None:
-    """Placeholder until the graph (task 7.8): the event is only logged."""
-    log.info("event %s from %s for %s", delivery.delivery_id, delivery.source, delivery.routing_key)
 
 
 def migrate(settings: config.Settings) -> int:
@@ -41,10 +36,22 @@ def serve(settings: config.Settings, host: str, port: int) -> int:
     if missing:
         log.error("tables %s are missing: run `orchestrator migrate` first", ", ".join(missing))
         return 1
+    import json
+
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    from . import intents
+    from .adapters.gitea import GiteaCodeHost
+    from .adapters.plane import PlaneTracker
+    from .graph import Dispatcher, Services, build
+    from .projects import LiveProjects
+
     queue = PostgresQueue(pool, settings.max_attempts)
-    workers = Workers(queue, handle, settings.workers)
-    workers.start()
+    links = Links(pool)
     stop = threading.Event()
+    executor = None
     if settings.agent_image:
         from .executor import Executor, KubernetesCluster
 
@@ -53,11 +60,25 @@ def serve(settings: config.Settings, host: str, port: int) -> int:
         threading.Thread(target=executor.watch, args=(stop,), name="runs-watcher", daemon=True).start()
     else:
         log.warning("no agent image (ORCHESTRATOR_COMMIT or agent_image): agent runs are off")
+    projects = LiveProjects(settings.projects_dir)
+    log.info("projects: %s", ", ".join(p.name for p in projects.all) or "none")
+    svc = Services(
+        projects=projects, links=links, queue=queue,
+        tracker=PlaneTracker(settings.plane_url, settings.plane_api_key, json.loads(settings.plane_people)),
+        code_host=GiteaCodeHost(settings.gitea_url, settings.gitea_token), executor=executor,
+        chat=intents.chat_model(settings.intent_model, settings.llm_base_url, settings.llm_api_key),
+        agent_model=settings.agent_model, threshold=settings.intent_threshold)
+    saver_pool = ConnectionPool(settings.database_url, min_size=1, max_size=settings.workers + 2,
+                                kwargs={"autocommit": True, "row_factory": dict_row}, open=True)
+    dispatcher = Dispatcher(svc, build(svc, PostgresSaver(saver_pool)))
+    workers = Workers(queue, dispatcher, settings.workers)
+    workers.start()
     try:
-        uvicorn.run(create_app(pool, queue, Links(pool)), host=host, port=port, log_config=None)
+        uvicorn.run(create_app(pool, queue, links, dispatcher.item), host=host, port=port, log_config=None)
     finally:
         stop.set()
         workers.stop()
+        saver_pool.close()
         pool.close()
     return 0
 
@@ -77,6 +98,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.command == "migrate":
         return migrate(settings)
+    if not settings.llm_api_key:
+        log.error("LLM_API_KEY is not set")
+        return 1
     return serve(settings, args.host, args.port)
 
 

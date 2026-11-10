@@ -1,0 +1,25 @@
+image:
+  repository: gitea.sdlc.internal/platform/orchestrator
+  tag: ""  # the commit, from the Application ($ARGOCD_APP_REVISION)
+
+# config.yaml of the orchestrator (orchestrator/src/orchestrator/config.py). The model provider is
+# any OpenAI-compatible API; its key is LLM_API_KEY in secrets.env. agent_model must be one of the
+# models listed in platform/apps/agents/opencode-config.yaml.
+config:
+  llm_base_url: https://routerai.ru/api/v1
+  intent_model: deepseek/deepseek-v4-flash-0731
+  agent_model: llm/deepseek/deepseek-v4-flash-0731
+  intent_threshold: 0.7
+  workers: 2
+  max_attempts: 5
+  max_active_runs: 2
+  agent_namespace: sdlc-agents
+  plane_url: http://plane-api.plane.svc:8000
+  gitea_url: http://gitea-http.gitea.svc:3000
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 192Mi
+  limits:
+    memory: 768Mi

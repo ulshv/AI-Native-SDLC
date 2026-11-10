@@ -878,6 +878,31 @@ create_ci_tokens() {
   done
 }
 
+# One webhook on the organization sdlc carries every target project's pull requests, reviews,
+# comments and releases to the orchestrator (design decision 6). The admin registers it: agent has
+# no admin rights on the repositories. Gitea never shows a webhook's secret again, so a changed
+# GITEA_WEBHOOK_SECRET needs the webhook deleted in Gitea and the bootstrap run again.
+ORG_WEBHOOK_URL=http://orchestrator.sdlc.svc/hooks/gitea
+ORG_WEBHOOK_EVENTS='["pull_request","pull_request_sync","issue_comment","pull_request_comment","pull_request_review_approved","pull_request_review_rejected","pull_request_review_comment","release"]'
+
+# Gitea folds the review events into pull_request_review and adds kinds of its own when it
+# stores the webhook, so the check looks for the four the orchestrator reads.
+org_webhook_current() {
+  [[ -n ${GITEA_URL-} ]] && gitea_api GET /orgs/sdlc/hooks 2>/dev/null | jq -e --arg url "$ORG_WEBHOOK_URL" '
+    any(.[]; .config.url == $url and .active and
+      ((["pull_request", "pull_request_review", "issue_comment", "release"] - .events) | length) == 0)' >/dev/null
+}
+
+create_org_webhook() {
+  local id
+  for id in $(gitea_api GET /orgs/sdlc/hooks | jq -r --arg url "$ORG_WEBHOOK_URL" '.[] | select(.config.url == $url) | .id'); do
+    gitea_api DELETE "/orgs/sdlc/hooks/$id" >/dev/null
+  done
+  secret_value GITEA_WEBHOOK_SECRET | jq -Rnc --arg url "$ORG_WEBHOOK_URL" --argjson events "$ORG_WEBHOOK_EVENTS" '{
+    type: "gitea", active: true, events: $events, branch_filter: "*",
+    config: {url: $url, content_type: "json", secret: input}}' | gitea_api_stdin POST /orgs/sdlc/hooks >/dev/null
+}
+
 # Runner registration tokens, in Secrets of namespace ci. Gitea returns the same token until it
 # is reset, so a Secret that still matches is current. ci-platform registers on this repository
 # only, ci-products on the organization.
@@ -1031,6 +1056,7 @@ phase_repository() {
   step "agent-runner's token in sdlc-agents/gitea-agent-runner works" agent_runner_token_works create_agent_runner_token
   step "CI push tokens are Actions secrets (sdlc: CI_REGISTRY_TOKEN, $GITEA_REPO: PLATFORM_REGISTRY_TOKEN)" ci_tokens_current create_ci_tokens
   step "runner registration tokens are in ci/runner-platform and ci/runner-products" runner_tokens_current store_runner_tokens
+  step "the sdlc organization's webhook goes to the orchestrator ($ORG_WEBHOOK_URL)" org_webhook_current create_org_webhook
   step "origin is $GITEA_REMOTE (the old one kept as github)" origin_is_gitea move_origin
   step "credential helper for $GITEA_HOST reads the push token" credential_helper_set set_credential_helper
   step "Gitea has every local branch and tag" gitea_has_local_refs push_all_refs

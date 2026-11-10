@@ -9,6 +9,7 @@
 #    "ticket": {"key": "EWA-12", "title": "...", "text": "..."},
 #    "answers": [{"question": "...", "answer": "..."}],   (optional)
 #    "feedback": "...",                                    (optional, for propose and fix)
+#    "unarchive": true,                                    (optional, for fix: the change was archived)
 #    "checks": ["npm ci", "npm test"]}                     (apply and fix)
 #
 # and ends with one JSON in /dev/termination-log, which the orchestrator reads from the pod's
@@ -173,6 +174,14 @@ case $MODE in
   apply | fix)
     # The code goes into the same pull request; the change stays unarchived until the code is
     # approved. A run never changes the CI workflows, which hold the products' push token.
+    # A fix after the change was archived takes the archive commit back first: the change is
+    # archived again, as the last commit, once the fix is approved.
+    if [[ $MODE == fix && $(task .unarchive) == true ]]; then
+      archived=$(git log -1 --format=%H --fixed-strings --grep="docs($KEY): archive $CHANGE")
+      [[ -n $archived ]] || fail "no archive commit of $CHANGE on $BRANCH to take back"
+      git revert --no-edit "$archived" >/dev/null
+      log "took back the archive commit ${archived:0:12}"
+    fi
     if [[ $MODE == apply ]]; then
       opencode_run opsx-apply "$(printf '%s%s' "$CHANGE" "$(answers)")"
     else

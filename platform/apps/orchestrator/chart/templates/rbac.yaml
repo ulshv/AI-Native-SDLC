@@ -1,0 +1,39 @@
+# The orchestrator starts and watches agent runs in sdlc-agents (design decision 7), and nothing
+# else of the Kubernetes API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orchestrator
+  labels: {{- include "orchestrator.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: orchestrator
+  namespace: {{ .Values.config.agent_namespace }}
+  labels: {{- include "orchestrator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create, get, patch, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: orchestrator
+  namespace: {{ .Values.config.agent_namespace }}
+  labels: {{- include "orchestrator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: orchestrator
+subjects:
+  - kind: ServiceAccount
+    name: orchestrator
+    namespace: {{ .Release.Namespace }}

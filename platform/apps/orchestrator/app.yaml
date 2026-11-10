@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: orchestrator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sdlc
+  sources:
+    # The chart, with the image of the commit Argo CD syncs (design decision 3). Argo CD fills in
+    # $ARGOCD_APP_REVISION in Helm parameters, not in Kustomize's images, hence a chart.
+    - repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
+      targetRevision: main
+      path: platform/apps/orchestrator/chart
+      helm:
+        parameters:
+          - name: image.tag
+            value: $ARGOCD_APP_REVISION
+    # Every target project's file, as the ConfigMap target-projects (platform/projects/kustomization.yaml).
+    - repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
+      targetRevision: main
+      path: platform/projects
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # Argo CD may see a commit before CI has pushed its image, and the PreSync Job then waits for
+    # it; a failed sync of the same commit is tried again, for about half an hour in all.
+    retry:
+      limit: 5
+      backoff: {duration: 1m, factor: 2, maxDuration: 10m}
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true

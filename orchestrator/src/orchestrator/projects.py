@@ -5,12 +5,15 @@
 from __future__ import annotations
 
 import json
+import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 import jsonschema
 import yaml
 
+log = logging.getLogger(__name__)
 ROLES = ("product_owner", "engineer")
 
 
@@ -91,3 +94,36 @@ class Projects:
             identifier = identifier_of(workspace, event.data.get("project_id")) if workspace else None
             return self.by_tracker(workspace, identifier) if identifier else None
         return None
+
+
+class LiveProjects:
+    """Projects that follow their directory: in the cluster, the mounted ConfigMap target-projects,
+    which the kubelet updates in place when a project file changes in git. A changed file is read
+    on the next use; a file that does not load leaves the projects as they were."""
+
+    def __init__(self, directory: Path):
+        self.directory = Path(directory)
+        self._lock = threading.Lock()
+        self._seen: tuple = ()
+        self._projects = Projects.load(self.directory)
+        self._seen = self._signature()
+
+    def _signature(self) -> tuple:
+        paths = sorted({*self.directory.glob("*/project.yaml"), *self.directory.glob("*.yaml"),
+                        *self.directory.glob("project.schema.json")})
+        return tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in paths)
+
+    def current(self) -> Projects:
+        with self._lock:
+            seen = self._signature()
+            if seen != self._seen:
+                try:
+                    self._projects = Projects.load(self.directory)
+                    log.info("projects reloaded: %s", ", ".join(p.name for p in self._projects.all) or "none")
+                except Exception:  # noqa: BLE001 - a broken file must not stop the loop
+                    log.exception("the project files in %s do not load; the projects stay as they were", self.directory)
+                self._seen = seen
+            return self._projects
+
+    def __getattr__(self, name):
+        return getattr(self.current(), name)

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orchestrator-config
+  labels: {{- include "orchestrator.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- toYaml .Values.config | nindent 4 }}

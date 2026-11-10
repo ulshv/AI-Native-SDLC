@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+  labels: {{- include "orchestrator.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # The old pod serves until the new one is ready, so a commit whose image never builds leaves the
+  # running version alone (design decision 3). Two pods at once are safe: events are leased, and
+  # the run limit is a lock in Postgres.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  selector:
+    matchLabels: {app.kubernetes.io/name: orchestrator}
+  template:
+    metadata:
+      labels: {{- include "orchestrator.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ toYaml .Values.config | sha256sum }}
+    spec:
+      serviceAccountName: orchestrator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: orchestrator
+          image: {{ include "orchestrator.image" . }}
+          args: [serve]
+          ports:
+            - {name: http, containerPort: 8000}
+          env:
+            {{- include "orchestrator.database" . | nindent 12 }}
+            - name: ORCHESTRATOR_COMMIT
+              value: {{ .Values.image.tag | quote }}
+            - name: ORCHESTRATOR_CONFIG
+              value: /config/config.yaml
+            - name: PROJECTS_DIR
+              value: /projects
+            - name: LLM_API_KEY
+              valueFrom: {secretKeyRef: {name: orchestrator-env, key: LLM_API_KEY}}
+            - name: PLANE_WEBHOOK_SECRET
+              valueFrom: {secretKeyRef: {name: orchestrator-env, key: PLANE_WEBHOOK_SECRET}}
+            - name: GITEA_WEBHOOK_SECRET
+              valueFrom: {secretKeyRef: {name: orchestrator-env, key: GITEA_WEBHOOK_SECRET}}
+            # From Plane's setup Job: the agent's key and the people's Plane ids.
+            - name: PLANE_API_KEY
+              valueFrom: {secretKeyRef: {name: plane-agent, key: api-key}}
+            - name: PLANE_PEOPLE
+              valueFrom: {secretKeyRef: {name: plane-agent, key: people.json}}
+            # From the bootstrap: agent's Gitea token.
+            - name: GITEA_TOKEN
+              valueFrom: {secretKeyRef: {name: gitea-agent, key: token}}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /config}
+            - {name: projects, mountPath: /projects}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: orchestrator-config}
+        - name: projects
+          configMap: {name: target-projects}
+        - name: tmp
+          emptyDir: {}

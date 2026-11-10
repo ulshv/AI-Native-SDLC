@@ -243,8 +243,8 @@ privileged and no host path is mounted. A NetworkPolicy lets the pods reach DNS,
 `ci_runners` and `ci_unprivileged` check both.
 
 **Platform images.** [`.gitea/workflows/images.yaml`](../.gitea/workflows/images.yaml) runs on
-every push to `main`: each of `orchestrator/` and `agent-runner/` that has a `Dockerfile` is
-built and pushed as `gitea.sdlc.internal/platform/<directory>:<commit>`. Argo CD deploys the
+every push to `main`: the orchestrator's tests first, against a Postgres in the runner; then each
+of `orchestrator/` and `agent-runner/` that has a `Dockerfile` is built and pushed as `gitea.sdlc.internal/platform/<directory>:<commit>`. Argo CD deploys the
 orchestrator with the tag of the commit it syncs, so a push to `main` reaches the cluster
 through CI and GitOps alone.
 
@@ -286,7 +286,8 @@ The clone's place is `repository.clone` in the project file (`~/Projects/sdlc/ex
    a `deploy/chart` and CI workflows (see `example-webapp`);
 2. add `projects/<name>/project.yaml` and one line in
    [`projects/kustomization.yaml`](projects/kustomization.yaml);
-3. push this repository: Plane's setup Job creates the Plane project;
+3. push this repository: Plane's setup Job creates the Plane project, and the orchestrator reads
+   the new file without a restart;
 4. run `platform/seed-projects.sh`.
 
 ## Agent runs
@@ -341,6 +342,26 @@ done.
 OpenCode's own error, or "changed nothing it may commit" with the agent's last words, which a
 cheap model sometimes ends on (start the run again). The entrypoint removes the model provider's
 key from everything it writes.
+
+## Orchestrator
+
+The orchestrator ([`orchestrator/`](../orchestrator/README.md)) runs in namespace `sdlc` from
+[`apps/orchestrator/`](apps/orchestrator/), a Helm chart that Argo CD renders with the commit it
+syncs as the image tag:
+
+- a PreSync Job runs `orchestrator migrate` with the new image, so the schema is current before
+  the new pod starts; the service never migrates on start;
+- one Deployment with a rolling update that keeps the old pod until the new one is ready: a
+  commit whose image never builds leaves the running version alone;
+- the Service `orchestrator.sdlc.svc`, where both tools' webhooks go;
+- its configuration from `config` in [`chart/values.yaml`](apps/orchestrator/chart/values.yaml),
+  the project files as the ConfigMap `target-projects`, and a Role in `sdlc-agents` to start and
+  watch agent runs.
+
+Plane's webhook is set up by its setup Job, and the `sdlc` organization's Gitea webhook by the
+bootstrap. Gitea never shows a webhook's secret again, so after `GITEA_WEBHOOK_SECRET` changes,
+delete the webhook in Gitea and run the bootstrap again. The smoke check `orchestrator_running`
+checks the rollout, `/healthz` and the Gitea webhook.
 
 ## Changing the platform through git
 

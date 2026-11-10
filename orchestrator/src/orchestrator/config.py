@@ -30,6 +30,7 @@ class Settings:
     gitea_token: str = ""
     plane_webhook_secret: str = ""
     gitea_webhook_secret: str = ""
+    plane_people: str = "{}"  # username -> Plane user id, from the Secret sdlc/plane-agent
     extra: dict = field(default_factory=dict)
 
 
@@ -48,6 +49,7 @@ def load(config_file: str | None = None) -> Settings:
         "gitea_webhook_secret": "GITEA_WEBHOOK_SECRET",
         "agent_image": "AGENT_IMAGE",
         "projects_dir": "PROJECTS_DIR",
+        "plane_people": "PLANE_PEOPLE",
     }
     for key, name in env.items():
         if os.environ.get(name):

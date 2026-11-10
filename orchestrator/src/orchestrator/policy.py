@@ -42,8 +42,10 @@ RULES: dict[str, list[tuple[set[Phase] | None, frozenset[str] | None]]] = {
 }
 
 ROLE_WORDS = {PEOPLE: "a product owner or an engineer", ENGINEERS: "an engineer"}
-VERBS = {"approve": "approve", "request_changes": "request changes", "reject": "reject", "answer": "answer",
-         "merge": "merge", "archive": "archive the change", "prepare_release": "prepare a release"}
+# What a refusal says the agent cannot do: "... so I cannot <this> now."
+VERBS = {"approve": "approve it", "request_changes": "take changes to it", "reject": "reject it",
+         "answer": "take an answer", "merge": "merge it", "archive": "archive the change",
+         "prepare_release": "prepare a release"}
 
 
 @dataclass(frozen=True)
@@ -59,11 +61,12 @@ def decide(intent: str, phase: Phase | None, roles: frozenset[str] | None, proje
         return Decision(False, f"I only take requests from the people of {project}.")
     rules = RULES.get(intent)
     if not rules:
-        return Decision(False, "I did not understand what to do.")
+        return Decision(False, "I am not sure what you are asking. Say, for example, \"@agent looks good\", "
+                               "\"@agent please change ...\" or \"@agent merge it into dev\".")
     in_phase = [(phases, allowed) for phases, allowed in rules if phases is None or phase in phases]
     if not in_phase:
         where = f"{key} is in {phase}" if phase else "this item is not in the loop"
-        return Decision(False, f"{where}, so I cannot {VERBS[intent]} it now.")
+        return Decision(False, f"{where}, so I cannot {VERBS[intent]} now.")
     for _, allowed in in_phase:
         if allowed is None or roles & allowed:
             if intent == "archive" and archived:

@@ -50,16 +50,26 @@ def server_url():
     forward = None
     try:
         kubectl("wait", f"pod/{name}", "-n", NAMESPACE, "--for=condition=Ready", "--timeout=180s")
+        # The pod is Ready before Postgres listens; a port-forward started too early dies.
+        for _ in range(90):
+            if subprocess.run(["kubectl", "exec", "-n", NAMESPACE, name, "--", "pg_isready", "-U", "postgres"],
+                              capture_output=True).returncode == 0:
+                break
+            time.sleep(1)
         port = free_port()
-        forward = subprocess.Popen(["kubectl", "port-forward", "-n", NAMESPACE, f"pod/{name}", f"{port}:5432"],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         url = f"postgresql://postgres:test@127.0.0.1:{port}/postgres"
-        for _ in range(60):
+        for _ in range(30):
+            if forward is None or forward.poll() is not None:
+                forward = subprocess.Popen(["kubectl", "port-forward", "-n", NAMESPACE, f"pod/{name}", f"{port}:5432"],
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(1)
             try:
                 psycopg.connect(url, connect_timeout=2).close()
                 break
             except psycopg.OperationalError:
                 time.sleep(1)
+        else:
+            raise RuntimeError(f"cannot reach the test Postgres in pod {NAMESPACE}/{name}")
         yield url
     finally:
         if forward:

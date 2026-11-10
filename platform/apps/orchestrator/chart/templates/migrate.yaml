@@ -1,0 +1,33 @@
+# The schema, before every rollout (design decision 4): the orchestrator's tables and LangGraph's,
+# with the image of the commit being synced. The service refuses to start without them.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: orchestrator-migrate
+  labels: {{- include "orchestrator.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 900
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: migrate
+          image: {{ include "orchestrator.image" . }}
+          args: [migrate]
+          env: {{- include "orchestrator.database" . | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {memory: 64Mi}
+            limits: {memory: 256Mi}

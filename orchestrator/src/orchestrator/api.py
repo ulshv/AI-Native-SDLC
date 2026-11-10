@@ -3,7 +3,7 @@
 A webhook is recorded in the queue and answered at once; the workers act on it later. The event
 is routed by what it is about: the thread linked to that object, or the object itself until it
 has a thread. The thread API follows LangGraph's Agent Protocol in shape (threads, their state
-and messages); it comes with task 7.9.
+and messages).
 """
 
 from __future__ import annotations
@@ -32,7 +32,12 @@ def routing_key(links: Links, link: Link | None, source: str) -> str:
     return links.thread_of(link) or str(link)
 
 
-def create_app(pool: ConnectionPool, queue: Queue, links: Links) -> FastAPI:
+# What the thread API shows of a work item; the rest is the loop's bookkeeping.
+SHOWN = ("phase", "key", "project", "title", "branch", "change", "pr", "preview", "questions", "archived")
+
+
+def create_app(pool: ConnectionPool, queue: Queue, links: Links, item_of=None) -> FastAPI:
+    """item_of(thread_id) returns a thread's work item state (the graph's), or {} when unknown."""
     app = FastAPI(title="orchestrator", docs_url=None, redoc_url=None)
 
     @app.get("/healthz")
@@ -70,5 +75,21 @@ def create_app(pool: ConnectionPool, queue: Queue, links: Links) -> FastAPI:
         if thread is None:
             raise HTTPException(404, f"no thread is linked to {link}")
         return {"thread_id": thread, "links": [str(l) for l in links.links_of(thread)]}
+
+    def thread_or_404(thread_id: str) -> dict:
+        item = item_of(thread_id) if item_of else {}
+        if not item and not links.links_of(thread_id):
+            raise HTTPException(404, f"no thread {thread_id}")
+        return item
+
+    @app.get("/threads/{thread_id}")
+    def thread(thread_id: str):
+        item = thread_or_404(thread_id)
+        return {"thread_id": thread_id, "values": {k: item.get(k) for k in SHOWN if k in item},
+                "links": [str(l) for l in links.links_of(thread_id)]}
+
+    @app.get("/threads/{thread_id}/messages")
+    def messages(thread_id: str):
+        return {"thread_id": thread_id, "messages": thread_or_404(thread_id).get("messages", [])}
 
     return app

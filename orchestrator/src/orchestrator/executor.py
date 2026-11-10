@@ -20,6 +20,7 @@ from typing import Protocol
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from .loop import run_name  # noqa: F401 - the run names are the loop's
 from .queue import Queue
 
 log = logging.getLogger(__name__)
@@ -56,10 +57,6 @@ class Cluster(Protocol):
     def finished_jobs(self) -> list[Finished]: ...
 
     def watch_finished(self, stop: threading.Event): ...  # yields Finished
-
-
-def run_name(key: str, mode: str, n: int) -> str:
-    return f"{key.lower()}-{mode}-{n}"
 
 
 def job_manifest(run: Run, image: str, namespace: str) -> dict:

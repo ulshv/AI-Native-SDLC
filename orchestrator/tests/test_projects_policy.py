@@ -7,7 +7,7 @@ import pytest
 
 from orchestrator import intents
 from orchestrator.policy import OPEN, Phase, decide
-from orchestrator.projects import Projects
+from orchestrator.projects import LiveProjects, Projects
 
 REPO_PROJECTS = Path(__file__).parents[2] / "platform" / "projects"
 
@@ -76,7 +76,7 @@ def test_reject_works_in_every_open_phase():
 
 def test_refusals_say_why():
     assert decide("merge", Phase.CODE_REVIEW, PO, "example-webapp").reason == \
-        "Only an engineer of example-webapp can merge in Code review."
+        "Only an engineer of example-webapp can merge it in Code review."
     assert decide("merge", Phase.SPEC_REVIEW, ENG, "example-webapp", "EWA-12").reason == \
         "EWA-12 is in Spec review, so I cannot merge it now."
     assert not decide("archive", Phase.ON_DEV, ENG, "p", "EWA-1", archived=True).allowed
@@ -161,3 +161,16 @@ def test_an_event_of_an_unconnected_project_or_repository_has_no_project(project
     assert projects.of_event(event, None).name == "example-webapp"
     d["body"]["repository"]["full_name"] = "sdlc/other"
     assert projects.of_event(gitea.to_event(d["headers"], d["body"]), None) is None
+
+
+def test_live_projects_follow_their_files_and_keep_the_last_good_ones(tmp_path):
+    repo = Path(__file__).parents[2] / "platform" / "projects"
+    file = tmp_path / "example-webapp.yaml"
+    (tmp_path / "project.schema.json").write_text((repo / "project.schema.json").read_text())
+    file.write_text((repo / "example-webapp" / "project.yaml").read_text())
+    projects = LiveProjects(tmp_path)
+    assert projects.by_repo("sdlc/example-webapp").base == "development"
+    file.write_text(file.read_text().replace("base: development", "base: dev"))
+    assert projects.by_repo("sdlc/example-webapp").base == "dev"
+    file.write_text("name: broken\n")
+    assert projects.by_repo("sdlc/example-webapp").base == "dev"

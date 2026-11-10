@@ -111,12 +111,13 @@ check_database_isolation() {
   )"
 }
 
-# with_gitea <command...>: runs the command with GITEA_URL pointing at a temporary port-forward
-# to Gitea's Service, so it works before the ingress exists.
-with_gitea() {
-  local log pid port rc
+# with_service <namespace> <service> <port> <command...>: runs the command with SERVICE_URL
+# pointing at a temporary port-forward to the Service, so it needs no ingress.
+with_service() {
+  local namespace=$1 service=$2 service_port=$3 log pid port rc
+  shift 3
   log=$(mktemp)
-  kubectl port-forward -n gitea svc/gitea-http 0:3000 >"$log" 2>&1 &
+  kubectl port-forward -n "$namespace" "svc/$service" "0:$service_port" >"$log" 2>&1 &
   pid=$!
   for _ in $(seq 50); do
     port=$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9]*\).*/\1/p' "$log")
@@ -129,12 +130,17 @@ with_gitea() {
     rm -f "$log"
     return 1
   fi
-  GITEA_URL=http://127.0.0.1:$port "$@"
+  SERVICE_URL=http://127.0.0.1:$port "$@"
   rc=$?
   kill "$pid" 2>/dev/null
   rm -f "$log"
   return $rc
 }
+
+# with_gitea <command...>: the command with GITEA_URL pointing at Gitea's Service, so it works
+# before the ingress exists.
+with_gitea() { with_service gitea gitea-http 3000 as_gitea "$@"; }
+as_gitea() { GITEA_URL=$SERVICE_URL "$@"; }
 
 # The admin signs in through the API with the password from secrets.env. The password goes
 # to curl through a netrc on a pipe, never as an argument.
@@ -580,6 +586,35 @@ EOF
   curl -fsS --max-time 20 -o /dev/null -H @<(printf 'X-API-Key: %s\n' "$key") \
     "https://plane.sdlc.internal/api/v1/workspaces/$workspace/projects/" ||
     { echo "agent's API key in sdlc/plane-agent does not work"; return 1; }
+}
+
+# The orchestrator runs (platform/apps/orchestrator): its Deployment is rolled out with the image
+# of a commit on main, it answers /healthz (which reads its database) through its Service, and
+# the webhooks of both tools point at it: the sdlc organization's in Gitea (registered by the
+# bootstrap) and each target project's workspace in Plane (check plane_loop_project).
+orchestrator_healthy() {
+  curl -fsS --max-time 10 "$SERVICE_URL/healthz" | jq -e '.ok' >/dev/null ||
+    { echo "the orchestrator does not answer /healthz"; return 1; }
+}
+
+org_webhook_to_orchestrator() {
+  gitea_admin_get /orgs/sdlc/hooks | jq -e '
+    any(.[]; .config.url == "http://orchestrator.sdlc.svc/hooks/gitea" and .active and
+      ((["pull_request", "pull_request_review", "issue_comment", "release"] - .events) | length) == 0)' >/dev/null ||
+    { echo "the sdlc organization has no active webhook to the orchestrator (run platform/bootstrap.sh)"; return 1; }
+}
+
+register orchestrator_running
+check_orchestrator_running() {
+  local tag
+  kubectl rollout status deploy/orchestrator -n sdlc --timeout=30s >/dev/null ||
+    { echo "the orchestrator's Deployment in sdlc is not rolled out"; return 1; }
+  tag=$(kubectl get deploy orchestrator -n sdlc -o jsonpath='{.spec.template.spec.containers[0].image}')
+  tag=${tag##*:}
+  git merge-base --is-ancestor "$tag" main 2>/dev/null ||
+    { echo "the orchestrator runs $tag, which is no commit on main"; return 1; }
+  with_service sdlc orchestrator 80 orchestrator_healthy || return 1
+  with_gitea org_webhook_to_orchestrator
 }
 
 # The public mirror holds main and nothing else: no other branch, no tag. Read anonymously over

@@ -304,6 +304,15 @@ need to know.
   #<n> on <key> were not archived and asks for an archive PR. When an engineer answers
   "@agent ok, create archive PR" (intent `archive`), it runs `archive` on a new branch
   `archive/<key>` from `development` and opens a PR with only that commit.
+- **One run per item at a time:** the thread remembers the run going on and takes only that run's
+  result. A request that needs another run while one goes gets "ask again when it is done";
+  closing the item or merging its PR ends the wait, and a result that arrives after that is
+  dropped. Runs keep counting when a closed item is assigned again, so their names stay new.
+- **A failed run** moves the item to Needs info with the reason; the next comment mentioning
+  `@agent` runs the same mode again, with whatever the person wrote added as an answer.
+- **Changes after the archive:** a request for changes after the `archive` run takes the archive
+  commit back (`git revert` in the `fix` run) before the fix, so the next approval archives
+  again and the archive commit stays the last one before the merge.
 - **Running OpenCode (spike 1.1):** `opencode run --pure --format json --model <provider>/<model>
   --command opsx-propose|opsx-apply "<arguments>" </dev/null`, with an `@ai-sdk/openai-compatible`
   provider block whose key is `{env:LLM_API_KEY}`. On a small change with DeepSeek V4 Flash
@@ -313,8 +322,7 @@ need to know.
 - **Built in group 6:** the first real runs on `example-webapp` with DeepSeek V4 Flash: propose
   101 s, apply 188 s with its checks, archive 15 s, and a vague ticket ended in two sensible
   questions after 52 s. One apply stopped after 8 steps having changed nothing, so the entrypoint
-  ends such a run with `failed` and the agent's last words, and the orchestrator may start it
-  again. A provider key written into `secrets.env` with quotes broke OpenCode's config, whose
+  ends such a run with `failed` and the agent's last words, and a person can have it run again. A provider key written into `secrets.env` with quotes broke OpenCode's config, whose
   parse error quoted the key into the pod's status: the entrypoint now redacts the key from
   everything it writes, and the bootstrap's preflight refuses quoted values.
 - **Result:** the entrypoint writes one JSON to `/dev/termination-log` (`spec_ready`,
