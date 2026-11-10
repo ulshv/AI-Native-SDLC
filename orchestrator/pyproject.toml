@@ -1,0 +1,34 @@
+[project]
+name = "orchestrator"
+version = "0.1.0"
+description = "The delivery loop's orchestrator: webhooks into a queue, one LangGraph thread per work item, agent runs as Kubernetes Jobs."
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "fastapi==0.162.2",
+    "uvicorn==0.54.0",
+    "langgraph==1.2.20",
+    "langgraph-checkpoint-postgres==3.2.0",
+    "psycopg[binary]==3.3.8",
+    "psycopg-pool==3.3.3",
+    "langchain-openai==1.7.4",
+    "langchain-deepseek==1.1.1",
+    "kubernetes==37.0.2",
+    "httpx==0.28.1",
+    "pydantic==2.14.3",
+    "pyyaml==6.0.3",
+    "jsonschema==4.26.0",
+]
+
+[dependency-groups]
+dev = ["pytest==9.2.0"]
+
+[project.scripts]
+orchestrator = "orchestrator.main:main"
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

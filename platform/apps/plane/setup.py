@@ -80,21 +80,32 @@ def k8s(method, path, body=None, content_type="application/json"):
         raise
 
 
-def stored_agent_key():
+def stored(key):
     namespace, name = AGENT_SECRET
     secret = k8s("GET", f"/api/v1/namespaces/{namespace}/secrets/{name}")
-    value = (secret or {}).get("data", {}).get("api-key")
+    value = (secret or {}).get("data", {}).get(key)
     return base64.b64decode(value).decode() if value else None
 
 
-def store_agent_key(key):
+def store(values):
+    """Sets keys of the Secret sdlc/plane-agent, leaving the others."""
     namespace, name = AGENT_SECRET
     k8s("PATCH", f"/api/v1/namespaces/{namespace}/secrets/{name}?fieldManager=plane-setup&force=true", {
         "apiVersion": "v1", "kind": "Secret",
         "metadata": {"name": name, "namespace": namespace,
                      "labels": {"app.kubernetes.io/managed-by": "plane-setup"}},
-        "stringData": {"api-key": key, "username": "agent"},
+        "stringData": {"username": "agent", **values},
     }, content_type="application/apply-patch+yaml")
+
+
+def store_people(users):
+    """The Plane user id of every person in the project files, and the agent's. Plane's public API
+    names members by display name only, which anyone can change, so the orchestrator matches the
+    people by these ids instead (key people.json: username -> id)."""
+    people = json.dumps({user.username: str(user.id) for user in users}, sort_keys=True)
+    if stored("people.json") != people:
+        store({"people.json": people})
+        log("stored the Plane ids of the people in sdlc/plane-agent")
 
 
 # --- The agent -----------------------------------------------------------------------------------
@@ -117,14 +128,14 @@ def ensure_agent():
 
 
 def ensure_agent_key(agent, workspace):
-    stored = stored_agent_key()
-    if stored and APIToken.objects.filter(token=stored, user=agent, is_active=True).exists():
+    current = stored("api-key")
+    if current and APIToken.objects.filter(token=current, user=agent, is_active=True).exists():
         return
     # all_objects: Plane's models delete softly, and an old key must not stay usable.
     APIToken.all_objects.filter(user=agent, label="orchestrator").delete()
     token = APIToken.objects.create(user=agent, workspace=workspace, label="orchestrator",
                                     description="the orchestrator's key, kept in the Secret sdlc/plane-agent")
-    store_agent_key(token.token)
+    store({"api-key": token.token})
     log("stored a new API key for agent in sdlc/plane-agent")
 
 
@@ -247,7 +258,7 @@ def main():
     for project in projects:
         by_workspace.setdefault(project["tracker"]["workspace"], []).append(project)
 
-    workspaces = []
+    workspaces, everyone = [], {agent}
     for slug, workspace_projects in by_workspace.items():
         workspace, created = Workspace.objects.get_or_create(slug=slug, defaults={"name": slug, "owner": admin})
         if created:
@@ -259,6 +270,7 @@ def main():
         try:
             for project in workspace_projects:
                 people = [user for person in project.get("people", []) if (user := plane_user(person)) is not None]
+                everyone.update(people)
                 for user in people:
                     if user != admin:
                         ensure_workspace_member(workspace, user, MEMBER)
@@ -271,6 +283,7 @@ def main():
     # loop has today.
     if workspaces:
         ensure_agent_key(agent, workspaces[0])
+        store_people(everyone)
     else:
         log("no project files: no workspace, so no API key for agent yet")
     log("done")

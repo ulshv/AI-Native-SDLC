@@ -5,3 +5,8 @@ secrets.env
 
 # Charts a local `kubectl kustomize --enable-helm` downloads next to a kustomization.
 platform/apps/*/charts/
+
+# Python
+__pycache__/
+.venv/
+.pytest_cache/

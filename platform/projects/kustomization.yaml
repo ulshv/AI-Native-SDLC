@@ -5,3 +5,5 @@ configMapGenerator:
   - name: target-projects
     files:
       - example-webapp.yaml=example-webapp/project.yaml
+      # the format, for the orchestrator to check the files with
+      - project.schema.json

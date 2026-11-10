@@ -166,10 +166,19 @@ worker: take the oldest unprocessed row for a thread not being handled (FOR UPDA
 - FastAPI for the endpoints; one worker loop in the same process; Postgres database
   `orchestrator` in the shared cluster for the inbox, `thread_link` and LangGraph's
   checkpoints.
-- **The queue is a table, behind an interface.** Recording an event, moving the phase and saving
-  the graph's checkpoint happen in one database and commit together (the transactional inbox
-  pattern, as in Oban, graphile-worker or pgmq). Duplicates are caught by the unique delivery id
-  for as long as the row exists, while Gitea can redeliver a webhook days later.
+- **Migrations are a step of their own:** `orchestrator migrate` (the orchestrator's tables and
+  LangGraph's) runs as an Argo CD PreSync Job with the same image before every rollout; the
+  service never changes the schema and refuses to start while a table is missing. CI runs the
+  tests but never reaches the database.
+- **The queue is a table, behind an interface.** Events and the graph's checkpoints live in one
+  database (the inbox pattern, as in Oban, graphile-worker or pgmq). Duplicates are caught by
+  the unique delivery id for as long as the row exists, while Gitea can redeliver a webhook days
+  later. A worker leases an event instead of holding a lock while it handles it, so a handler may
+  touch the queue (an intake moves the item's waiting events to its new thread); a lease that
+  runs out (the process died) makes the event available again. Effects are at least once: the
+  graph keeps the deliveries it applied in the thread's state and skips one it sees again, and a
+  handler routes an event anew when its object got a thread after the event was recorded.
+  Found in the code review of group 7.
 - **Why not NATS JetStream:** two systems to keep consistent, an ack on top of a database
   commit, and deduplication still in the database, since JetStream's window is two minutes by
   default; all for a few dozen events a day. NATS becomes the right tool when several services
@@ -255,9 +264,11 @@ need to know.
   delivery id for deduplication.
 - **Gitea:** repository webhooks for `pull_request` (opened, synchronized, closed with `merged`),
   the review events (approved, rejected, comment), `issue_comment` on PRs and `release`
-  (published). The orchestrator registers them for every project on start, idempotently by URL.
-  Replies go to the PR. Mentions are the literal `@agent`. Spike 1.4: a review event carries the
-  review's text and the reviewed `commit_id` but neither the review's id nor its inline comments,
+  (published), from one webhook on the organization `sdlc`, which the bootstrap registers as the
+  admin (`agent` has no admin rights on the repositories). Replies go to the PR. Mentions are the
+  literal `@agent`. Spike 1.4: a review event carries the
+  review's text and the pull request's head (its own `commit_id` is empty in Gitea 1.27) but
+  neither the review's id nor its inline comments,
   so the adapter reads the PR's latest review by that person and its comments through the API.
   An approving review whose text mentions `@agent` is both an approval and a request to read.
   `html_url` follows the host a request came through, so links are built from configuration.
