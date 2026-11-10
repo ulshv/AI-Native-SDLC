@@ -83,8 +83,8 @@ check_container_signals() {
       kill $p'
 }
 
-# Runs psql in a throwaway pod with the gitea role's password from its Secret, so the password
-# never appears on a command line.
+# Runs psql in a throwaway pod with each checked role's password from its Secret, so no
+# password appears on a command line. Each role opens its own database and is refused another.
 register database_isolation
 check_database_isolation() {
   local image pod=smoke-database-isolation
@@ -92,14 +92,21 @@ check_database_isolation() {
   run_pod databases "$pod" --image="$image" --overrides="$(
     jq -n --arg pod "$pod" --arg image "$image" '{spec: {containers: [{
       name: $pod, image: $image,
-      env: [{name: "PGPASSWORD", valueFrom: {secretKeyRef: {name: "pg-gitea", key: "password"}}}],
+      env: [
+        {name: "PW_gitea", valueFrom: {secretKeyRef: {name: "pg-gitea", key: "password"}}},
+        {name: "PW_orchestrator", valueFrom: {secretKeyRef: {name: "pg-orchestrator", key: "password"}}}
+      ],
       command: ["sh", "-c", "
-        psql \"host=platform-pg-rw user=gitea dbname=gitea\" -tAc \"select 1\" >/dev/null ||
-          { echo \"gitea cannot open its own database\"; exit 1; }
-        if psql \"host=platform-pg-rw user=gitea dbname=plane\" -tAc \"select 1\" 2>/tmp/err; then
-          echo \"gitea opened the plane database\"; exit 1
-        fi
-        grep -q \"pg_hba.conf rejects connection\" /tmp/err || { cat /tmp/err; exit 1; }"]
+        for pair in gitea:plane orchestrator:gitea; do
+          role=${pair%:*} other=${pair#*:}
+          eval \"export PGPASSWORD=\\$PW_$role\"
+          psql \"host=platform-pg-rw user=$role dbname=$role\" -tAc \"select 1\" >/dev/null ||
+            { echo \"$role cannot open its own database\"; exit 1; }
+          if psql \"host=platform-pg-rw user=$role dbname=$other\" -tAc \"select 1\" 2>/tmp/err; then
+            echo \"$role opened the $other database\"; exit 1
+          fi
+          grep -q \"pg_hba.conf rejects connection\" /tmp/err || { cat /tmp/err; exit 1; }
+        done"]
     }]}}'
   )"
 }
@@ -137,6 +144,38 @@ gitea_admin_is_admin() {
   curl -fsS --max-time 10 --netrc-file <(printf 'machine 127.0.0.1 login gitea_admin password %s\n' "$password") \
     "$GITEA_URL/api/v1/user" | jq -e '.login == "gitea_admin" and .is_admin' >/dev/null ||
     { echo "gitea_admin cannot sign in as an admin"; return 1; }
+}
+
+# newest_sdlc_image (inside with_gitea): the newest tagged container image of the sdlc
+# organization in Gitea's registry, empty when there is none.
+newest_sdlc_image() {
+  local password
+  password=$(sed -n 's/^GITEA_ADMIN_PASSWORD=//p' "$SECRETS_FILE")
+  curl -fsS --max-time 10 --netrc-file <(printf 'machine 127.0.0.1 login gitea_admin password %s\n' "$password") \
+    "$GITEA_URL/api/v1/packages/sdlc?type=container&limit=50" |
+    jq -r '[.[] | select(.version | startswith("sha256:") | not)] | sort_by(.created_at) | last
+      | if . then "gitea.sdlc.internal/sdlc/\(.name):\(.version)" else empty end'
+}
+
+# A pod in any namespace pulls an image from Gitea's registry without a pull secret: k3s uses
+# reader's token from /etc/rancher/k3s/registries.yaml. imagePullPolicy Always makes the node
+# ask the registry even when it has the image. Passes with a note while the registry is empty.
+register registry_pull
+check_registry_pull() {
+  local image pod=smoke-registry-pull state i
+  image=$(with_gitea newest_sdlc_image) || return 1
+  [[ -n $image ]] || { echo "  (no image in the sdlc registry yet: nothing to pull)"; return 0; }
+  kubectl delete pod "$pod" -n default --ignore-not-found --wait=true >/dev/null
+  kubectl run "$pod" -n default --restart=Never --image="$image" --image-pull-policy=Always >/dev/null || return 1
+  for i in $(seq 60); do
+    state=$(kubectl get pod "$pod" -n default -o json | jq -r '.status.containerStatuses[0] |
+      if .imageID != null and .imageID != "" then "pulled"
+      else (.state.waiting.reason // "pending") end')
+    [[ $state == pulled || $state == ErrImagePull || $state == ImagePullBackOff ]] && break
+    sleep 2
+  done
+  kubectl delete pod "$pod" -n default --wait=false >/dev/null
+  [[ $state == pulled ]] || { echo "$image: $state"; return 1; }
 }
 
 register gitea_admin_login

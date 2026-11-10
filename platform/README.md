@@ -21,12 +21,14 @@ at once:
 - you run it as your own user, not as root (it calls `sudo` itself, so expect a password prompt);
 - the tools from the host prerequisites are installed, and `yq` is mikefarah's v4;
 - ports 80 and 443 are free (the error names the process that holds them);
-- every required external secret is in `~/.config/ai-native-sdlc/secrets.env`. For now that
-  is only your Plane admin email:
+- every required external secret is in `~/.config/ai-native-sdlc/secrets.env`: your Plane
+  admin email and the API key of an OpenAI-compatible model provider (RouterAI, OpenRouter,
+  DeepSeek, OpenAI and the like):
 
   ```bash
   mkdir -p ~/.config/ai-native-sdlc && chmod 700 ~/.config/ai-native-sdlc
   echo 'PLANE_ADMIN_EMAIL=you@example.com' >> ~/.config/ai-native-sdlc/secrets.env
+  read -rsp 'Model provider API key: ' key && echo "LLM_API_KEY=$key" >> ~/.config/ai-native-sdlc/secrets.env; unset key
   chmod 600 ~/.config/ai-native-sdlc/secrets.env
   ```
 
@@ -56,8 +58,12 @@ description of each.
 bootstrap creates when they are missing, so you never type them. A `password` (22 characters,
 128 bits) is only hashed or compared; a `key` (44 characters, 256 bits) is turned into an
 encryption or signing key by the app. `external` values come from somewhere else, and you
-put them into `secrets.env` yourself; for now that is only `PLANE_ADMIN_EMAIL`. Values persist
+put them into `secrets.env` yourself: `PLANE_ADMIN_EMAIL` and `LLM_API_KEY`. Values persist
 across rebuilds, so services keep the same credentials.
+
+**The model provider's key** (`LLM_API_KEY`) goes to the orchestrator (`sdlc/orchestrator-env`)
+and to the agent runs (`sdlc-agents/llm-api-key`). Set a spending limit on it at the provider:
+a run is a few calls, but a misbehaving loop would keep spending.
 
 **Rotation.** Change the value, or delete its line to get a new generated one, re-run
 `platform/bootstrap.sh`, then restart the service that uses it. Two values must not be
@@ -84,6 +90,7 @@ Phase 2 changes the host, and each change is checked first and skipped when alre
 | Traffic to pods bypasses VPN routing rules, so a VPN in TUN mode cannot capture pods' DNS | `ip rule` priority 100 for `10.42.0.0/16` |
 | Both of the above come back on every k3s start, including after a reboot | `/etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf` |
 | Processes of one container may signal each other under AppArmor again: Ubuntu's kernels from 7.0.0-42 stack containerd's profile, which then denies it ([containerd#14485](https://github.com/containerd/containerd/issues/14485)). The file is containerd's own profile plus two rules; apparmor.service loads it at boot, before k3s, so containerd keeps it | `/etc/apparmor.d/cri-containerd.apparmor.d`, from [`apparmor/`](apparmor/cri-containerd.apparmor.d) |
+| k3s pulls images from Gitea's registry as `reader` (written in phase 7, see [Container registry](#container-registry)) | `/etc/rancher/k3s/registries.yaml` |
 | Cluster access for you | `~/.kube/config`; a config that was already there is kept as `~/.kube/config.before-ai-native-sdlc` |
 | Service names from [`hosts.txt`](hosts.txt) → `127.0.0.1` | a block between `# BEGIN ai-native-sdlc` and `# END ai-native-sdlc` in `/etc/hosts`; the original is kept as `/etc/hosts.before-ai-native-sdlc` |
 | Root CA trusted by the system (curl, git, most tools) | `/usr/local/share/ca-certificates/ai-native-sdlc.crt` |
@@ -115,11 +122,14 @@ sudo rm -f /etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf \
   && sudo ip link del sdlc0 \
   && sudo ip rule del to 10.42.0.0/16 lookup main priority 100
 
-# 4. the AppArmor profile; after the reboot containerd loads its own one again
+# 4. the registry access (k3s-uninstall.sh removes it with the rest of /etc/rancher)
+sudo rm -f /etc/rancher/k3s/registries.yaml
+
+# 5. the AppArmor profile; after the reboot containerd loads its own one again
 sudo rm -f /etc/apparmor.d/cri-containerd.apparmor.d && sudo reboot
 ```
 
-The AppArmor profile is a workaround: remove it (step 4, and the file and its bootstrap step)
+The AppArmor profile is a workaround: remove it (step 5, and the file and its bootstrap step)
 once the pinned k3s ships a containerd with the fix from
 [containerd#14487](https://github.com/containerd/containerd/pull/14487). The smoke check
 `container_signals` tells whether it is still needed: it fails without the file on an
@@ -137,14 +147,47 @@ Phase 4 makes the platform's Gitea the home of this repository:
 - renames the old `origin` (GitHub) to `github`, so nothing it references is lost, and adds
   `https://gitea.sdlc.internal/sdlc/ai-native-sdlc.git` as `origin`;
 - pushes every local branch and tag, and sets `main` to track `origin/main`;
-- creates two Gitea tokens for the admin: `bootstrap-push` (write access to repositories) in
-  `~/.config/ai-native-sdlc/gitea-push-token`, and `argocd-read` (read only) in Argo CD's
-  repository Secret. Both belong to this cluster and are replaced after a rebuild.
+- creates the admin's Gitea token `bootstrap-push` (write access to repositories) in
+  `~/.config/ai-native-sdlc/gitea-push-token`;
+- creates the service accounts below, with tokens that live only where they are used.
+
+| Account | What it is for | Its token |
+|---|---|---|
+| `agent` | the orchestrator: comments, pull requests, merges into `development` where a target project allows it | `sdlc/gitea-agent` (write to repositories and issues) |
+| `agent-runner` | agent runs: pushes feature branches, may merge nothing | `sdlc-agents/gitea-agent-runner` (write to repositories) |
+| `reader` | reads every repository and package of `sdlc`, as a member of the team `readers` | `argocd/creds-sdlc` (Argo CD's credential template for every `sdlc/` repository) and `/etc/rancher/k3s/registries.yaml` (image pulls, phase 7) |
+
+Nobody signs in as a service account: its password is random and never stored. Every token
+belongs to this cluster and is replaced after a rebuild; a re-run replaces only a token that
+no longer works. Which repositories `agent` and `agent-runner` may write to, and which
+branches they may merge into, is set per target project by `seed-projects.sh`.
 
 Until the ingress is up, phase 4 reaches Gitea through a temporary port-forward. Afterwards a
 plain `git push` goes to `gitea.sdlc.internal`: a credential helper in this clone's
 `.git/config`, scoped to that host, reads the push token from the secrets directory when git
 asks, so the token itself is never written into `.git/config` or `~/.git-credentials`.
+
+## Container registry
+
+Images live in Gitea's own registry as `gitea.sdlc.internal/sdlc/<name>:<tag>`, under the
+organization, not under a repository. Phase 7, the last one, lets k3s pull them in any
+namespace without a pull secret: it writes `/etc/rancher/k3s/registries.yaml` (mode 0600)
+with `reader`'s read-only package token and the local CA, and restarts k3s, which reads the
+file only on start. Pods keep running through the restart; the API is away for about half a
+minute. A re-run leaves the file and k3s alone while the token works. It comes last because
+the token needs Gitea, which runs only from phase 3.
+
+Pushing needs write access to the organization's packages, which only CI's own account `ci`
+gets; a repository collaborator is refused, and so is Gitea Actions' job token.
+
+The smoke check `registry_pull` runs the newest image of `sdlc` in a pod, asking the registry
+each time; while the registry is empty it only says so.
+
+**Undo:**
+
+```bash
+sudo rm /etc/rancher/k3s/registries.yaml && sudo systemctl restart k3s
+```
 
 **Rollback** to GitHub as `origin`:
 

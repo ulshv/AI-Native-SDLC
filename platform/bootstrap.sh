@@ -43,8 +43,9 @@ APPARMOR_NAME=cri-containerd.apparmor.d
 GITEA_HOST=https://gitea.sdlc.internal
 GITEA_REPO=sdlc/ai-native-sdlc
 GITEA_REMOTE=$GITEA_HOST/$GITEA_REPO.git
-# Argo CD reads the repository over the in-cluster Service, not through the ingress.
-ARGOCD_REPO_URL=http://gitea-http.gitea.svc:3000/$GITEA_REPO.git
+# Argo CD reads repositories over the in-cluster Service, not through the ingress: one
+# credential template for every repository of the sdlc organization.
+ARGOCD_CREDS_URL=http://gitea-http.gitea.svc:3000/sdlc/
 # Created through the Gitea API for this cluster and replaced after a rebuild, so it is not a
 # value in secrets.env.
 PUSH_TOKEN_FILE=$SECRETS_DIR/gitea-push-token
@@ -580,6 +581,8 @@ phase_git_hosting() {
 # phase 4 talks to Gitea through a temporary port-forward, killed when the script exits.
 start_gitea_forward() {
   local log port=""
+  # Several phases need it; one forward serves them all.
+  [[ -n ${GITEA_FORWARD_PID-} ]] && kill -0 "$GITEA_FORWARD_PID" 2>/dev/null && return 0
   log=$(mktemp)
   kubectl port-forward -n gitea svc/gitea-http 0:3000 >"$log" 2>&1 &
   GITEA_FORWARD_PID=$!
@@ -638,23 +641,111 @@ create_push_token() {
   (umask 077 && printf '%s\n' "$token" >"$PUSH_TOKEN_FILE")
 }
 
-argocd_token() {
-  kubectl get secret -n argocd repo-ai-native-sdlc -o jsonpath='{.data.password}' 2>/dev/null | base64 -d
+# Service accounts. Nobody signs in as them: the password is random and never stored, and each
+# token lives only where it is used. agent is the orchestrator, agent-runner pushes from agent
+# runs (neither may merge into main, see seed-projects.sh), reader only reads: Argo CD reads
+# repositories and k3s pulls images with its tokens.
+SERVICE_ACCOUNTS=(agent agent-runner reader)
+READERS_TEAM=readers
+
+gitea_user_exists() { [[ -n ${GITEA_URL-} ]] && gitea_api GET "/users/$1" >/dev/null 2>&1; }
+
+create_gitea_user() {
+  gitea_api POST /admin/users "$(jq -nc --arg user "$1" --arg password "$(random_secret 32)" '{
+    username: $user, email: ($user + "@sdlc.internal"), password: $password,
+    must_change_password: false, visibility: "private"}')" >/dev/null
 }
 
-argocd_token_works() { [[ -n ${GITEA_URL-} ]] && gitea_token_works "$(argocd_token)"; }
+service_accounts_exist() {
+  local user
+  for user in "${SERVICE_ACCOUNTS[@]}"; do gitea_user_exists "$user" || return 1; done
+}
 
-# The read-only token lives only in Argo CD's repository Secret, which Argo CD finds by label.
-create_argocd_token() {
-  local token
-  token=$(new_gitea_token argocd-read read:repository)
-  ensure_namespace argocd
-  printf '%s' "$token" | jq -Rn --arg url "$ARGOCD_REPO_URL" '{
+create_service_accounts() {
+  local user
+  for user in "${SERVICE_ACCOUNTS[@]}"; do gitea_user_exists "$user" || create_gitea_user "$user"; done
+}
+
+# new_user_token <user> <name> <scope...>: replaces that user's token of that name and prints
+# it. Every token can read its own user, which is how token_is checks it.
+new_user_token() {
+  local user=$1 name=$2
+  shift 2
+  gitea_api DELETE "/users/$user/tokens/$name" >/dev/null 2>&1 || true
+  gitea_api POST "/users/$user/tokens" "$(jq -nc --arg name "$name" '{name: $name, scopes: ($ARGS.positional + ["read:user"])}' --args "$@")" |
+    jq -er .sha1
+}
+
+# token_is <user> <token>: the token is valid and belongs to <user>.
+token_is() {
+  [[ -n ${GITEA_URL-} && -n $2 ]] &&
+    [[ $(curl -fs --max-time 20 -H @<(printf 'Authorization: token %s\n' "$2") "$GITEA_URL/api/v1/user" | jq -r .login) == "$1" ]]
+}
+
+# cluster_secret <namespace>/<name> <key>: a value from a Secret, empty when absent.
+cluster_secret() {
+  kubectl get secret -n "${1%/*}" "${1#*/}" -o jsonpath="{.data.$2}" 2>/dev/null | base64 -d
+}
+
+# store_token <namespace>/<name> <user>: the token from stdin as the Secret's "token" key.
+store_token() {
+  ensure_namespace "${1%/*}"
+  jq -Rn --arg ns "${1%/*}" --arg name "${1#*/}" --arg user "$2" --arg manager "$FIELD_MANAGER" '{
     apiVersion: "v1", kind: "Secret",
-    metadata: {namespace: "argocd", name: "repo-ai-native-sdlc",
-      labels: {"argocd.argoproj.io/secret-type": "repository", "app.kubernetes.io/managed-by": "ai-native-sdlc"}},
-    stringData: {type: "git", url: $url, username: "gitea_admin", password: input}
+    metadata: {namespace: $ns, name: $name, labels: {"app.kubernetes.io/managed-by": $manager}},
+    stringData: {username: $user, token: input}
   }' | kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f - >/dev/null
+}
+
+agent_token_works() { token_is agent "$(cluster_secret sdlc/gitea-agent token)"; }
+create_agent_token() {
+  new_user_token agent orchestrator write:repository write:issue | store_token sdlc/gitea-agent agent
+}
+
+agent_runner_token_works() { token_is agent-runner "$(cluster_secret sdlc-agents/gitea-agent-runner token)"; }
+create_agent_runner_token() {
+  new_user_token agent-runner agent-runs write:repository | store_token sdlc-agents/gitea-agent-runner agent-runner
+}
+
+# readers_team_id: the id of the team that may read every repository and package of sdlc.
+readers_team_id() {
+  gitea_api GET /orgs/sdlc/teams 2>/dev/null | jq -r --arg team "$READERS_TEAM" '.[] | select(.name == $team) | .id'
+}
+
+reader_in_team() {
+  local id
+  [[ -n ${GITEA_URL-} ]] && id=$(readers_team_id) && [[ -n $id ]] &&
+    gitea_api GET "/teams/$id/members/reader" >/dev/null 2>&1
+}
+
+# Packages belong to the organization, not to a repository, so pulling needs a team grant.
+add_reader_to_team() {
+  local id
+  id=$(readers_team_id)
+  [[ -n $id ]] || id=$(gitea_api POST /orgs/sdlc/teams "$(jq -nc --arg team "$READERS_TEAM" '{
+    name: $team, description: "Read every repository and package: Argo CD and image pulls",
+    permission: "read", includes_all_repositories: true,
+    units_map: {"repo.code": "read", "repo.packages": "read"}}')" | jq -er .id)
+  gitea_api PUT "/teams/$id/members/reader" >/dev/null
+}
+
+# Argo CD reads every repository under sdlc/ through one credential template (repo-creds) with
+# reader's token, so a new target project needs no Secret of its own.
+argocd_creds_work() {
+  [[ -n ${GITEA_URL-} ]] && gitea_token_works "$(cluster_secret argocd/creds-sdlc password)" &&
+    ! kubectl get secret -n argocd repo-ai-native-sdlc >/dev/null 2>&1
+}
+
+# The per-repository Secret of earlier versions is removed once the template is in place.
+create_argocd_creds() {
+  ensure_namespace argocd
+  new_user_token reader argocd read:repository | jq -Rn --arg url "$ARGOCD_CREDS_URL" --arg manager "$FIELD_MANAGER" '{
+    apiVersion: "v1", kind: "Secret",
+    metadata: {namespace: "argocd", name: "creds-sdlc",
+      labels: {"argocd.argoproj.io/secret-type": "repo-creds", "app.kubernetes.io/managed-by": $manager}},
+    stringData: {type: "git", url: $url, username: "reader", password: input}
+  }' | kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f - >/dev/null
+  kubectl delete secret -n argocd repo-ai-native-sdlc --ignore-not-found >/dev/null
 }
 
 origin_is_gitea() { [[ $(git remote get-url origin 2>/dev/null) == "$GITEA_REMOTE" ]]; }
@@ -739,7 +830,11 @@ phase_repository() {
   step "Gitea org sdlc exists" org_exists create_org
   step "private repo $GITEA_REPO exists" repo_exists create_repo
   step "push token in the secrets directory works" push_token_works create_push_token
-  step "Argo CD's read token works" argocd_token_works create_argocd_token
+  step "service accounts ${SERVICE_ACCOUNTS[*]} exist" service_accounts_exist create_service_accounts
+  step "reader is in team $READERS_TEAM (reads every repository and package)" reader_in_team add_reader_to_team
+  step "Argo CD reads every sdlc repository with reader's token" argocd_creds_work create_argocd_creds
+  step "agent's token in sdlc/gitea-agent works" agent_token_works create_agent_token
+  step "agent-runner's token in sdlc-agents/gitea-agent-runner works" agent_runner_token_works create_agent_runner_token
   step "origin is $GITEA_REMOTE (the old one kept as github)" origin_is_gitea move_origin
   step "credential helper for $GITEA_HOST reads the push token" credential_helper_set set_credential_helper
   step "Gitea has every local branch and tag" gitea_has_local_refs push_all_refs
@@ -860,7 +955,55 @@ phase_adoption() {
   step "Argo CD alone owns the fields of what it manages" argo_owns_alone drop_foreign_managers
 }
 
-PHASES=(preflight secrets host git_hosting repository gitops adoption)
+# k3s pulls images from Gitea's registry as reader, with a read:package token that lives only
+# in this root-only file. The file needs a token from Gitea, so it comes last, not with the
+# other host changes, and k3s reads it only on start.
+REGISTRIES=/etc/rancher/k3s/registries.yaml
+
+registries_yaml() {
+  printf '%s\n' \
+    "# Managed by ai-native-sdlc platform/bootstrap.sh: k3s pulls images from Gitea's registry" \
+    "configs:" \
+    "  gitea.sdlc.internal:" \
+    "    auth:" \
+    "      username: reader" \
+    "      password: $1" \
+    "    tls:" \
+    "      ca_file: $SYSTEM_CA"
+}
+
+# A dry run must not ask for the password, so it reads the root-only file only when sudo is
+# already unlocked, and reports todo otherwise.
+sudo_cat() {
+  if $DRY_RUN; then sudo -n cat "$1" 2>/dev/null; else sudo cat "$1" 2>/dev/null; fi
+}
+
+registries_current() {
+  local file token
+  file=$(sudo_cat "$REGISTRIES") || return 1
+  token=$(sed -n 's/^      password: //p' <<<"$file")
+  [[ $file == "$(registries_yaml "$token")" ]] && token_is reader "$token"
+}
+
+write_registries() {
+  local token
+  token=$(new_user_token reader registry-pull read:package)
+  registries_yaml "$token" | sudo install -m 0600 -o root -g root /dev/stdin "$REGISTRIES"
+  sudo systemctl restart k3s
+  for _ in $(seq 60); do
+    kubeconfig_works && node_ready && return 0
+    sleep 2
+  done
+  echo "error: k3s is not back 2 minutes after the restart" >&2
+  return 1
+}
+
+phase_registry() {
+  start_gitea_forward
+  step "k3s pulls from gitea.sdlc.internal as reader ($REGISTRIES)" registries_current write_registries
+}
+
+PHASES=(preflight secrets host git_hosting repository gitops adoption registry)
 
 usage() { sed -n '2,5s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; }
 

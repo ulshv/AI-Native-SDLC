@@ -22,6 +22,7 @@ spec:
     pg_hba:
       - host gitea gitea all scram-sha-256
       - host plane plane all scram-sha-256
+      - host orchestrator orchestrator all scram-sha-256
       - host all all all reject
   managed:
     roles:
@@ -33,3 +34,7 @@ spec:
         login: true
         passwordSecret:
           name: pg-plane
+      - name: orchestrator
+        login: true
+        passwordSecret:
+          name: pg-orchestrator
