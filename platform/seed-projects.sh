@@ -65,6 +65,11 @@ create_project_repo() {
   push=(git -C "$CLONE" -c credential.helper= -c "credential.helper=$(credential_helper)" push "$GITEA_URL/$REPO.git")
   "${push[@]}" "refs/heads/$RELEASE:refs/heads/$RELEASE"
   "${push[@]}" 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'
+  # Gitea sets that default asynchronously; setting another one before it is done gets overwritten.
+  for _ in $(seq 30); do
+    [[ $(gitea_api GET "/repos/$REPO" | jq -r .default_branch) == "$RELEASE" ]] && return 0
+    sleep 1
+  done
 }
 
 # Pull requests target the base branch unless someone picks another one.

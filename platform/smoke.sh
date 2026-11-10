@@ -500,6 +500,17 @@ if bad:
 EOF
 }
 
+# Every target project is seeded and its settings hold (platform/seed-projects.sh): its repository
+# exists, agent and agent-runner may write to it, and branch protection matches design decision 8.
+# A dry run of the seeding reports anything that would change. Spike 1.4 showed Gitea enforcing
+# exactly these settings, so the check compares them instead of merging for real.
+register target_projects_seeded
+check_target_projects_seeded() {
+  local out
+  out=$(platform/seed-projects.sh --dry-run 2>&1) || { echo "$out"; return 1; }
+  ! grep -qE '^\s+(todo|FAIL)' <<<"$out" || { grep -E '^\s+(todo|FAIL)' <<<"$out"; return 1; }
+}
+
 # Plane is set up for the loop (apps/plane/setup.py): for every target project, its Plane project
 # has every status of the loop, and agent and the file's people with a Plane account as members;
 # its workspace has an active webhook to the orchestrator for work items and comments, signed
