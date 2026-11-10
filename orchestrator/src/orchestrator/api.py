@@ -32,12 +32,9 @@ def routing_key(links: Links, link: Link | None, source: str) -> str:
     return links.thread_of(link) or str(link)
 
 
-# What the thread API shows of a work item; the rest is the loop's bookkeeping.
-SHOWN = ("phase", "key", "project", "title", "branch", "change", "pr", "preview", "questions", "archived")
-
-
-def create_app(pool: ConnectionPool, queue: Queue, links: Links, item_of=None) -> FastAPI:
-    """item_of(thread_id) returns a thread's work item state (the graph's), or {} when unknown."""
+def create_app(pool: ConnectionPool, queue: Queue, links: Links, view_of=None) -> FastAPI:
+    """view_of(thread_id) returns what a thread shows ({"values": ..., "messages": ...}, as
+    Threads.view), or {} for a thread without a work item."""
     app = FastAPI(title="orchestrator", docs_url=None, redoc_url=None)
 
     @app.get("/healthz")
@@ -74,22 +71,21 @@ def create_app(pool: ConnectionPool, queue: Queue, links: Links, item_of=None) -
             raise HTTPException(400, str(error)) from error
         if thread is None:
             raise HTTPException(404, f"no thread is linked to {link}")
-        return {"thread_id": thread, "links": [str(l) for l in links.links_of(thread)]}
+        return {"thread_id": thread, "links": [str(link) for link in links.links_of(thread)]}
 
-    def thread_or_404(thread_id: str) -> dict:
-        item = item_of(thread_id) if item_of else {}
-        if not item and not links.links_of(thread_id):
+    def view_or_404(thread_id: str) -> dict:
+        view = view_of(thread_id) if view_of else {}
+        if not view and not links.links_of(thread_id):
             raise HTTPException(404, f"no thread {thread_id}")
-        return item
+        return view
 
     @app.get("/threads/{thread_id}")
     def thread(thread_id: str):
-        item = thread_or_404(thread_id)
-        return {"thread_id": thread_id, "values": {k: item.get(k) for k in SHOWN if k in item},
-                "links": [str(l) for l in links.links_of(thread_id)]}
+        return {"thread_id": thread_id, "values": view_or_404(thread_id).get("values", {}),
+                "links": [str(link) for link in links.links_of(thread_id)]}
 
     @app.get("/threads/{thread_id}/messages")
     def messages(thread_id: str):
-        return {"thread_id": thread_id, "messages": thread_or_404(thread_id).get("messages", [])}
+        return {"thread_id": thread_id, "messages": view_or_404(thread_id).get("messages", [])}
 
     return app

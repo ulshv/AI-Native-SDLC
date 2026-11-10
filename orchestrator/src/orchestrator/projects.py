@@ -52,7 +52,7 @@ class Projects:
         self.all = projects
 
     @classmethod
-    def load(cls, directory: Path) -> "Projects":
+    def load(cls, directory: Path) -> Projects:
         """Every project file in the directory: platform/projects/*/project.yaml in the
         repository, or the flat ConfigMap target-projects (<name>.yaml) in the cluster."""
         directory = Path(directory)
@@ -76,6 +76,9 @@ class Projects:
             checks=tuple(doc.get("checks", [])),
             people=tuple(Person(p["name"], frozenset(p.get("roles", [])), p.get("plane"), p.get("gitea"))
                          for p in doc.get("people", [])))
+
+    def by_name(self, name: str) -> Project | None:
+        return next((p for p in self.all if p.name == name), None)
 
     def by_repo(self, repo: str) -> Project | None:
         return next((p for p in self.all if p.repo == repo), None)
@@ -107,6 +110,7 @@ class LiveProjects:
         self._seen: tuple = ()
         self._projects = Projects.load(self.directory)
         self._seen = self._signature()
+        log.info("projects: %s", ", ".join(p.name for p in self._projects.all) or "none")
 
     def _signature(self) -> tuple:
         paths = sorted({*self.directory.glob("*/project.yaml"), *self.directory.glob("*.yaml"),

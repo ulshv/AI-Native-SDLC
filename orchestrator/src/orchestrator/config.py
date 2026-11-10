@@ -28,6 +28,7 @@ class Settings:
     plane_api_key: str = ""
     gitea_url: str = "http://gitea-http.gitea.svc:3000"
     gitea_token: str = ""
+    gitea_public_url: str = "https://gitea.sdlc.internal"  # for addresses people open
     plane_webhook_secret: str = ""
     gitea_webhook_secret: str = ""
     plane_people: str = "{}"  # username -> Plane user id, from the Secret sdlc/plane-agent

@@ -1,4 +1,4 @@
-"""The orchestrator's entry point.
+"""The orchestrator's entry point: settings, connections and clients for the agent (agent.py).
 
   orchestrator migrate   create or update the tables (a Job before every rollout)
   orchestrator serve     the webhooks, the thread API, the workers and the agent runs' watcher
@@ -7,79 +7,70 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import threading
+from contextlib import ExitStack
 
-from . import config, db
+import uvicorn
+from psycopg_pool import ConnectionPool
+
+from . import agent, config, db, intents
+from .adapters.gitea import GiteaCodeHost
+from .adapters.plane import PlaneTracker
+from .api import create_app
+from .executor import Executor, KubernetesCluster
 from .links import Links
-from .queue import PostgresQueue
+from .projects import LiveProjects
+from .queue import PostgresQueue, Queue
 from .worker import Workers
 
 log = logging.getLogger("orchestrator")
 
 
 def migrate(settings: config.Settings) -> int:
-    pool = db.connect(settings.database_url, size=2)
-    db.migrate(pool, settings.database_url)
+    with db.connect(settings.database_url, size=2) as pool:
+        db.migrate(pool)
+    agent.setup_checkpoints(settings.database_url)
     log.info("the schema is up to date")
     return 0
 
 
-def serve(settings: config.Settings, host: str, port: int) -> int:
-    import uvicorn
-
-    from .api import create_app
-
-    pool = db.connect(settings.database_url, size=settings.workers + 6)
-    missing = db.missing_tables(pool)
-    if missing:
-        log.error("tables %s are missing: run `orchestrator migrate` first", ", ".join(missing))
-        return 1
-    import json
-
-    from langgraph.checkpoint.postgres import PostgresSaver
-    from psycopg.rows import dict_row
-    from psycopg_pool import ConnectionPool
-
-    from . import intents
-    from .adapters.gitea import GiteaCodeHost
-    from .adapters.plane import PlaneTracker
-    from .graph import Dispatcher, Services, build
-    from .projects import LiveProjects
-
-    queue = PostgresQueue(pool, settings.max_attempts)
-    links = Links(pool)
-    stop = threading.Event()
-    executor = None
-    if settings.agent_image:
-        from .executor import Executor, KubernetesCluster
-
-        executor = Executor(KubernetesCluster(settings.agent_namespace), pool, queue, settings.agent_image,
-                            settings.agent_namespace, settings.max_active_runs)
-        threading.Thread(target=executor.watch, args=(stop,), name="runs-watcher", daemon=True).start()
-    else:
+def executor_of(settings: config.Settings, pool: ConnectionPool, queue: Queue, stop: threading.Event):
+    """Agent runs and their watcher, or None while no agent image is configured."""
+    if not settings.agent_image:
         log.warning("no agent image (ORCHESTRATOR_COMMIT or agent_image): agent runs are off")
-    projects = LiveProjects(settings.projects_dir)
-    log.info("projects: %s", ", ".join(p.name for p in projects.all) or "none")
-    svc = Services(
-        projects=projects, links=links, queue=queue,
-        tracker=PlaneTracker(settings.plane_url, settings.plane_api_key, json.loads(settings.plane_people)),
-        code_host=GiteaCodeHost(settings.gitea_url, settings.gitea_token), executor=executor,
-        chat=intents.chat_model(settings.intent_model, settings.llm_base_url, settings.llm_api_key),
-        agent_model=settings.agent_model, threshold=settings.intent_threshold)
-    saver_pool = ConnectionPool(settings.database_url, min_size=1, max_size=settings.workers + 2,
-                                kwargs={"autocommit": True, "row_factory": dict_row}, open=True)
-    dispatcher = Dispatcher(svc, build(svc, PostgresSaver(saver_pool)))
-    workers = Workers(queue, dispatcher, settings.workers)
-    workers.start()
-    try:
-        uvicorn.run(create_app(pool, queue, links, dispatcher.item), host=host, port=port, log_config=None)
-    finally:
-        stop.set()
-        workers.stop()
-        saver_pool.close()
-        pool.close()
+        return None
+    executor = Executor(KubernetesCluster(settings.agent_namespace), pool, queue, settings.agent_image,
+                        settings.agent_namespace, settings.max_active_runs)
+    threading.Thread(target=executor.watch, args=(stop,), name="runs-watcher", daemon=True).start()
+    return executor
+
+
+def serve(settings: config.Settings, host: str, port: int) -> int:
+    with ExitStack() as stack:
+        pool = stack.enter_context(db.connect(settings.database_url, size=settings.workers + 6))
+        missing = db.missing_tables(pool)
+        if missing:
+            log.error("tables %s are missing: run `orchestrator migrate` first", ", ".join(missing))
+            return 1
+        checkpointer = stack.enter_context(agent.checkpointer(settings.database_url, settings.workers + 2))
+        stop = threading.Event()
+        stack.callback(stop.set)
+        queue, links = PostgresQueue(pool, settings.max_attempts), Links(pool)
+        the_agent = agent.Agent(
+            projects=LiveProjects(settings.projects_dir), links=links, queue=queue,
+            tracker=PlaneTracker(settings.plane_url, settings.plane_api_key, json.loads(settings.plane_people)),
+            code_host=GiteaCodeHost(settings.gitea_url, settings.gitea_token, public_url=settings.gitea_public_url),
+            executor=executor_of(settings, pool, queue, stop),
+            chat=intents.chat_model(settings.intent_model, settings.llm_base_url, settings.llm_api_key),
+            agent_model=settings.agent_model, threshold=settings.intent_threshold,
+            checkpointer=checkpointer)
+        workers = Workers(queue, the_agent, settings.workers)
+        workers.start()
+        stack.callback(workers.stop)
+        uvicorn.run(create_app(pool, queue, links, the_agent.view), host=host, port=port, log_config=None)
     return 0
 
 

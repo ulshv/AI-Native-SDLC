@@ -20,7 +20,7 @@ class Link:
         return f"{self.kind}:{self.ref}"
 
     @classmethod
-    def parse(cls, text: str) -> "Link":
+    def parse(cls, text: str) -> Link:
         kind, _, ref = text.partition(":")
         if not kind or not ref:
             raise ValueError(f"not a link: {text!r}")

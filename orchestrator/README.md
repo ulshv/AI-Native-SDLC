@@ -10,9 +10,16 @@ tools' APIs or starts a run.
 
 ```
 src/orchestrator/
-  main.py        entry point: `orchestrator migrate`, `orchestrator serve`
+  main.py        entry point: `orchestrator migrate`, `orchestrator serve`; settings and clients
+  agent.py       the agent's root: its LangGraph threads, checkpoints, and the parts it is made of
+  dispatch.py    delivery -> command: event, project, thread, and the request's intent
+  machine.py     the loop's rules as tables (requests, run outcomes, after an archive, PR events)
+                 and the step that acts through the ports
+  model.py       the work item a thread keeps, and the commands of its steps
+  policy.py      phases, rules (intent, phases, roles), explicit signals
+  intents.py     reading a request with one model call
   config.py      settings: config.yaml (ORCHESTRATOR_CONFIG) overlaid with the environment
-  db.py          the tables (inbox, thread_link, pending_runs) and LangGraph's checkpointer
+  db.py          the tables (inbox, thread_link, pending_runs)
   queue.py       the leased event queue: one event per thread at a time, in arrival order
   worker.py      the workers that take events from the queue
   links.py       thread_link: a ticket, a pull request -> their thread
@@ -21,13 +28,14 @@ src/orchestrator/
   ports.py       the Tracker and CodeHost ports
   events.py      the normalized event
   projects.py    platform/projects/*/project.yaml: projects, people and roles
-  policy.py      phases, the policy table, explicit signals
-  intents.py     reading a request with one model call
-  loop.py        the loop's rules, pure: an event and a state -> a new state and actions
-  graph.py       the LangGraph thread (one step: decide, then act) and the dispatcher
   executor.py    agent runs as Jobs, at most max_active_runs at a time, and the watcher
 tests/           pytest, against a real Postgres; fixtures/ holds scrubbed webhook payloads
 ```
+
+A delivery goes through the dispatcher to a command, and the agent runs the command as one step
+of the item's thread: the machine finds the rule, its handler acts through the ports, and the
+checkpoint keeps the new item. A new rule of the loop is a row in a table of `machine.py` with a
+small handler; another tracker or code host is an adapter behind the ports.
 
 ## Tests
 
@@ -90,6 +98,7 @@ settings that are not secret. In the cluster, it comes from `config` in
 | `max_active_runs` | `2` | agent runs at a time; the rest wait in `pending_runs` |
 | `agent_namespace` | `sdlc-agents` | |
 | `plane_url`, `gitea_url` | the in-cluster services | |
+| `gitea_public_url` | `https://gitea.sdlc.internal` | for the pull request links people open |
 
 The environment holds the secrets and connections and overrides the file:
 

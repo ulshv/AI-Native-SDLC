@@ -20,7 +20,7 @@ from typing import Protocol
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from .loop import run_name  # noqa: F401 - the run names are the loop's
+from .model import run_name  # noqa: F401 - a run's name is the work item's
 from .queue import Queue
 
 log = logging.getLogger(__name__)

@@ -73,10 +73,9 @@ class FakeGitea:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path, method = request.url.path.removeprefix("/api/v1/repos/sdlc/example-webapp"), request.method
         body = json.loads(request.content) if request.content else {}
-        if m := re.fullmatch(r"/pulls/(\w+)/(.+)", path):
-            if method == "GET" and not m.group(1).isdigit():
-                pr = next((p for p in self.prs.values() if p["base"] == m.group(1) and p["head"] == m.group(2)), None)
-                return httpx.Response(200, json=pr) if pr else httpx.Response(404)
+        if (m := re.fullmatch(r"/pulls/(\w+)/(.+)", path)) and method == "GET" and not m.group(1).isdigit():
+            pr = next((p for p in self.prs.values() if p["base"] == m.group(1) and p["head"] == m.group(2)), None)
+            return httpx.Response(200, json=pr) if pr else httpx.Response(404)
         if path == "/pulls" and method == "GET":
             return httpx.Response(200, json=[{"number": p["number"], "head": {"ref": p["head"]}, "base": {"ref": p["base"]}}
                                              for p in self.prs.values() if p["state"] == "open"])

@@ -96,8 +96,17 @@ class GiteaCodeHost:
     """The orchestrator's side of Gitea, with agent's token (Secret sdlc/gitea-agent). Gitea's
     branch protection decides what agent may merge (design decision 8)."""
 
-    def __init__(self, base_url: str, token: str, transport=None):
+    def __init__(self, base_url: str, token: str, transport=None, public_url: str = "https://gitea.sdlc.internal"):
         self.api = Api(base_url.rstrip("/") + "/api/v1", {"Authorization": f"token {token}"}, transport=transport)
+        # Payloads' html_url follow the host a request came through, so addresses for people are
+        # built from this.
+        self.public_url = public_url.rstrip("/")
+
+    def pr_link(self, repo: str, number: int) -> Link:
+        return Link(KIND, f"{repo}#{number}")
+
+    def pr_url(self, repo: str, number: int) -> str:
+        return f"{self.public_url}/{repo}/pulls/{number}"
 
     def open_pr(self, repo: str, head: str, base: str) -> int | None:
         """The open pull request from head into base, if there is one."""
@@ -127,7 +136,7 @@ class GiteaCodeHost:
         self.api.call("POST", f"/repos/{repo}/issues/{number}/comments", json={"body": f"{text}\n\n{note}"})
 
     def label(self, repo: str, number: int, label: str) -> None:
-        labels = {l["name"]: l["id"] for l in self.api.json("GET", f"/repos/{repo}/labels", params={"limit": 50}) or []}
+        labels = {entry["name"]: entry["id"] for entry in self.api.json("GET", f"/repos/{repo}/labels", params={"limit": 50}) or []}
         if label not in labels:
             labels[label] = self.api.json("POST", f"/repos/{repo}/labels", json={"name": label, "color": "#0ea5e9"})["id"]
         self.api.call("POST", f"/repos/{repo}/issues/{number}/labels", json={"labels": [labels[label]]})

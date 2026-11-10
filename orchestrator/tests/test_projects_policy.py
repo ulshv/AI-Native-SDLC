@@ -6,10 +6,12 @@ from pathlib import Path
 import pytest
 
 from orchestrator import intents
-from orchestrator.policy import OPEN, Phase, decide
+from orchestrator.machine import POLICY
+from orchestrator.policy import OPEN, Phase
 from orchestrator.projects import LiveProjects, Projects
 
 REPO_PROJECTS = Path(__file__).parents[2] / "platform" / "projects"
+decide = POLICY.decide
 
 
 @pytest.fixture(scope="module")
@@ -79,7 +81,6 @@ def test_refusals_say_why():
         "Only an engineer of example-webapp can merge it in Code review."
     assert decide("merge", Phase.SPEC_REVIEW, ENG, "example-webapp", "EWA-12").reason == \
         "EWA-12 is in Spec review, so I cannot merge it now."
-    assert not decide("archive", Phase.ON_DEV, ENG, "p", "EWA-1", archived=True).allowed
 
 
 @pytest.mark.parametrize("kind, data, intent", [

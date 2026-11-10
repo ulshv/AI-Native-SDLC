@@ -55,16 +55,11 @@ def connect(database_url: str, size: int = 8) -> ConnectionPool:
     return pool
 
 
-def migrate(pool: ConnectionPool, database_url: str | None = None) -> None:
-    """Creates or updates the orchestrator's tables and LangGraph's checkpoint tables. Run by
-    `orchestrator migrate`, a Job before every rollout; the service itself never changes the schema."""
+def migrate(pool: ConnectionPool) -> None:
+    """Creates or updates the orchestrator's tables (LangGraph's are agent.setup_checkpoints). Run
+    by `orchestrator migrate`, a Job before every rollout; the service never changes the schema."""
     with pool.connection() as conn:
         conn.execute(SCHEMA)
-    if database_url:
-        from langgraph.checkpoint.postgres import PostgresSaver
-
-        with PostgresSaver.from_conn_string(database_url) as saver:
-            saver.setup()
 
 
 def missing_tables(pool: ConnectionPool) -> list[str]:

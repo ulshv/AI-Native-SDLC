@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from .links import Link
+
 
 class Tracker(Protocol):
     def agent_id(self) -> str:
@@ -25,6 +27,12 @@ class Tracker(Protocol):
 
 class CodeHost(Protocol):
     def find_or_open_pr(self, repo: str, head: str, base: str, title: str, body: str) -> int: ...
+
+    def pr_link(self, repo: str, number: int) -> Link:
+        """The thread link of a pull request, as the code host's events name it."""
+
+    def pr_url(self, repo: str, number: int) -> str:
+        """The pull request's address for people."""
 
     def comment(self, repo: str, number: int, text: str, marker: str) -> None: ...
 

@@ -17,7 +17,7 @@ class Api:
         self.sleep, self.attempts = sleep, attempts
 
     def call(self, method: str, path: str, ok=(200, 201, 204), **kwargs) -> httpx.Response:
-        for attempt in range(self.attempts):
+        for _ in range(self.attempts):
             response = self.client.request(method, path, **kwargs)
             if response.status_code != 429:
                 break
