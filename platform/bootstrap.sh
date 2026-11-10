@@ -1037,7 +1037,12 @@ root_app_current() {
   kubectl diff --server-side --field-manager="$FIELD_MANAGER" -f platform/argocd/root.yaml >/dev/null 2>&1
 }
 
-apply_root_app() { kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f platform/argocd/root.yaml; }
+# The root Application manages itself, so Argo CD's controller owns its fields. The file is the
+# one Argo CD applies from git, so taking the conflicting fields over is safe; it matters when the
+# root's own source changed and Argo CD cannot fetch the old one any more.
+apply_root_app() {
+  kubectl apply --server-side --force-conflicts --field-manager="$FIELD_MANAGER" -f platform/argocd/root.yaml
+}
 
 # Installs Argo CD with Helm and applies the root Application.
 phase_gitops() {
