@@ -263,6 +263,8 @@ def test_a_person_merging_before_the_archive_gets_a_note_and_an_archive_pr_on_re
     world.finish({"result": "archived"})
     assert ("archive/EWA-1", "development") in world.svc.code_host.prs.values()
     assert "archive pull request is open" in world.svc.tracker.comments[-1][1]
+    world.hook("gitea", "comment_mention_agent", issue__number=4, sender__login="gitea_admin")  # on the archive PR
+    assert world.svc.code_host.comments[-1][1:] == (4, "The change of EWA-1 is archived already.")
 
 
 def test_a_delivery_applied_before_changes_nothing_and_a_restart_keeps_the_phase(world):
@@ -367,3 +369,10 @@ def test_an_approved_status_that_leaves_the_phase_is_set_back(world):
     to_code_review(world)
     world.hook("plane", "issue_state_approved")  # the code approved by setting the status
     assert world.runs[-1] == "ewa-1-archive-3" and world.svc.tracker.statuses[-1] == "Code review"
+
+
+def test_closing_an_item_that_waits_for_answers_drops_the_questions(world):
+    assign(world)
+    world.finish({"result": "questions", "questions": ["Should the filter survive a reload?"]})
+    world.hook("plane", "issue_state_closed")
+    assert world.item.phase == "Closed" and world.item.paused is None and world.item.summary()["questions"] == []

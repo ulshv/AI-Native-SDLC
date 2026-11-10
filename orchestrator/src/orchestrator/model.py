@@ -154,6 +154,7 @@ class Request(CommandBase):
     author: str = "someone"
     roles: frozenset[str] | None = None  # None: not a person of the project
     via: Where = Where.TICKET  # where it was asked, and where the answer goes
+    pr: int | None = None  # the pull request it was asked on, when via is a pull request
     feedback: list[str] = Field(default_factory=list)  # a review's inline comments
     status_signal: bool = False  # a status a person set in the tracker
 

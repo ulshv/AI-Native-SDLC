@@ -49,6 +49,7 @@ class Step:
     thread_id: str
     delivery: str
     said: int = field(default=0)  # comments so far, for their markers
+    asked_on: int | None = None  # the pull request a request came from, where its answer goes
 
     @property
     def key(self) -> str:
@@ -71,11 +72,13 @@ class Step:
             self.set_status(phase)
 
     def say(self, text: str, where: Where = Where.TICKET) -> None:
-        """Says it where asked; on the pull request only once there is one."""
+        """Says it where asked: on the pull request a request came from, else the item's own; on
+        the ticket while there is none."""
         marker = f"{self.delivery}/{self.said}"
         self.said += 1
-        if where == Where.PR and self.item.pr:
-            self.ports.code_host.comment(self.repo, self.item.pr, text, marker)
+        pr = self.asked_on or self.item.pr
+        if where == Where.PR and pr:
+            self.ports.code_host.comment(self.repo, pr, text, marker)
         else:
             self.ports.tracker.comment(*self._ticket(), text, marker)
         self.item.messages.append(Message(author="agent", text=text))
@@ -120,9 +123,11 @@ class Step:
     def again(self, run: AgentRun) -> None:
         self.start(run.mode, run.then, branch=run.branch, unarchive=run.unarchive)
 
-    def stop_runs(self) -> None:
-        """The item moved on: whatever run goes on, its result no longer counts."""
+    def stop(self) -> None:
+        """The item moved on: whatever run goes on, its result no longer counts, and questions
+        asked before wait for no answer."""
         self.item.running = None
+        self.item.paused = None
 
     def pause(self, run: AgentRun, questions: list[str], text: str) -> None:
         self.item.paused = Paused(phase=self.item.phase, run=run, questions=questions)
@@ -199,7 +204,7 @@ def fix_code(s: Step, r: Request) -> None:
 
 
 def reject(s: Step, r: Request) -> None:
-    s.stop_runs()
+    s.stop()
     s.phase(Phase.CLOSED)
     s.close_pr()
     s.say(f"Closed {s.key}; no further work on it.", r.via)
@@ -229,17 +234,17 @@ def release_later(s: Step, r: Request) -> None:
 
 
 POLICY = Policy([
-    Rule("approve", frozenset({Phase.SPEC_REVIEW}), PEOPLE, approve_spec),
-    Rule("approve", frozenset({Phase.CODE_REVIEW}), ENGINEERS,
+    Rule("approve", "approve it", frozenset({Phase.SPEC_REVIEW}), PEOPLE, approve_spec),
+    Rule("approve", "approve it", frozenset({Phase.CODE_REVIEW}), ENGINEERS,
          finish_code_review(Then.REVIEW, "Archiving the change into the specs.")),
-    Rule("merge", frozenset({Phase.CODE_REVIEW}), ENGINEERS,
+    Rule("merge", "merge it", frozenset({Phase.CODE_REVIEW}), ENGINEERS,
          finish_code_review(Then.MERGE, "Archiving the change into the specs, then merging.")),
-    Rule("request_changes", frozenset({Phase.SPEC_REVIEW}), PEOPLE, revise_spec),
-    Rule("request_changes", frozenset({Phase.CODE_REVIEW}), PEOPLE, fix_code),
-    Rule("reject", OPEN, PEOPLE, reject, while_running=True),
-    Rule("answer", frozenset({Phase.NEEDS_INFO}), MEMBERS, resume),
-    Rule("archive", frozenset({Phase.ON_DEV}), ENGINEERS, archive_in_own_pr),
-    Rule("prepare_release", None, PEOPLE, release_later, while_running=True),
+    Rule("request_changes", "take changes to it", frozenset({Phase.SPEC_REVIEW}), PEOPLE, revise_spec),
+    Rule("request_changes", "take changes to it", frozenset({Phase.CODE_REVIEW}), PEOPLE, fix_code),
+    Rule("reject", "reject it", OPEN, PEOPLE, reject, while_running=True),
+    Rule("answer", "take an answer", frozenset({Phase.NEEDS_INFO}), MEMBERS, resume),
+    Rule("archive", "archive the change", frozenset({Phase.ON_DEV}), ENGINEERS, archive_in_own_pr),
+    Rule("prepare_release", "prepare a release", None, PEOPLE, release_later, while_running=True),
 ])
 
 
@@ -247,6 +252,7 @@ def request(s: Step, r: Request) -> None:
     """A request the policy allows goes to its rule's handler; any other gets the reason. A status
     a person set in the tracker that left the phase as it was goes back to the phase's own."""
     s.item.messages.append(Message(author=r.author, text=r.text))
+    s.asked_on = r.pr
     before = s.item.phase
     decision = POLICY.decide(r.intent, s.item.phase, r.roles, s.project.name, s.key)
     if not decision.allowed:
@@ -348,7 +354,7 @@ PR_EVENTS = {True: pr_merged, False: pr_closed}
 def pr_changed(s: Step, c: PrChanged) -> None:
     """Only an open item moves; its run, if any, no longer counts."""
     if s.item.phase in OPEN:
-        s.stop_runs()
+        s.stop()
         PR_EVENTS[c.merged](s)
 
 

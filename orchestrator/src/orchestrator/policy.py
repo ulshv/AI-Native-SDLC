@@ -40,10 +40,6 @@ MEMBERS = None  # any person of the project
 INTENTS = ("approve", "request_changes", "reject", "answer", "merge", "archive", "prepare_release", "none")
 
 ROLE_WORDS = {PEOPLE: "a product owner or an engineer", ENGINEERS: "an engineer"}
-# What a refusal says the agent cannot do: "... so I cannot <this> now."
-VERBS = {"approve": "approve it", "request_changes": "take changes to it", "reject": "reject it",
-         "answer": "take an answer", "merge": "merge it", "archive": "archive the change",
-         "prepare_release": "prepare a release"}
 UNSURE = ("I am not sure what you are asking. Say, for example, \"@agent looks good\", "
           "\"@agent please change ...\" or \"@agent merge it into dev\".")
 
@@ -51,6 +47,7 @@ UNSURE = ("I am not sure what you are asking. Say, for example, \"@agent looks g
 @dataclass(frozen=True)
 class Rule:
     intent: str
+    verb: str  # what a refusal says cannot be done: "... so I cannot <verb> now."
     phases: frozenset[Phase] | None  # None: any phase, the request is about the project
     roles: frozenset[str] | None  # None: any person of the project
     handler: Any  # what the loop does when the rule allows a request
@@ -90,11 +87,11 @@ class Policy:
         in_phase = [rule for rule in self.rules[intent] if rule.covers(phase)]
         if not in_phase:
             where = f"{key} is in {phase}" if phase else "this item is not in the loop"
-            return Decision(reason=f"{where}, so I cannot {VERBS[intent]} now.")
+            return Decision(reason=f"{where}, so I cannot {self.rules[intent][0].verb} now.")
         rule = next((rule for rule in in_phase if rule.admits(roles)), None)
         if rule is None:
             needed = ROLE_WORDS.get(in_phase[0].roles, "someone else")
-            return Decision(reason=f"Only {needed} of {project} can {VERBS[intent]} in {phase}.")
+            return Decision(reason=f"Only {needed} of {project} can {in_phase[0].verb} in {phase}.")
         return Decision(rule)
 
 

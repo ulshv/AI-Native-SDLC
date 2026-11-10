@@ -114,7 +114,7 @@ class FakeGitea:
 
 
 def gitea(fake):
-    return GiteaCodeHost("http://gitea", "token", transport=httpx.MockTransport(fake))
+    return GiteaCodeHost("http://gitea", "token", "https://gitea.sdlc.internal", transport=httpx.MockTransport(fake))
 
 
 def test_gitea_actions_are_not_repeated_by_a_retry():

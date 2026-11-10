@@ -139,7 +139,8 @@ class Dispatcher:
             feedback = self.code_host.review_comments(project.repo, event.data["number"], event.actor.username)
         return Request(delivery=delivery, project=project.name, intent=intent, text=event.text,
                        author=person.name if person else (event.actor.username if event.actor else "") or "someone",
-                       roles=person.roles if person else None, via=VIA[event.source], feedback=feedback,
+                       roles=person.roles if person else None, via=VIA[event.source],
+                       pr=event.data.get("number") if VIA[event.source] == Where.PR else None, feedback=feedback,
                        status_signal=event.kind == "status")
 
     def _person(self, project: Project, event: Event):

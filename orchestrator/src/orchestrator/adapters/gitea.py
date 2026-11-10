@@ -20,6 +20,11 @@ REVIEWS = {"pull_request_review_approved": "approved", "pull_request_review_reje
            "pull_request_review_comment": "comment"}
 
 
+def pr_link(repo: str, number: int) -> Link:
+    """A pull request's thread link, as the webhooks and the agent name it."""
+    return Link(KIND, f"{repo}#{number}")
+
+
 def link_of(headers: dict, body: dict) -> Link | None:
     repo = (body.get("repository") or {}).get("full_name")
     number = body.get("number") or (body.get("pull_request") or {}).get("number")
@@ -30,7 +35,7 @@ def link_of(headers: dict, body: dict) -> Link | None:
         number = issue.get("number")
     if header(headers, "X-Gitea-Event") == "release" or not repo or not number:
         return None
-    return Link(KIND, f"{repo}#{number}")
+    return pr_link(repo, number)
 
 
 def to_event(headers: dict, body: dict) -> Event | None:
@@ -96,14 +101,14 @@ class GiteaCodeHost:
     """The orchestrator's side of Gitea, with agent's token (Secret sdlc/gitea-agent). Gitea's
     branch protection decides what agent may merge (design decision 8)."""
 
-    def __init__(self, base_url: str, token: str, transport=None, public_url: str = "https://gitea.sdlc.internal"):
+    def __init__(self, base_url: str, token: str, public_url: str, transport=None):
         self.api = Api(base_url.rstrip("/") + "/api/v1", {"Authorization": f"token {token}"}, transport=transport)
         # Payloads' html_url follow the host a request came through, so addresses for people are
         # built from this.
         self.public_url = public_url.rstrip("/")
 
     def pr_link(self, repo: str, number: int) -> Link:
-        return Link(KIND, f"{repo}#{number}")
+        return pr_link(repo, number)
 
     def pr_url(self, repo: str, number: int) -> str:
         return f"{self.public_url}/{repo}/pulls/{number}"
