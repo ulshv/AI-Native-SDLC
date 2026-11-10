@@ -45,7 +45,7 @@
 ## 4. Plane setup for the loop
 
 - [ ] 4.1 Implement the Plane setup hook Job from design decision 14 (agent user with e-mail notifications off and API key Secret, workspace, project `EWA` with the loop's states and Backlog as the default, members from `platform/projects/`, webhook to the orchestrator with `PLANE_WEBHOOK_SECRET`), as spike 1.3 showed: Django shell for the user, key and webhook, Plane's API for the rest. Verify a second sync changes nothing and `agent` can be assigned and mentioned in `EWA` in the UI, and save one comment written in the UI as a fixture to compare its mention markup with spike 1.3's
-- [ ] 4.2 Add smoke checks that project `EWA` has every loop state and that the webhook exists. Document any manual step from spike 1.3 in `platform/README.md`, and verify the smoke check fails when that step is skipped
+- [x] 4.2 Add smoke checks that project `EWA` has every loop state and that the webhook exists. Document any manual step from spike 1.3 in `platform/README.md`, and verify the smoke check fails when that step is skipped
 
 ## 5. `example-webapp` and connecting it
 
@@ -54,7 +54,7 @@
 - [ ] 5.3 Initialise OpenSpec for OpenCode, write specs `auth` and `dashboard` for what the app does, and add the agent instructions for unattended runs (questions file, no chat questions). Verify `openspec validate --all --strict` passes and the `/opsx` commands exist for OpenCode
 - [ ] 5.4 Add `.gitea/workflows/ci.yaml` and `release.yaml` from design decision 12 with `runs-on: ubuntu-latest`, and verify they parse; `ci.yaml` runs in 5.8, `release.yaml` in group 10
 - [ ] 5.5 Create `main` without a version tag and `development` from it in the local clone, and verify `git log` shows both branches at the same commit and `git tag` is empty. The operator commits this repository's seed after reviewing it
-- [ ] 5.6 Add `platform/projects/example-webapp/project.yaml` (Plane project, repository, base branch, clone path, domain, `previews: false` until group 9, merge allowlist, people with usernames and roles), and verify it parses with the schema the orchestrator will use
+- [x] 5.6 Add `platform/projects/example-webapp/project.yaml` (Plane project, repository, base branch, clone path, domain, `previews: false` until group 9, merge allowlist, people with usernames and roles), and verify it parses with the schema the orchestrator will use
 - [ ] 5.7 Create `platform/seed-projects.sh` from design decision 9: it reads `platform/projects/*/project.yaml`, stops naming a missing clone before changing anything, and creates a missing repository from its clone, with all branches and tags, write access for `agent` and `agent-runner`, and branch protection from design decision 8, including the approvals allowlist of the project's people on `main`. Verify with a smoke check that `agent` is refused a merge into `main` and allowed into `development`, that an approval by `agent-runner` does not count on `main`, and that a re-run leaves an existing repository unchanged
 - [ ] 5.8 Push a commit to a feature branch of `example-webapp`. Verify the tests run on `ci-products`, the image `:<sha>` exists, and the PR shows the check; then push a failing test and verify no image is stored and the check fails
 - [ ] 5.9 Document target projects, the project directory, the clone location and adding a project in `platform/README.md`, and verify the steps match what `seed-projects.sh` does

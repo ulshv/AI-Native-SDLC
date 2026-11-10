@@ -1,6 +1,6 @@
-# example-webapp in the delivery loop (design decision 10). One file per target project, read by
-# Plane's setup Job (platform/apps/plane), and later by the orchestrator and Argo CD's
-# ApplicationSets. The repository, branches, domain and previews come with task 5.6.
+# example-webapp in the delivery loop (design decision 10), in the format of
+# ../project.schema.json. One directory per target project, read by Plane's setup Job, the
+# orchestrator, seed-projects.sh and Argo CD's ApplicationSets.
 name: example-webapp
 
 # The Plane project the loop takes tickets from.
@@ -9,9 +9,22 @@ tracker:
   identifier: EWA
   name: Example webapp   # Plane allows no special characters in a project name
 
-# People and their roles in the loop (design decision 5): product_owner, engineer. Usernames
-# only, never e-mail addresses: this repository is public. Plane's `admin` and Gitea's
-# `gitea_admin` are the instance admins the bootstrap creates.
+repository:
+  gitea: sdlc/example-webapp
+  # Where seed-projects.sh finds the local clone; EXAMPLE_WEBAPP_CLONE overrides it.
+  clone: ~/Projects/sdlc/example-webapp
+  base: development
+  release: main
+
+# Production; dev is dev.example-webapp.sdlc.internal, a preview ewa-12.qa.example-webapp.sdlc.internal.
+domain: example-webapp.sdlc.internal
+# Previews and the Deploying to QA phase come with group 9.
+previews: false
+
+# People and their roles in the loop (design decision 5): product_owner, engineer. Engineers may
+# merge into development (with agent) and into main; product owners and engineers approve on
+# main. Usernames only, never e-mail addresses: this repository is public. Plane's `admin` and
+# Gitea's `gitea_admin` are the instance admins the bootstrap creates.
 people:
   - name: sergey
     roles: [product_owner, engineer]

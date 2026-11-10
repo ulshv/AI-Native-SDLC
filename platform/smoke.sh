@@ -479,6 +479,27 @@ EOF
 register plane_webhook_in_cluster
 check_plane_webhook_in_cluster() { with_plane_key plane_webhook_delivered; }
 
+# Every target project's file has the format of platform/projects/project.schema.json, which the
+# orchestrator reads them with.
+register project_files_valid
+check_project_files_valid() {
+  python3 - platform/projects/project.schema.json platform/projects/*/project.yaml <<'EOF'
+import json, sys
+try:
+    import jsonschema, yaml
+except ImportError as error:
+    sys.exit(f"python3 lacks {error.name} (apt install python3-jsonschema python3-yaml)")
+schema = json.load(open(sys.argv[1]))
+validator = jsonschema.Draft202012Validator(schema)
+bad = []
+for path in sys.argv[2:]:
+    for error in validator.iter_errors(yaml.safe_load(open(path))):
+        bad.append(f"{path}: {'/'.join(map(str, error.path)) or '(top)'}: {error.message}")
+if bad:
+    sys.exit("\n".join(bad))
+EOF
+}
+
 # Plane is set up for the loop (apps/plane/setup.py): for every target project, its Plane project
 # has every status of the loop, and agent and the file's people with a Plane account as members;
 # its workspace has an active webhook to the orchestrator for work items and comments, signed

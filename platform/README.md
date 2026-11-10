@@ -9,8 +9,9 @@ Install the [host prerequisites](../README.md#host-prerequisites) first, then fr
 repository root:
 
 ```bash
-platform/bootstrap.sh   # build or rebuild the platform; safe to re-run
-platform/smoke.sh       # check that it works
+platform/bootstrap.sh       # build or rebuild the platform; safe to re-run
+platform/seed-projects.sh   # connect the target projects (see Target projects); safe to re-run
+platform/smoke.sh           # check that it works
 ```
 
 ## Preflight
@@ -250,6 +251,43 @@ through CI and GitOps alone.
 **After a rebuild** there are no images yet: phase 4 pushes `main` before the runners exist,
 Gitea keeps that run queued, and `ci-platform` picks it up as soon as Argo CD has started it.
 Until the run finishes, the orchestrator's pod waits for its image.
+
+## Target projects
+
+A product joins the delivery loop with one directory, `projects/<name>/`, whose `project.yaml`
+names its Plane project, its Gitea repository and local clone, its branches, its domain and its
+people with their roles ([`projects/example-webapp/project.yaml`](projects/example-webapp/project.yaml)).
+[`projects/project.schema.json`](projects/project.schema.json) is the format, checked by the
+smoke check `project_files_valid`. The product's code lives in its own repository, in the Gitea
+organization `sdlc`, never in this one.
+
+**Its repository.** [`seed-projects.sh`](seed-projects.sh), run after the bootstrap, connects
+every project to Gitea; it needs no sudo and is safe to re-run:
+
+- checks first that every project's local clone exists with both long-lived branches, and stops
+  before changing anything when one does not, naming it;
+- creates a missing repository from its clone, with every branch and tag; an existing one keeps
+  its contents, so after a rebuild the clone is what comes back;
+- sets the default branch to the base branch (`development`), so pull requests go there;
+- gives `agent` and `agent-runner` write access;
+- protects both long-lived branches: nobody pushes to them directly; `development` takes merges
+  from the engineers and `agent`, without a required review (the orchestrator's policy is the
+  gate there); `main` takes merges only from the engineers, after an approval by one of the
+  project's people;
+- points the clone's `origin` at Gitea when it has none.
+
+The clone's place is `repository.clone` in the project file (`~/Projects/sdlc/example-webapp`);
+`<NAME>_CLONE` in the environment overrides it, such as
+`EXAMPLE_WEBAPP_CLONE=/elsewhere platform/seed-projects.sh`. `--dry-run` prints the plan.
+
+**Adding a project:**
+
+1. create its repository locally with `main` and `development`, an OpenSpec setup for OpenCode,
+   a `deploy/chart` and CI workflows (see `example-webapp`);
+2. add `projects/<name>/project.yaml` and one line in
+   [`projects/kustomization.yaml`](projects/kustomization.yaml);
+3. push this repository: Plane's setup Job creates the Plane project;
+4. run `platform/seed-projects.sh`.
 
 ## Changing the platform through git
 
