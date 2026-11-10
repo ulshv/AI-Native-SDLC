@@ -7,6 +7,7 @@ source (another tracker, a chat, a tool reached through MCP) is one more adapter
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from .links import Link
 
@@ -29,5 +30,5 @@ class Event:
     actor: Actor | None = None
     text: str = ""  # a comment's or a review's words
     mentions_agent: bool = False
-    data: dict = field(default_factory=dict)  # by kind: state, review, merged, tag, tickets, result, ...
+    data: dict[str, Any] = field(default_factory=dict)  # by kind: state, review, merged, tag, tickets, result, ...
     delivery_id: str = ""

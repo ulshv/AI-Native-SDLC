@@ -11,6 +11,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Callable
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -32,19 +34,24 @@ def routing_key(links: Links, link: Link | None, source: str) -> str:
     return links.thread_of(link) or str(link)
 
 
-def create_app(pool: ConnectionPool, queue: Queue, links: Links, view_of=None) -> FastAPI:
+View = dict[str, Any]
+
+
+def create_app(
+    pool: ConnectionPool, queue: Queue, links: Links, view_of: Callable[[str], View] | None = None
+) -> FastAPI:
     """view_of(thread_id) returns what a thread shows ({"values": ..., "messages": ...}, as
     Threads.view), or {} for a thread without a work item."""
     app = FastAPI(title="orchestrator", docs_url=None, redoc_url=None)
 
     @app.get("/healthz")
-    def healthz():
+    def healthz() -> dict[str, bool]:
         with pool.connection() as conn:
             conn.execute("SELECT 1")
         return {"ok": True}
 
     @app.post("/hooks/{source}")
-    async def hook(source: str, request: Request):
+    async def hook(source: str, request: Request) -> dict[str, bool]:
         if source not in LINK_OF:
             raise HTTPException(404, f"no webhooks from {source}")
         raw = await request.body()
@@ -64,28 +71,31 @@ def create_app(pool: ConnectionPool, queue: Queue, links: Links, view_of=None) -
         return {"recorded": await run_in_threadpool(record)}
 
     @app.get("/threads")
-    def find_thread(link: str):
+    def find_thread(link: str) -> View:
         try:
             thread = links.thread_of(Link.parse(link))
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         if thread is None:
             raise HTTPException(404, f"no thread is linked to {link}")
-        return {"thread_id": thread, "links": [str(link) for link in links.links_of(thread)]}
+        return {"thread_id": thread, "links": [str(other) for other in links.links_of(thread)]}
 
-    def view_or_404(thread_id: str) -> dict:
+    def view_or_404(thread_id: str) -> View:
         view = view_of(thread_id) if view_of else {}
         if not view and not links.links_of(thread_id):
             raise HTTPException(404, f"no thread {thread_id}")
         return view
 
     @app.get("/threads/{thread_id}")
-    def thread(thread_id: str):
-        return {"thread_id": thread_id, "values": view_or_404(thread_id).get("values", {}),
-                "links": [str(link) for link in links.links_of(thread_id)]}
+    def thread(thread_id: str) -> View:
+        return {
+            "thread_id": thread_id,
+            "values": view_or_404(thread_id).get("values", {}),
+            "links": [str(other) for other in links.links_of(thread_id)],
+        }
 
     @app.get("/threads/{thread_id}/messages")
-    def messages(thread_id: str):
+    def messages(thread_id: str) -> View:
         return {"thread_id": thread_id, "messages": view_or_404(thread_id).get("messages", [])}
 
     return app

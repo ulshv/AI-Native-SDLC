@@ -33,8 +33,9 @@ class Links:
 
     def thread_of(self, link: Link) -> str | None:
         with self.pool.connection() as conn:
-            row = conn.execute("SELECT thread_id FROM thread_link WHERE kind = %s AND ref = %s",
-                               (link.kind, link.ref)).fetchone()
+            row = conn.execute(
+                "SELECT thread_id FROM thread_link WHERE kind = %s AND ref = %s", (link.kind, link.ref)
+            ).fetchone()
         return row[0] if row else None
 
     def link(self, thread_id: str, link: Link) -> None:
@@ -43,12 +44,16 @@ class Links:
             row = conn.execute(
                 """INSERT INTO thread_link (kind, ref, thread_id) VALUES (%s, %s, %s)
                    ON CONFLICT (kind, ref) DO UPDATE SET kind = EXCLUDED.kind
-                   RETURNING thread_id""", (link.kind, link.ref, thread_id)).fetchone()
-        if row[0] != thread_id:
-            raise AlreadyLinked(f"{link} belongs to thread {row[0]}")
+                   RETURNING thread_id""",
+                (link.kind, link.ref, thread_id),
+            ).fetchone()
+        owner = row[0] if row else thread_id  # RETURNING always gives the row: inserted or kept
+        if owner != thread_id:
+            raise AlreadyLinked(f"{link} belongs to thread {owner}")
 
     def links_of(self, thread_id: str) -> list[Link]:
         with self.pool.connection() as conn:
-            rows = conn.execute("SELECT kind, ref FROM thread_link WHERE thread_id = %s ORDER BY created_at",
-                                (thread_id,)).fetchall()
+            rows = conn.execute(
+                "SELECT kind, ref FROM thread_link WHERE thread_id = %s ORDER BY created_at", (thread_id,)
+            ).fetchall()
         return [Link(kind, ref) for kind, ref in rows]

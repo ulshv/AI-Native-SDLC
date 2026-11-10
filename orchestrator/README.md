@@ -19,7 +19,8 @@ src/orchestrator/
   policy.py      phases, rules (intent, phases, roles), explicit signals
   intents.py     reading a request with one model call
   config.py      settings: config.yaml (ORCHESTRATOR_CONFIG) overlaid with the environment
-  db.py          the tables (inbox, thread_link, pending_runs)
+  db.py          the pool, `migrate` (Alembic) and the schema revision check
+  migrations/    Alembic revisions of the tables (inbox, thread_link, pending_runs)
   queue.py       the leased event queue: one event per thread at a time, in arrival order
   worker.py      the workers that take events from the queue
   links.py       thread_link: a ticket, a pull request -> their thread
@@ -58,9 +59,18 @@ kubectl port-forward -n orchestrator-test pod/orchestrator-pg 55432:5432 &
 ORCHESTRATOR_TEST_DSN=postgresql://postgres:test@127.0.0.1:55432/postgres uv run --python 3.13 pytest
 ```
 
-One test calls the real model provider and is skipped without `LLM_API_KEY`. CI
-(`.gitea/workflows/images.yaml`) runs the tests against a Postgres in the runner before any image
-is built.
+One test calls the real model provider and is skipped without `LLM_API_KEY`.
+
+Lint, format and types, which CI runs before the tests:
+
+```bash
+uv run --python 3.13 ruff check src tests
+uv run --python 3.13 ruff format --check src tests   # `ruff format src tests` fixes it
+uv run --python 3.13 mypy src                        # strict
+```
+
+CI (`.gitea/workflows/images.yaml`) runs all of it, and the tests against a Postgres in the
+runner, before any image is built.
 
 ## Local run
 
@@ -81,11 +91,32 @@ addresses by default. From the host, set `plane_url` and `gitea_url` in a config
 `https://plane.sdlc.internal` and `https://gitea.sdlc.internal`, and give it `PLANE_API_KEY` and
 `GITEA_TOKEN`.
 
+## Schema changes
+
+The orchestrator's tables are Alembic revisions in `src/orchestrator/migrations/versions/`, one
+file per change, forward-only (a mistake is fixed by the next revision). A revision must work
+with the version still running during a rollout: add first, drop or rename in a later release.
+
+```bash
+export DATABASE_URL=postgresql://postgres:test@127.0.0.1:55432/postgres
+uv run --python 3.13 alembic revision -m "add a column" --rev-id 0002   # then write upgrade()
+uv run --python 3.13 orchestrator migrate                               # what the PreSync Job runs
+```
+
+`serve` refuses to start on a database behind its code. A database a newer release migrated is
+left as it is, and the older code runs on it: that is what makes a rollback to an older commit
+work, and why every revision has to be expand-then-contract. LangGraph's checkpoint tables are
+its own; `orchestrator migrate` sets them up too.
+
 ## Configuration
 
-`config.yaml` (the path is `ORCHESTRATOR_CONFIG`, `/config/config.yaml` by default) holds the
-settings that are not secret. In the cluster, it comes from `config` in
+The settings are one typed model per command (`src/orchestrator/config.py`), checked at start: a
+missing or malformed setting, or a key in the file that `serve` does not know, stops the process
+with a message naming it. `config.yaml` (the path is `ORCHESTRATOR_CONFIG`, `/config/config.yaml`
+by default) holds the settings that are not secret. In the cluster, it comes from `config` in
 [`platform/apps/orchestrator/chart/values.yaml`](../platform/apps/orchestrator/chart/values.yaml).
+Any setting can also come from the environment, named in capitals (`WORKERS=4`), which wins over
+the file.
 
 | Setting | Default | |
 |---|---|---|
@@ -100,7 +131,7 @@ settings that are not secret. In the cluster, it comes from `config` in
 | `plane_url`, `gitea_url` | the in-cluster services | |
 | `gitea_public_url` | `https://gitea.sdlc.internal` | for the pull request links people open |
 
-The environment holds the secrets and connections and overrides the file:
+The environment holds the secrets and connections (`migrate` needs `DATABASE_URL` only):
 
 | Variable | In the cluster from |
 |---|---|

@@ -17,10 +17,20 @@ dependencies = [
     "pydantic==2.14.3",
     "pyyaml==6.0.3",
     "jsonschema==4.26.0",
+    "alembic==1.20.1",
+    "sqlalchemy==2.1.8",
+    "pydantic-settings[yaml]==2.16.2",
+    "tenacity==9.2.1",
 ]
 
 [dependency-groups]
-dev = ["pytest==9.2.0"]
+dev = [
+    "mypy==2.4.1",
+    "pytest==9.2.0",
+    "ruff==0.17.4",
+    "types-jsonschema==4.26.0.20261006",
+    "types-pyyaml==6.0.12.20261103",
+]
 
 [project.scripts]
 orchestrator = "orchestrator.main:main"
@@ -32,3 +42,20 @@ build-backend = "uv_build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "SIM", "UP", "RUF"]
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# The Kubernetes client's config loaders and watch have no type information; its API is typed.
+module = ["orchestrator.executor"]
+disallow_untyped_calls = false

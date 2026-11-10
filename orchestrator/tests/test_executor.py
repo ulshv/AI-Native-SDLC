@@ -24,16 +24,32 @@ class FakeCluster:
         self.jobs[name]["done"] = result
 
     def finished_jobs(self):
-        return [Finished(n, j["manifest"]["metadata"]["labels"]["sdlc/thread"], j["done"]["result"] != "failed", j["done"],
-                         uid=f"uid-{n}") for n, j in self.jobs.items() if j["done"]]
+        return [
+            Finished(
+                n,
+                j["manifest"]["metadata"]["labels"]["sdlc/thread"],
+                j["done"]["result"] != "failed",
+                j["done"],
+                uid=f"uid-{n}",
+            )
+            for n, j in self.jobs.items()
+            if j["done"]
+        ]
 
     def watch_finished(self, stop):
         return iter(())
 
 
 def task(key, mode="propose", model="llm/deepseek/deepseek-v4-flash-0731"):
-    return {"mode": mode, "repo": "sdlc/example-webapp", "base": "development", "branch": f"feat/{key}_x",
-            "change": f"{key.lower()}-x", "model": model, "ticket": {"key": key, "title": "x", "text": ""}}
+    return {
+        "mode": mode,
+        "repo": "sdlc/example-webapp",
+        "base": "development",
+        "branch": f"feat/{key}_x",
+        "change": f"{key.lower()}-x",
+        "model": model,
+        "ticket": {"key": key, "title": "x", "text": ""},
+    }
 
 
 def executor(pool, cluster, image="gitea.sdlc.internal/platform/agent-runner:abc"):

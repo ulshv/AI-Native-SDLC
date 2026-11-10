@@ -3,8 +3,8 @@
 import json
 
 import pytest
-
 from conftest import FIXTURES
+
 from orchestrator.adapters import gitea, plane
 
 AGENT = "acf51e1d-b7bc-4e95-a61d-9deba97c5a30"  # the agent's Plane user id in the fixtures
@@ -67,10 +67,13 @@ def test_a_pull_request_comment_that_mentions_the_agent_is_a_request():
     assert (e.kind, str(e.link), e.actor.username, e.text) == ("comment", PR, "eng", "@agent looks good, go ahead")
 
 
-@pytest.mark.parametrize("name, review, mentioned", [
-    ("review_approved", "approved", True),
-    ("review_request_changes", "request_changes", True),
-])
+@pytest.mark.parametrize(
+    "name, review, mentioned",
+    [
+        ("review_approved", "approved", True),
+        ("review_request_changes", "request_changes", True),
+    ],
+)
 def test_reviews_are_signals_and_may_carry_a_request(name, review, mentioned):
     e = gitea_event(name)
     assert (e.kind, e.data["review"], e.mentions_agent, str(e.link)) == ("review", review, mentioned, PR)
@@ -89,7 +92,11 @@ def test_a_review_comment_without_a_mention_is_nothing():
 @pytest.mark.parametrize("name, kind", [("pr_merged", "pr_merged"), ("pr_closed_unmerged", "pr_closed")])
 def test_a_person_merging_or_closing_a_pull_request(name, kind):
     e = gitea_event(name, login="eng")
-    assert (e.kind, e.data["head"], e.actor.username) == (kind, "feat/EWA-12_filter" if kind == "pr_merged" else "feat/EWA-13_drop", "eng")
+    assert (e.kind, e.data["head"], e.actor.username) == (
+        kind,
+        "feat/EWA-12_filter" if kind == "pr_merged" else "feat/EWA-13_drop",
+        "eng",
+    )
 
 
 @pytest.mark.parametrize("name", ["comment_by_agent", "pr_merged", "pr_opened", "pr_synchronized"])

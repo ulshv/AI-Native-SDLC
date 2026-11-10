@@ -2,11 +2,15 @@
 
 import json
 import re
+import socket
+import time
 
 import httpx
+import pytest
 
 from orchestrator.adapters.gitea import GiteaCodeHost
 from orchestrator.adapters.plane import PlaneTracker
+from orchestrator.http import MAX_WAIT, Api, ApiError, rate_limit_wait
 
 
 class FakePlane:
@@ -23,7 +27,9 @@ class FakePlane:
         if path == "/projects/":
             return httpx.Response(200, json={"results": [{"id": "p-1", "identifier": "EWA"}]})
         if path == "/projects/p-1/states/":
-            return httpx.Response(200, json={"results": [{"id": "s-backlog", "name": "Backlog"}, {"id": "s-draft", "name": "Drafting"}]})
+            return httpx.Response(
+                200, json={"results": [{"id": "s-backlog", "name": "Backlog"}, {"id": "s-draft", "name": "Drafting"}]}
+            )
         if path == "/projects/p-1/issues/i-1/":
             if request.method == "PATCH":
                 self.state = json.loads(request.content)["state"]
@@ -37,8 +43,13 @@ class FakePlane:
 
 
 def plane(fake):
-    return PlaneTracker("http://plane", "key", {"agent": "u-agent", "admin": "u-admin"},
-                        transport=httpx.MockTransport(fake), sleep=lambda s: None)
+    return PlaneTracker(
+        "http://plane",
+        "key",
+        {"agent": "u-agent", "admin": "u-admin"},
+        transport=httpx.MockTransport(fake),
+        sleep=lambda s: None,
+    )
 
 
 def test_plane_status_and_comment_are_not_repeated_by_a_retry():
@@ -77,8 +88,14 @@ class FakeGitea:
             pr = next((p for p in self.prs.values() if p["base"] == m.group(1) and p["head"] == m.group(2)), None)
             return httpx.Response(200, json=pr) if pr else httpx.Response(404)
         if path == "/pulls" and method == "GET":
-            return httpx.Response(200, json=[{"number": p["number"], "head": {"ref": p["head"]}, "base": {"ref": p["base"]}}
-                                             for p in self.prs.values() if p["state"] == "open"])
+            return httpx.Response(
+                200,
+                json=[
+                    {"number": p["number"], "head": {"ref": p["head"]}, "base": {"ref": p["base"]}}
+                    for p in self.prs.values()
+                    if p["state"] == "open"
+                ],
+            )
         if path == "/pulls" and method == "POST":
             n = len(self.prs) + 1
             self.prs[n] = {"number": n, "head": body["head"], "base": body["base"], "state": "open", "merged": False}
@@ -106,22 +123,39 @@ class FakeGitea:
             self.issue_labels.update(body["labels"])
             return httpx.Response(200, json=[])
         if re.fullmatch(r"/pulls/\d+/reviews", path):
-            return httpx.Response(200, json=[{"id": 7, "user": {"login": "eng"}}, {"id": 9, "user": {"login": "eng"}},
-                                             {"id": 8, "user": {"login": "po"}}])
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": 7, "user": {"login": "eng"}},
+                    {"id": 9, "user": {"login": "eng"}},
+                    {"id": 8, "user": {"login": "po"}},
+                ],
+            )
         if re.fullmatch(r"/pulls/\d+/reviews/9/comments", path):
             return httpx.Response(200, json=[{"path": "src/orders.ts", "position": 4, "body": "rename this"}])
         return httpx.Response(404)
 
 
 def gitea(fake):
-    return GiteaCodeHost("http://gitea", "token", "https://gitea.sdlc.internal", transport=httpx.MockTransport(fake))
+    return GiteaCodeHost(
+        "http://gitea",
+        "token",
+        "https://gitea.sdlc.internal",
+        transport=httpx.MockTransport(fake),
+        sleep=lambda s: None,
+    )
 
 
 def test_gitea_actions_are_not_repeated_by_a_retry():
     fake = FakeGitea()
     host = gitea(fake)
     repo = "sdlc/example-webapp"
-    twice = lambda action: [action() for _ in range(2)][0]  # noqa: E731 - each action as a retry would run it
+
+    def twice(action):  # each action as a retry would run it
+        first = action()
+        action()
+        return first
+
     n = twice(lambda: host.find_or_open_pr(repo, "feat/EWA-12_x", "development", "EWA-12: x", "spec"))
     twice(lambda: host.comment(repo, n, "Spec ready.", marker="evt-1"))
     twice(lambda: host.label(repo, n, "preview"))
@@ -141,3 +175,62 @@ def test_a_closed_pull_request_of_the_branch_does_not_count():
     first = host.find_or_open_pr("sdlc/example-webapp", "feat/EWA-12_x", "development", "t", "b")
     host.close("sdlc/example-webapp", first)
     assert host.find_or_open_pr("sdlc/example-webapp", "feat/EWA-12_x", "development", "t", "b") == first + 1
+
+
+def answers(*statuses):
+    """A transport answering with these statuses in turn, and the calls it got."""
+    calls, left = [], list(statuses)
+
+    def fake(request):
+        calls.append(request.method)
+        return httpx.Response(left.pop(0) if len(left) > 1 else left[0], json={})
+
+    return httpx.MockTransport(fake), calls
+
+
+@pytest.mark.parametrize(
+    "method, statuses, sent, ok",
+    [
+        ("GET", (503, 503, 200), 3, True),  # a server error, retried while it is safe to send again
+        ("POST", (429, 201), 2, True),  # never taken: retried whatever the method
+        ("POST", (503, 201), 1, False),  # may have landed: not sent twice
+        ("GET", (404,), 1, False),  # an answer, not a failure
+    ],
+)
+def test_only_what_is_safe_to_send_again_is_retried(method, statuses, sent, ok):
+    transport, calls = answers(*statuses)
+    api = Api("http://x", {}, transport=transport, sleep=lambda s: None)
+    try:
+        api.call(method, "/thing")
+        succeeded = True
+    except ApiError:
+        succeeded = False
+    assert (len(calls), succeeded) == (sent, ok)
+
+
+def test_a_hanging_call_ends_at_its_timeout():
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen()  # takes the connection, never answers
+        api = Api(
+            f"http://127.0.0.1:{server.getsockname()[1]}",
+            {},
+            attempts=2,
+            sleep=lambda s: None,
+            timeout=httpx.Timeout(0.3),
+        )
+        started = time.monotonic()
+        with pytest.raises(httpx.ReadTimeout):
+            api.call("GET", "/thing")
+        assert time.monotonic() - started < 3
+
+
+def test_a_rate_limit_wait_reads_seconds_epochs_and_dates_and_stays_bounded():
+    def wait_for(value):
+        return rate_limit_wait(httpx.Response(429, headers={"Retry-After": value}))
+
+    assert wait_for("3") == 3
+    assert wait_for("3600") == MAX_WAIT  # never past the queue's lease
+    assert 1 <= wait_for(str(time.time() + 20)) <= 21
+    assert wait_for("Wed, 21 Oct 2015 07:28:00 GMT") == 1  # a date gone by
+    assert wait_for("soon") == 10

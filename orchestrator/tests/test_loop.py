@@ -7,10 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from conftest import FIXTURES
-from orchestrator import intents
-from orchestrator import agent
+
+from orchestrator import agent, intents
 from orchestrator.agent import Agent
 from orchestrator.links import Link, Links
 from orchestrator.projects import Projects
@@ -101,16 +100,23 @@ class FakeChat:
         self.calls += 1
         comment = prompt.rsplit("The comment:\n", 1)[1]
         name, confidence = self.answers.get(comment, ("none", 1.0))
-        return intents.Reading(intent=name, confidence=confidence)
+        return intents.ModelReading(intent=name, confidence=confidence)
 
 
 @pytest.fixture
 def world(pool, database_url):
-    agent.setup_checkpoints(database_url)
     with agent.checkpointer(database_url, 4) as saver:
-        svc = SimpleNamespace(projects=Projects.load(REPO_PROJECTS), links=Links(pool), queue=PostgresQueue(pool),
-                              tracker=FakeTracker(), code_host=FakeCodeHost(), executor=FakeExecutor(), chat=FakeChat(),
-                              agent_model="llm/deepseek/deepseek-v4-flash-0731", threshold=0.7)
+        svc = SimpleNamespace(
+            projects=Projects.load(REPO_PROJECTS),
+            links=Links(pool),
+            queue=PostgresQueue(pool),
+            tracker=FakeTracker(),
+            code_host=FakeCodeHost(),
+            executor=FakeExecutor(),
+            chat=FakeChat(),
+            agent_model="llm/deepseek/deepseek-v4-flash-0731",
+            threshold=0.7,
+        )
 
         class World:
             def __init__(self):
@@ -130,15 +136,19 @@ def world(pool, database_url):
                         target = target[p]
                     target[last] = value
                 self.n += 1
-                link = (Link.parse(ITEM) if source == "plane" else Link("gitea_pr", "sdlc/example-webapp#3"))
+                link = Link.parse(ITEM) if source == "plane" else Link("gitea_pr", "sdlc/example-webapp#3")
                 key = self.svc.links.thread_of(link) or str(link)
                 self.queue.put(source, delivery or f"{name}-{self.n}", key, d["body"], d["headers"])
                 self.drain()
 
             def finish(self, result):
                 run = list(self.svc.executor.runs.values())[-1]
-                self.queue.put("job", f"{run.name}/uid", run.thread_id,
-                               {"job": run.name, "thread_id": run.thread_id, "succeeded": True, "result": result})
+                self.queue.put(
+                    "job",
+                    f"{run.name}/uid",
+                    run.thread_id,
+                    {"job": run.name, "thread_id": run.thread_id, "succeeded": True, "result": result},
+                )
                 self.drain()
 
             def drain(self):
@@ -169,11 +179,17 @@ def test_from_assignment_to_a_merge_into_development(world):
     assert world.item.phase == "Drafting" and world.item.key == "EWA-1"
     assert world.item.ticket.branch == "feat/EWA-1_orders-filter-by-status" and world.runs == ["ewa-1-propose-1"]
     run = world.svc.executor.runs["ewa-1-propose-1"]
-    assert run.task["repo"] == "sdlc/example-webapp" and run.task["base"] == "development" and "npm test" in run.task["checks"]
+    assert (
+        run.task["repo"] == "sdlc/example-webapp"
+        and run.task["base"] == "development"
+        and "npm test" in run.task["checks"]
+    )
 
     world.finish({"result": "spec_ready", "commit": "a1"})
     assert world.item.phase == "Spec review" and world.item.pr == 3
-    assert world.svc.links.thread_of(Link("gitea_pr", "sdlc/example-webapp#3")) == world.svc.links.thread_of(Link.parse(ITEM))
+    assert world.svc.links.thread_of(Link("gitea_pr", "sdlc/example-webapp#3")) == world.svc.links.thread_of(
+        Link.parse(ITEM)
+    )
     assert "https://gitea.sdlc.internal/sdlc/example-webapp/pulls/3" in world.svc.tracker.comments[-1][1]
 
     chat["@agent looks good, go ahead"] = ("approve", 0.95)
@@ -255,7 +271,9 @@ def test_a_person_merging_before_the_archive_gets_a_note_and_an_archive_pr_on_re
     world.finish({"result": "code_ready"})
     world.hook("gitea", "pr_merged", sender__login="gitea_admin")
     assert world.item.phase == "On dev"
-    assert "were not archived" in world.svc.tracker.comments[-1][1] and "#3 on EWA-1" in world.svc.tracker.comments[-1][1]
+    assert (
+        "were not archived" in world.svc.tracker.comments[-1][1] and "#3 on EWA-1" in world.svc.tracker.comments[-1][1]
+    )
     world.svc.chat.answers["@agent looks good, go ahead"] = ("archive", 0.95)
     world.hook("plane", "comment_mention_agent")
     assert world.runs[-1] == "ewa-1-archive-3"
@@ -296,7 +314,9 @@ def test_the_thread_api_shows_a_thread_and_its_messages(world, pool):
     client = TestClient(create_app(pool, world.queue, world.svc.links, world.dispatch.view))
     thread_id = client.get("/threads", params={"link": "gitea_pr:sdlc/example-webapp#3"}).json()["thread_id"]
     shown = client.get(f"/threads/{thread_id}").json()
-    assert shown["values"]["phase"] == "Spec review" and shown["values"]["key"] == "EWA-1" and shown["values"]["pr"] == 3
+    assert (
+        shown["values"]["phase"] == "Spec review" and shown["values"]["key"] == "EWA-1" and shown["values"]["pr"] == 3
+    )
     assert shown["values"]["branch"] == "feat/EWA-1_orders-filter-by-status"
     assert set(shown["links"]) == {ITEM, "gitea_pr:sdlc/example-webapp#3", "ticket:example-webapp/EWA-1"}
     messages = client.get(f"/threads/{thread_id}/messages").json()["messages"]

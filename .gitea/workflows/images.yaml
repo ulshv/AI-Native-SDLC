@@ -26,6 +26,12 @@ jobs:
           curl -fsSL -o /tmp/uv.tgz https://github.com/astral-sh/uv/releases/download/0.11.22/uv-x86_64-unknown-linux-gnu.tar.gz
           echo "30075b14624a62021198319f22e08f1651a97d4026a8c84dab6abcbfaba0d81c  /tmp/uv.tgz" | sha256sum -c -
           tar -xzf /tmp/uv.tgz -C /usr/local/bin --strip-components=1
+      - name: orchestrator lint and types
+        working-directory: orchestrator
+        run: |
+          uv run --locked ruff check src tests
+          uv run --locked ruff format --check src tests
+          uv run --locked mypy src
       - name: orchestrator tests
         working-directory: orchestrator
         env:

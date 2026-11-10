@@ -65,7 +65,10 @@ def test_a_ticket_and_its_pull_request_reach_the_same_thread(pool):
     links.link("t-1", Link("gitea_pr", "sdlc/example-webapp#34"))
     assert links.thread_of(Link("plane_work_item", "p-uuid/w-uuid")) == "t-1"
     assert links.thread_of(Link("gitea_pr", "sdlc/example-webapp#34")) == "t-1"
-    assert [str(link) for link in links.links_of("t-1")] == ["plane_work_item:p-uuid/w-uuid", "gitea_pr:sdlc/example-webapp#34"]
+    assert [str(link) for link in links.links_of("t-1")] == [
+        "plane_work_item:p-uuid/w-uuid",
+        "gitea_pr:sdlc/example-webapp#34",
+    ]
 
 
 def test_an_object_cannot_belong_to_two_threads(pool):
@@ -131,7 +134,9 @@ def test_a_failing_event_is_retried_and_finally_closed_with_its_error(pool):
         conn.execute("UPDATE inbox SET available_at = now() - interval '1 second'")  # skip the backoff
     queue.process(boom)
     with pool.connection() as conn:
-        rows = conn.execute("SELECT delivery_id, attempts, processed_at IS NOT NULL, error FROM inbox ORDER BY id").fetchall()
+        rows = conn.execute(
+            "SELECT delivery_id, attempts, processed_at IS NOT NULL, error FROM inbox ORDER BY id"
+        ).fetchall()
     assert rows[0][:3] == ("d-1", 2, True) and "Plane is down" in rows[0][3]
     seen = []
     drain(queue, lambda d: seen.append(d.delivery_id))

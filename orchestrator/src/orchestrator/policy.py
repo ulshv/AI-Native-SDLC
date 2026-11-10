@@ -30,27 +30,45 @@ class Phase(StrEnum):
 
 
 # Until the merge; after it, there is nothing left to reject.
-OPEN = frozenset({Phase.DRAFTING, Phase.NEEDS_INFO, Phase.SPEC_REVIEW, Phase.IMPLEMENTING, Phase.DEPLOYING,
-                  Phase.CODE_REVIEW})
+OPEN = frozenset(
+    {Phase.DRAFTING, Phase.NEEDS_INFO, Phase.SPEC_REVIEW, Phase.IMPLEMENTING, Phase.DEPLOYING, Phase.CODE_REVIEW}
+)
 PEOPLE = frozenset({"product_owner", "engineer"})
 ENGINEERS = frozenset({"engineer"})
 MEMBERS = None  # any person of the project
 
-# What the model may read a comment as.
-INTENTS = ("approve", "request_changes", "reject", "answer", "merge", "archive", "prepare_release", "none")
 
-ROLE_WORDS = {PEOPLE: "a product owner or an engineer", ENGINEERS: "an engineer"}
-UNSURE = ("I am not sure what you are asking. Say, for example, \"@agent looks good\", "
-          "\"@agent please change ...\" or \"@agent merge it into dev\".")
+class Intent(StrEnum):
+    """What a person asks for. The model reads a comment as one of these, but UNCLEAR: that is what
+    a comment becomes when nobody could read it."""
+
+    APPROVE = "approve"
+    REQUEST_CHANGES = "request_changes"
+    REJECT = "reject"
+    ANSWER = "answer"
+    MERGE = "merge"
+    ARCHIVE = "archive"
+    PREPARE_RELEASE = "prepare_release"
+    NONE = "none"
+    UNCLEAR = "unclear"
+
+
+READABLE = tuple(i for i in Intent if i is not Intent.UNCLEAR)
+
+ROLE_WORDS: dict[frozenset[str] | None, str] = {PEOPLE: "a product owner or an engineer", ENGINEERS: "an engineer"}
+UNSURE = (
+    'I am not sure what you are asking. Say, for example, "@agent looks good", '
+    '"@agent please change ..." or "@agent merge it into dev".'
+)
 
 
 @dataclass(frozen=True)
-class Rule:
-    intent: str
+class Rule[H]:
+    intent: Intent
     verb: str  # what a refusal says cannot be done: "... so I cannot <verb> now."
     phases: frozenset[Phase] | None  # None: any phase, the request is about the project
     roles: frozenset[str] | None  # None: any person of the project
-    handler: Any  # what the loop does when the rule allows a request
+    handler: H  # what the loop does when the rule allows a request
     while_running: bool = False  # may be asked while an agent run goes on
 
     def covers(self, phase: Phase | None) -> bool:
@@ -61,8 +79,8 @@ class Rule:
 
 
 @dataclass(frozen=True)
-class Decision:
-    rule: Rule | None = None
+class Decision[H]:
+    rule: Rule[H] | None = None
     reason: str = ""
 
     @property
@@ -70,14 +88,15 @@ class Decision:
         return self.rule is not None
 
 
-class Policy:
-    def __init__(self, rules: Iterable[Rule]):
-        self.rules: dict[str, list[Rule]] = defaultdict(list)
+class Policy[H]:
+    def __init__(self, rules: Iterable[Rule[H]]):
+        self.rules: dict[Intent, list[Rule[H]]] = defaultdict(list)
         for rule in rules:
             self.rules[rule.intent].append(rule)
 
-    def decide(self, intent: str, phase: Phase | None, roles: frozenset[str] | None, project: str,
-               key: str = "") -> Decision:
+    def decide(
+        self, intent: Intent, phase: Phase | None, roles: frozenset[str] | None, project: str, key: str = ""
+    ) -> Decision[H]:
         """The rule that lets a person with these roles (None: not a person of the project) ask
         for this now, or the reason nothing does."""
         if roles is None:
@@ -97,13 +116,13 @@ class Policy:
 
 # Explicit signals need no model (design decision 5): an event kind, the field it is read from,
 # and what its values stand for.
-SIGNALS = {
-    "status": ("state", {"Approved": "approve", "Closed": "reject"}),
-    "review": ("review", {"approved": "approve", "request_changes": "request_changes"}),
+SIGNALS: dict[str, tuple[str, dict[str, Intent]]] = {
+    "status": ("state", {"Approved": Intent.APPROVE, "Closed": Intent.REJECT}),
+    "review": ("review", {"approved": Intent.APPROVE, "request_changes": Intent.REQUEST_CHANGES}),
 }
 
 
-def signal(kind: str, data: dict) -> str | None:
+def signal(kind: str, data: dict[str, Any]) -> Intent | None:
     """The intent an explicit signal stands for: a status a person set, or a review's verdict."""
     field, meanings = SIGNALS.get(kind, ("", {}))
     return meanings.get(data.get(field, ""))

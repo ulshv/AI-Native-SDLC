@@ -9,8 +9,9 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable
-from typing import Protocol
+from typing import Any, Protocol
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import ValidationError
 
 from . import intents
@@ -18,9 +19,9 @@ from .adapters import gitea, plane
 from .events import Event
 from .links import Link, Links
 from .model import Command, Intake, PrChanged, Request, RunFinished, RunResult, Where, WorkItem
-from .policy import Phase, signal
+from .policy import Intent, Phase, signal
 from .ports import CodeHost, Tracker
-from .projects import Project, Projects
+from .projects import Person, Project, Projects
 from .queue import Delivery, Queue
 
 log = logging.getLogger(__name__)
@@ -29,10 +30,10 @@ IGNORED = {"release"}  # releases come with group 10
 VIA = {"plane": Where.TICKET, "gitea": Where.PR}  # where a request was made, and its answer goes
 # A reading may make an explicit signal more precise, never turn it around: an approving review
 # that asks to merge is a merge request, a review requesting changes stays one.
-REFINES = {"approve": {"merge"}}
+REFINES = {Intent.APPROVE: {Intent.MERGE}}
 
 
-def read_intent(chat, threshold: float, event: Event, item: WorkItem, known: bool) -> str | None:
+def read_intent(chat: BaseChatModel, threshold: float, event: Event, item: WorkItem, known: bool) -> Intent | None:
     """An explicit signal needs no model; a mention is read by one; nothing else is a request. No
     model reads a stranger's comment (the policy refuses it whatever it says), nor one in Needs
     info, where the next mention is the answer."""
@@ -40,17 +41,17 @@ def read_intent(chat, threshold: float, event: Event, item: WorkItem, known: boo
     if not (event.mentions_agent and event.text):
         return explicit
     if not known:
-        return explicit or "unclear"
+        return explicit or Intent.UNCLEAR
     if not explicit and item.phase == Phase.NEEDS_INFO:
-        return "answer"
+        return Intent.ANSWER
     reading = intents.read(chat, event.text, item.phase or "", item.last_said())
     clear = intents.clear(reading, threshold)
     if explicit:
-        return reading.name if clear and reading.name in REFINES.get(explicit, ()) else explicit
-    return reading.name if clear else "unclear"
+        return reading.intent if clear and reading.intent in REFINES.get(explicit, set()) else explicit
+    return reading.intent if clear else Intent.UNCLEAR
 
 
-def result_of(payload: dict) -> RunResult:
+def result_of(payload: dict[str, Any]) -> RunResult:
     """The run's termination message, which the agent's run writes: one not in the shape asked
     for counts as a failed run, so the item does not wait for it forever."""
     try:
@@ -68,8 +69,17 @@ class Threads(Protocol):
 class Dispatcher:
     """The queue's handler: a delivery in, at most one thread step out."""
 
-    def __init__(self, projects: Projects, links: Links, queue: Queue, tracker: Tracker, code_host: CodeHost,
-                 chat, threshold: float, threads: Threads):
+    def __init__(
+        self,
+        projects: Projects,
+        links: Links,
+        queue: Queue,
+        tracker: Tracker,
+        code_host: CodeHost,
+        chat: BaseChatModel,
+        threshold: float,
+        threads: Threads,
+    ) -> None:
         self.projects, self.links, self.queue = projects, links, queue
         self.tracker, self.code_host, self.chat, self.threshold = tracker, code_host, chat, threshold
         self.threads = threads
@@ -86,8 +96,12 @@ class Dispatcher:
     def __call__(self, delivery: Delivery) -> None:
         if delivery.source == "job":  # an agent run's result names its thread itself
             payload = delivery.payload
-            self.threads.run(payload["thread_id"], RunFinished(
-                delivery=f"job/{delivery.delivery_id}", job=payload.get("job", ""), result=result_of(payload)))
+            self.threads.run(
+                payload["thread_id"],
+                RunFinished(
+                    delivery=f"job/{delivery.delivery_id}", job=payload.get("job", ""), result=result_of(payload)
+                ),
+            )
             return
         adapter = self.adapters.get(delivery.source)
         event = adapter(delivery) if adapter else None
@@ -114,6 +128,8 @@ class Dispatcher:
     def _thread_of(self, event: Event, project: Project) -> str | None:
         """The event's thread; a ticket assigned to @agent gets one, linked to the work item and
         to its key (again on a retry, should the first try have stopped in between)."""
+        if event.link is None:
+            return None
         thread_id = self.links.thread_of(event.link)
         if event.kind != "assigned":
             return thread_id
@@ -124,26 +140,39 @@ class Dispatcher:
 
     def _intake(self, delivery: str, event: Event, project: Project, item: WorkItem) -> Intake:
         data = event.data
-        return Intake(delivery=delivery, project=project.name, sequence_id=data["sequence_id"],
-                      title=data.get("title", ""), description=data.get("description", ""),
-                      workspace=data.get("workspace", ""), project_id=data.get("project_id", ""),
-                      work_item_id=data.get("work_item_id", ""))
+        return Intake(
+            delivery=delivery,
+            project=project.name,
+            sequence_id=data["sequence_id"],
+            title=data.get("title", ""),
+            description=data.get("description", ""),
+            workspace=data.get("workspace", ""),
+            project_id=data.get("project_id", ""),
+            work_item_id=data.get("work_item_id", ""),
+        )
 
     def _request(self, delivery: str, event: Event, project: Project, item: WorkItem) -> Request | None:
         person = self._person(project, event)
         intent = read_intent(self.chat, self.threshold, event, item, person is not None)
         if intent is None:
             return None
-        feedback = []
-        if event.kind == "review" and intent == "request_changes":
+        feedback: list[str] = []
+        if event.kind == "review" and intent is Intent.REQUEST_CHANGES and event.actor:
             feedback = self.code_host.review_comments(project.repo, event.data["number"], event.actor.username)
-        return Request(delivery=delivery, project=project.name, intent=intent, text=event.text,
-                       author=person.name if person else (event.actor.username if event.actor else "") or "someone",
-                       roles=person.roles if person else None, via=VIA[event.source],
-                       pr=event.data.get("number") if VIA[event.source] == Where.PR else None, feedback=feedback,
-                       status_signal=event.kind == "status")
+        return Request(
+            delivery=delivery,
+            project=project.name,
+            intent=intent,
+            text=event.text,
+            author=person.name if person else (event.actor.username if event.actor else "") or "someone",
+            roles=person.roles if person else None,
+            via=VIA[event.source],
+            pr=event.data.get("number") if VIA[event.source] == Where.PR else None,
+            feedback=feedback,
+            status_signal=event.kind == "status",
+        )
 
-    def _person(self, project: Project, event: Event):
+    def _person(self, project: Project, event: Event) -> Person | None:
         if event.actor is None:
             return None
         username = event.actor.username if event.actor.tool == "gitea" else self.tracker.username(event.actor.id)

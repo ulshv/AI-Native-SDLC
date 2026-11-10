@@ -16,13 +16,29 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from .executor import Run
 from .links import Links
-from .model import (AgentRun, Answer, Command, Intake, Message, Mode, Paused, PrChanged, Request, RunFinished,
-                    RunResult, Then, Ticket, Where, WorkItem)
-from .policy import ENGINEERS, MEMBERS, OPEN, PEOPLE, Phase, Policy, Rule
-from .ports import CodeHost, Tracker
+from .model import (
+    AgentRun,
+    Answer,
+    Command,
+    Intake,
+    Message,
+    Mode,
+    Paused,
+    PrChanged,
+    Request,
+    RunFinished,
+    RunResult,
+    Then,
+    Ticket,
+    Where,
+    WorkItem,
+)
+from .policy import ENGINEERS, MEMBERS, OPEN, PEOPLE, Intent, Phase, Policy, Rule
+from .ports import CodeHost, RunStarter, Tracker
 from .projects import Project
 
 log = logging.getLogger(__name__)
@@ -35,7 +51,7 @@ class Ports:
     tracker: Tracker
     code_host: CodeHost
     links: Links
-    executor: object | None
+    executor: RunStarter | None
     agent_model: str
 
 
@@ -59,8 +75,22 @@ class Step:
     def repo(self) -> str:
         return self.project.repo
 
+    @property
+    def ticket(self) -> Ticket:
+        """The item's ticket; every step after the intake has one (the agent skips the others)."""
+        if self.item.ticket is None:
+            raise LookupError(f"thread {self.thread_id} has no ticket")
+        return self.item.ticket
+
+    @property
+    def pr(self) -> int:
+        """The item's pull request, for the steps that act on it."""
+        if self.item.pr is None:
+            raise LookupError(f"{self.key} has no pull request")
+        return self.item.pr
+
     def _ticket(self) -> tuple[str, str, str]:
-        t = self.item.ticket
+        t = self.ticket
         return t.workspace, t.project_id, t.work_item_id
 
     def set_status(self, phase: Phase) -> None:
@@ -83,38 +113,50 @@ class Step:
             self.ports.tracker.comment(*self._ticket(), text, marker)
         self.item.messages.append(Message(author="agent", text=text))
 
-    def start(self, mode: Mode, then: Then = Then.REVIEW, **options) -> None:
+    def start(self, mode: Mode, then: Then = Then.REVIEW, branch: str = "", unarchive: bool = False) -> None:
         if self.ports.executor is None:
             raise RuntimeError("agent runs are off: no agent image configured")
         self.item.runs += 1
-        run = self.item.running = AgentRun(mode=mode, n=self.item.runs, then=then, **options)
+        run = self.item.running = AgentRun(mode=mode, n=self.item.runs, then=then, branch=branch, unarchive=unarchive)
         self.ports.executor.start(Run(run.name(self.key), self.thread_id, self.task(run)))
 
-    def task(self, run: AgentRun) -> dict:
+    def task(self, run: AgentRun) -> dict[str, Any]:
         """agent-runner's task.json (agent-runner/entrypoint.sh)."""
-        item, project, ticket = self.item, self.project, self.item.ticket
-        return {"mode": str(run.mode), "repo": project.repo, "base": project.base,
-                "branch": run.branch or ticket.branch, "change": ticket.change, "model": self.ports.agent_model,
-                "checks": list(project.checks), "ticket": {"key": ticket.key, "title": ticket.title, "text": ticket.text},
-                "answers": [a.model_dump() for a in item.answers],
-                **({"feedback": item.feedback} if item.feedback else {}),
-                **({"unarchive": True} if run.unarchive else {})}
+        item, project, ticket = self.item, self.project, self.ticket
+        return {
+            "mode": str(run.mode),
+            "repo": project.repo,
+            "base": project.base,
+            "branch": run.branch or ticket.branch,
+            "change": ticket.change,
+            "model": self.ports.agent_model,
+            "checks": list(project.checks),
+            "ticket": {"key": ticket.key, "title": ticket.title, "text": ticket.text},
+            "answers": [a.model_dump() for a in item.answers],
+            **({"feedback": item.feedback} if item.feedback else {}),
+            **({"unarchive": True} if run.unarchive else {}),
+        }
 
     def open_pr(self, head: str, title: str, announce: str, own: bool = True) -> None:
         """Finds or opens a pull request into the base branch, links it to the thread and
         announces it in the ticket ("{url}" becomes its address). own: the item's pull request."""
-        number = self.ports.code_host.find_or_open_pr(self.repo, head, self.project.base, title,
-                                                      f"Ticket {self.key}: {self.item.ticket.title}\n\nOpened by @agent.")
+        number = self.ports.code_host.find_or_open_pr(
+            self.repo,
+            head,
+            self.project.base,
+            title,
+            f"Ticket {self.key}: {self.ticket.title}\n\nOpened by @agent.",
+        )
         self.ports.links.link(self.thread_id, self.ports.code_host.pr_link(self.repo, number))
         if own:
             self.item.pr = number
         self.say(announce.format(url=self.ports.code_host.pr_url(self.repo, number)))
 
     def label(self, name: str) -> None:
-        self.ports.code_host.label(self.repo, self.item.pr, name)
+        self.ports.code_host.label(self.repo, self.pr, name)
 
     def merge(self) -> None:
-        self.ports.code_host.merge(self.repo, self.item.pr)
+        self.ports.code_host.merge(self.repo, self.pr)
 
     def close_pr(self) -> None:
         if self.item.pr:
@@ -151,16 +193,29 @@ def intake(s: Step, c: Intake) -> None:
         return
     key, name = f"{s.project.identifier}-{c.sequence_id}", slug(c.title)
     old = s.item
-    s.item = WorkItem(runs=old.runs, messages=old.messages, applied=old.applied, ticket=Ticket(
-        project=s.project.name, key=key, title=c.title, text=c.description, workspace=c.workspace,
-        project_id=c.project_id, work_item_id=c.work_item_id,
-        branch=f"feat/{key}_{name}", change=f"{key.lower()}-{name}"))
+    s.item = WorkItem(
+        runs=old.runs,
+        messages=old.messages,
+        applied=old.applied,
+        ticket=Ticket(
+            project=s.project.name,
+            key=key,
+            title=c.title,
+            text=c.description,
+            workspace=c.workspace,
+            project_id=c.project_id,
+            work_item_id=c.work_item_id,
+            branch=f"feat/{key}_{name}",
+            change=f"{key.lower()}-{name}",
+        ),
+    )
     s.phase(Phase.DRAFTING)
     s.say(f"Drafting a spec for {key}. I will link the pull request here when it is ready.")
     s.start(Mode.PROPOSE)
 
 
 # --- a person's requests (agent-commands) --------------------------------------------------------
+
 
 def approve_spec(s: Step, r: Request) -> None:
     s.phase(Phase.IMPLEMENTING)
@@ -214,6 +269,8 @@ def resume(s: Step, r: Request) -> None:
     """The answers to the agent's questions, or, after a failed run, whatever the person adds;
     then the same run again, in the phase the item was in."""
     paused, s.item.paused = s.item.paused, None
+    if paused is None:
+        raise LookupError(f"{s.key} is in Needs info with nothing to resume")
     s.item.answers += [Answer(question=q, answer=r.text) for q in paused.questions] or [Answer(answer=r.text)]
     s.phase(paused.phase)
     s.say("Thanks, going on.", r.via)
@@ -233,19 +290,33 @@ def release_later(s: Step, r: Request) -> None:
     s.say("Releases come with the next part of the loop.", r.via)
 
 
-POLICY = Policy([
-    Rule("approve", "approve it", frozenset({Phase.SPEC_REVIEW}), PEOPLE, approve_spec),
-    Rule("approve", "approve it", frozenset({Phase.CODE_REVIEW}), ENGINEERS,
-         finish_code_review(Then.REVIEW, "Archiving the change into the specs.")),
-    Rule("merge", "merge it", frozenset({Phase.CODE_REVIEW}), ENGINEERS,
-         finish_code_review(Then.MERGE, "Archiving the change into the specs, then merging.")),
-    Rule("request_changes", "take changes to it", frozenset({Phase.SPEC_REVIEW}), PEOPLE, revise_spec),
-    Rule("request_changes", "take changes to it", frozenset({Phase.CODE_REVIEW}), PEOPLE, fix_code),
-    Rule("reject", "reject it", OPEN, PEOPLE, reject, while_running=True),
-    Rule("answer", "take an answer", frozenset({Phase.NEEDS_INFO}), MEMBERS, resume),
-    Rule("archive", "archive the change", frozenset({Phase.ON_DEV}), ENGINEERS, archive_in_own_pr),
-    Rule("prepare_release", "prepare a release", None, PEOPLE, release_later, while_running=True),
-])
+Handler = Callable[[Step, Request], None]
+
+POLICY: Policy[Handler] = Policy(
+    [
+        Rule(Intent.APPROVE, "approve it", frozenset({Phase.SPEC_REVIEW}), PEOPLE, approve_spec),
+        Rule(
+            Intent.APPROVE,
+            "approve it",
+            frozenset({Phase.CODE_REVIEW}),
+            ENGINEERS,
+            finish_code_review(Then.REVIEW, "Archiving the change into the specs."),
+        ),
+        Rule(
+            Intent.MERGE,
+            "merge it",
+            frozenset({Phase.CODE_REVIEW}),
+            ENGINEERS,
+            finish_code_review(Then.MERGE, "Archiving the change into the specs, then merging."),
+        ),
+        Rule(Intent.REQUEST_CHANGES, "take changes to it", frozenset({Phase.SPEC_REVIEW}), PEOPLE, revise_spec),
+        Rule(Intent.REQUEST_CHANGES, "take changes to it", frozenset({Phase.CODE_REVIEW}), PEOPLE, fix_code),
+        Rule(Intent.REJECT, "reject it", OPEN, PEOPLE, reject, while_running=True),
+        Rule(Intent.ANSWER, "take an answer", frozenset({Phase.NEEDS_INFO}), MEMBERS, resume),
+        Rule(Intent.ARCHIVE, "archive the change", frozenset({Phase.ON_DEV}), ENGINEERS, archive_in_own_pr),
+        Rule(Intent.PREPARE_RELEASE, "prepare a release", None, PEOPLE, release_later, while_running=True),
+    ]
+)
 
 
 def request(s: Step, r: Request) -> None:
@@ -255,22 +326,27 @@ def request(s: Step, r: Request) -> None:
     s.asked_on = r.pr
     before = s.item.phase
     decision = POLICY.decide(r.intent, s.item.phase, r.roles, s.project.name, s.key)
-    if not decision.allowed:
+    rule = decision.rule
+    if rule is None:
         s.say(decision.reason, r.via)
-    elif s.item.running and not decision.rule.while_running:
+    elif s.item.running and not rule.while_running:
         s.say(f"I am still on the {s.item.running.mode} run of {s.key}. Ask again when it is done.", r.via)
     else:
-        decision.rule.handler(s, r)
+        rule.handler(s, r)
     if r.status_signal and before and s.item.phase == before:
         s.set_status(before)
 
 
 # --- a run's result (design decision 7) ----------------------------------------------------------
 
+
 def spec_ready(s: Step, run: AgentRun, result: RunResult) -> None:
     s.item.feedback = ""
-    s.open_pr(s.item.ticket.branch, f"{s.key}: {s.item.ticket.title}",
-              "The spec is ready for review: {url}. Approve it with @agent, or say what to change.")
+    s.open_pr(
+        s.ticket.branch,
+        f"{s.key}: {s.ticket.title}",
+        "The spec is ready for review: {url}. Approve it with @agent, or say what to change.",
+    )
     s.phase(Phase.SPEC_REVIEW)
 
 
@@ -299,23 +375,28 @@ def questions(s: Step, run: AgentRun, result: RunResult) -> None:
 
 def failed(s: Step, run: AgentRun, result: RunResult) -> None:
     """A failed run, or a result the loop does not know: a person decides whether to retry."""
-    s.pause(run, [], f"The {run.mode} run failed: {result.reason or 'no reason given'}. "
-                     "Reply with @agent to run it again; anything you add goes to the agent.")
+    s.pause(
+        run,
+        [],
+        f"The {run.mode} run failed: {result.reason or 'no reason given'}. "
+        "Reply with @agent to run it again; anything you add goes to the agent.",
+    )
 
 
 OUTCOMES = {"spec_ready": spec_ready, "code_ready": code_ready, "archived": archived, "questions": questions}
 
 
 def run_finished(s: Step, c: RunFinished) -> None:
-    if not s.item.is_running(c.job):
-        log.info("result of run %s dropped: the item waits for %s", c.job,
-                 s.item.running.name(s.key) if s.item.running else "no run")
+    run = s.item.running
+    if run is None or run.name(s.key) != c.job:
+        log.info("result of run %s dropped: the item waits for %s", c.job, run.name(s.key) if run else "no run")
         return
-    run, s.item.running = s.item.running, None
+    s.item.running = None
     OUTCOMES.get(c.result.result, failed)(s, run, c.result)
 
 
 # --- what follows an archive ---------------------------------------------------------------------
+
 
 def ready_to_merge(s: Step, where: Where) -> None:
     s.say("The change is archived into the specs; the pull request is ready to merge.", where)
@@ -336,11 +417,14 @@ AFTER_ARCHIVE = {Then.REVIEW: ready_to_merge, Then.MERGE: merge_now, Then.ARCHIV
 
 # --- a person merged or closed the pull request --------------------------------------------------
 
+
 def pr_merged(s: Step) -> None:
     s.phase(Phase.ON_DEV)
     if not s.item.archived:
-        s.say(f"The specs in pull request #{s.item.pr} on {s.key} were not archived. "
-              "Reply \"@agent ok, create archive PR\" to have them archived.")
+        s.say(
+            f"The specs in pull request #{s.item.pr} on {s.key} were not archived. "
+            'Reply "@agent ok, create archive PR" to have them archived.'
+        )
 
 
 def pr_closed(s: Step) -> None:
@@ -360,7 +444,12 @@ def pr_changed(s: Step, c: PrChanged) -> None:
 
 # --- a step --------------------------------------------------------------------------------------
 
-STEPS: dict[type, Callable] = {Intake: intake, Request: request, RunFinished: run_finished, PrChanged: pr_changed}
+STEPS: dict[type, Callable[[Step, Any], None]] = {
+    Intake: intake,
+    Request: request,
+    RunFinished: run_finished,
+    PrChanged: pr_changed,
+}
 
 
 def advance(item: WorkItem, command: Command, project: Project, ports: Ports, thread_id: str) -> WorkItem:

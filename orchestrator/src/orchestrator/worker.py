@@ -28,7 +28,7 @@ class Workers:
             try:
                 if not self.queue.process(self.handler):
                     self.stopping.wait(self.idle)
-            except Exception:  # noqa: BLE001 - the database was away; try again shortly
+            except Exception:
                 log.exception("the queue is not reachable")
                 self.stopping.wait(5)
 

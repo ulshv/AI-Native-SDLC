@@ -7,11 +7,11 @@ already saved still load.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from .policy import Phase
+from .policy import Intent, Phase
 
 APPLIED_KEPT = 200
 
@@ -104,9 +104,6 @@ class WorkItem(BaseModel):
     def project(self) -> str:
         return self.ticket.project if self.ticket else ""
 
-    def is_running(self, job: str) -> bool:
-        return self.running is not None and self.running.name(self.key) == job
-
     def last_said(self) -> str:
         return next((m.text for m in reversed(self.messages) if m.author == "agent"), "")
 
@@ -114,15 +111,22 @@ class WorkItem(BaseModel):
         return delivery in self.applied
 
     def remember(self, delivery: str) -> None:
-        self.applied = [*self.applied[-(APPLIED_KEPT - 1):], delivery]
+        self.applied = [*self.applied[-(APPLIED_KEPT - 1) :], delivery]
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, Any]:
         """What the thread API shows; the rest is the loop's bookkeeping."""
         ticket = self.ticket
-        return {"phase": self.phase, "key": self.key, "project": self.project,
-                "title": ticket.title if ticket else "", "branch": ticket.branch if ticket else "",
-                "change": ticket.change if ticket else "", "pr": self.pr, "archived": self.archived,
-                "questions": self.paused.questions if self.paused else []}
+        return {
+            "phase": self.phase,
+            "key": self.key,
+            "project": self.project,
+            "title": ticket.title if ticket else "",
+            "branch": ticket.branch if ticket else "",
+            "change": ticket.change if ticket else "",
+            "pr": self.pr,
+            "archived": self.archived,
+            "questions": self.paused.questions if self.paused else [],
+        }
 
 
 # --- commands: what a step is about -----------------------------------------------------------
@@ -149,7 +153,7 @@ class Request(CommandBase):
     """A person's request: an explicit signal or a comment to @agent, read as an intent."""
 
     kind: Literal["request"] = "request"
-    intent: str
+    intent: Intent
     text: str = ""
     author: str = "someone"
     roles: frozenset[str] | None = None  # None: not a person of the project

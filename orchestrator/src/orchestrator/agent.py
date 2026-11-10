@@ -12,18 +12,22 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TypedDict
+from typing import Any, TypedDict
 
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
-from psycopg.rows import dict_row
+from psycopg import Connection
+from psycopg.rows import DictRow, dict_row
 from psycopg_pool import ConnectionPool
 
 from . import machine
 from .dispatch import Dispatcher
 from .links import Links
 from .model import COMMANDS, Command, Intake, WorkItem
-from .ports import CodeHost, Tracker
+from .ports import CodeHost, RunStarter, Tracker
 from .projects import Projects
 from .queue import Delivery, Queue
 
@@ -39,21 +43,38 @@ def setup_checkpoints(database_url: str) -> None:
 @contextmanager
 def checkpointer(database_url: str, size: int) -> Iterator[PostgresSaver]:
     """A checkpointer on a pool of its own, in the shape PostgresSaver needs."""
-    with ConnectionPool(database_url, min_size=1, max_size=size,
-                        kwargs={"autocommit": True, "row_factory": dict_row}, open=True) as pool:
+    with ConnectionPool(
+        database_url,
+        min_size=1,
+        max_size=size,
+        connection_class=Connection[DictRow],
+        kwargs={"autocommit": True, "row_factory": dict_row},
+        open=True,
+    ) as pool:
         yield PostgresSaver(pool)
 
 
 class State(TypedDict, total=False):
-    item: dict  # WorkItem as JSON
-    command: dict  # Command as JSON
+    item: dict[str, Any]  # WorkItem as JSON
+    command: dict[str, Any]  # Command as JSON
 
 
 class Agent:
     """The queue's handler (a delivery in, at most one thread step out) and the threads it keeps."""
 
-    def __init__(self, projects: Projects, links: Links, queue: Queue, tracker: Tracker, code_host: CodeHost,
-                 executor, chat, agent_model: str, threshold: float, checkpointer):
+    def __init__(
+        self,
+        projects: Projects,
+        links: Links,
+        queue: Queue,
+        tracker: Tracker,
+        code_host: CodeHost,
+        executor: RunStarter | None,
+        chat: BaseChatModel,
+        agent_model: str,
+        threshold: float,
+        checkpointer: BaseCheckpointSaver[Any],
+    ) -> None:
         self.projects = projects
         self.ports = machine.Ports(tracker, code_host, links, executor, agent_model)
         self.dispatcher = Dispatcher(projects, links, queue, tracker, code_host, chat, threshold, self)
@@ -66,8 +87,8 @@ class Agent:
     def __call__(self, delivery: Delivery) -> None:
         self.dispatcher(delivery)
 
-    def _step(self, state: State, config) -> State:
-        thread_id = config["configurable"]["thread_id"]
+    def _step(self, state: State, config: RunnableConfig) -> State:
+        thread_id = str(config["configurable"]["thread_id"])
         item = WorkItem.model_validate(state.get("item") or {})
         command = COMMANDS.validate_python(state["command"])
         if item.applied_before(command.delivery):
@@ -79,7 +100,9 @@ class Agent:
             return {"item": item.model_dump(mode="json")}
         project = self.projects.by_name(item.project or command.project)
         if project is None:
-            raise LookupError(f"thread {thread_id} belongs to no connected project ({item.project or command.project!r})")
+            raise LookupError(
+                f"thread {thread_id} belongs to no connected project ({item.project or command.project!r})"
+            )
         new = machine.advance(item, command, project, self.ports, thread_id)
         new.remember(command.delivery)
         return {"item": new.model_dump(mode="json")}
@@ -91,7 +114,7 @@ class Agent:
         snapshot = self.graph.get_state({"configurable": {"thread_id": thread_id}})
         return WorkItem.model_validate((snapshot.values or {}).get("item") or {})
 
-    def view(self, thread_id: str) -> dict:
+    def view(self, thread_id: str) -> dict[str, Any]:
         """What the thread API shows: the item's summary and its conversation; {} for no item."""
         item = self.item(thread_id)
         if item.ticket is None:

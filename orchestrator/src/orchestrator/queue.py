@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -36,13 +36,20 @@ class Delivery:
     source: str
     delivery_id: str
     routing_key: str
-    headers: dict
-    payload: dict
+    headers: dict[str, str]
+    payload: dict[str, Any]
     attempts: int
 
 
 class Queue(Protocol):
-    def put(self, source: str, delivery_id: str, routing_key: str, payload: dict, headers: dict | None = None) -> bool:
+    def put(
+        self,
+        source: str,
+        delivery_id: str,
+        routing_key: str,
+        payload: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> bool:
         """Records an event; False when this delivery was recorded before."""
 
     def process(self, handler: Callable[[Delivery], None]) -> bool:
@@ -72,12 +79,20 @@ class PostgresQueue:
     def __init__(self, pool: ConnectionPool, max_attempts: int = 5, lease: int = LEASE_SECONDS):
         self.pool, self.max_attempts, self.lease = pool, max_attempts, lease
 
-    def put(self, source, delivery_id, routing_key, payload, headers=None) -> bool:
+    def put(
+        self,
+        source: str,
+        delivery_id: str,
+        routing_key: str,
+        payload: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> bool:
         with self.pool.connection() as conn:
             row = conn.execute(
                 """INSERT INTO inbox (source, delivery_id, routing_key, headers, payload)
                    VALUES (%s, %s, %s, %s, %s) ON CONFLICT (source, delivery_id) DO NOTHING RETURNING id""",
-                (source, delivery_id, routing_key, Jsonb(headers or {}), Jsonb(payload))).fetchone()
+                (source, delivery_id, routing_key, Jsonb(headers or {}), Jsonb(payload)),
+            ).fetchone()
         if row is None:
             log.info("duplicate delivery %s/%s, recorded before", source, delivery_id)
         return row is not None
@@ -89,40 +104,54 @@ class PostgresQueue:
                 """UPDATE inbox SET processed_at = clock_timestamp(), leased_until = NULL,
                      error = 'the worker stopped while handling it, ' || attempts || ' times'
                    WHERE processed_at IS NULL AND attempts >= %s AND leased_until < clock_timestamp()""",
-                (self.max_attempts,))
+                (self.max_attempts,),
+            )
             row = conn.execute(TAKE, {"lease": self.lease}).fetchone()
         return Delivery(*row) if row else None
 
-    def process(self, handler) -> bool:
+    def process(self, handler: Callable[[Delivery], None]) -> bool:
         delivery = self.take()
         if delivery is None:
             return False
         try:
             handler(delivery)
-        except Exception as error:  # noqa: BLE001 - any failure is the event's, and recorded
+        except Exception as error:
             self.failed(delivery, error)
             return True
         with self.pool.connection() as conn:
-            conn.execute("UPDATE inbox SET processed_at = clock_timestamp(), leased_until = NULL, error = NULL WHERE id = %s",
-                         (delivery.id,))
+            conn.execute(
+                "UPDATE inbox SET processed_at = clock_timestamp(), leased_until = NULL, error = NULL WHERE id = %s",
+                (delivery.id,),
+            )
         return True
 
     def failed(self, delivery: Delivery, error: Exception) -> None:
         final = delivery.attempts >= self.max_attempts
-        log.exception("event %s (%s/%s) failed, attempt %d%s", delivery.id, delivery.source, delivery.delivery_id,
-                      delivery.attempts, ", giving up" if final else "", exc_info=error)
+        log.exception(
+            "event %s (%s/%s) failed, attempt %d%s",
+            delivery.id,
+            delivery.source,
+            delivery.delivery_id,
+            delivery.attempts,
+            ", giving up" if final else "",
+            exc_info=error,
+        )
         with self.pool.connection() as conn:
             conn.execute(
                 """UPDATE inbox SET error = %s, leased_until = NULL,
                      available_at = clock_timestamp() + make_interval(secs => %s),
                      processed_at = CASE WHEN %s THEN clock_timestamp() END
                    WHERE id = %s""",
-                (f"{type(error).__name__}: {error}"[:2000], min(2 ** delivery.attempts, 300), final, delivery.id))
+                (f"{type(error).__name__}: {error}"[:2000], min(2**delivery.attempts, 300), final, delivery.id),
+            )
 
     def rekey(self, old: str, new: str) -> None:
         with self.pool.connection() as conn:
-            conn.execute("UPDATE inbox SET routing_key = %s WHERE routing_key = %s AND processed_at IS NULL", (new, old))
+            conn.execute(
+                "UPDATE inbox SET routing_key = %s WHERE routing_key = %s AND processed_at IS NULL", (new, old)
+            )
 
     def pending(self) -> int:
         with self.pool.connection() as conn:
-            return conn.execute("SELECT count(*) FROM inbox WHERE processed_at IS NULL").fetchone()[0]
+            (count,) = conn.execute("SELECT count(*) FROM inbox WHERE processed_at IS NULL").fetchone() or (0,)
+        return int(count)
