@@ -49,7 +49,7 @@ BRANCH=${BRANCH:-feat/${KEY}_$SLUG}
 CHANGE=$key-$SLUG
 NAME=$key-$MODE-$(date +%s)
 
-task=$(yq -o json -I0 '{repo: .repository.gitea, base: .repository.base, checks: .checks}' <"$FILE" |
+task=$(yq -o json -I0 '{"repo": .repository.gitea, "base": .repository.base, "checks": .checks}' <"$FILE" |
   jq -c --arg mode "$MODE" --arg branch "$BRANCH" --arg change "$CHANGE" --arg model "$MODEL" \
     --arg key "$KEY" --arg title "$TITLE" --arg text "$TEXT" --arg feedback "$FEEDBACK" --argjson answers "$ANSWERS" \
     '. + {mode: $mode, branch: $branch, change: $change, model: $model,

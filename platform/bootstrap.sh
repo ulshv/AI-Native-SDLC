@@ -79,6 +79,15 @@ secret_value() {
   sed -n "s/^$1=//p" "$SECRETS_FILE" | tail -n 1
 }
 
+# Names of values in secrets.env that start or end with a quote or contain white space.
+malformed_secrets() {
+  [[ -f $SECRETS_FILE ]] || return 0
+  sed -n 's/^\([A-Za-z0-9_]*\)=\(.*\)$/\1 \2/p' "$SECRETS_FILE" |
+    while read -r name value; do
+      [[ $value =~ ^[\"\'] || $value =~ [\"\']$ || $value =~ [[:space:]] ]] && echo "$name"
+    done || true
+}
+
 required_external_secrets() {
   awk '$1 == "value" && $3 == "external" && $4 == "yes" { print $2 }' "$MANIFEST"
 }
@@ -131,6 +140,11 @@ phase_preflight() {
   done
   for name in $(required_external_secrets); do
     [[ -n $(secret_value "$name") ]] || problems+=("missing secret: $name (add it to $SECRETS_FILE)")
+  done
+  # secrets.env holds NAME=value with no quotes: a quote or a space becomes part of the value,
+  # and an app that puts the value into its own config may break and print it.
+  for name in $(malformed_secrets); do
+    problems+=("secret $name in $SECRETS_FILE is quoted or has spaces; write NAME=value without them")
   done
 
   if [[ ${#problems[@]} -eq 0 ]]; then

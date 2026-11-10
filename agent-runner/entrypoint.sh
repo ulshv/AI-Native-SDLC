@@ -27,11 +27,26 @@ WORK=${WORK:-/work}
 
 task() { jq -r "$1 // empty" "$TASK"; }
 
+# redact <text>: the text without the model provider's key. A tool's error can quote its config
+# with the key filled in (OpenCode does on a config it cannot parse), and whatever the run prints
+# ends up in the pod's log and status.
+redact() {
+  local text=$1 key=${LLM_API_KEY-}
+  if ((${#key} >= 8)); then
+    text=${text//"$key"/<LLM_API_KEY>}
+    key=${key//\"/}
+    text=${text//"$key"/<LLM_API_KEY>}
+  fi
+  printf '%s' "$text"
+}
+
 # result <json>: the run's one answer. A termination message holds at most 4 KiB, so long texts
 # are cut short before they get there.
 result() {
-  printf '%s' "$1" >"$RESULT"
-  printf 'agent-run: result %s\n' "$1"
+  local message
+  message=$(redact "$1")
+  printf '%s' "$message" >"$RESULT"
+  printf 'agent-run: result %s\n' "$message"
 }
 
 fail() {
@@ -41,7 +56,7 @@ fail() {
 }
 trap 'fail "the run stopped at line $LINENO of agent-run"' ERR
 
-log() { printf 'agent-run: %s\n' "$*"; }
+log() { printf 'agent-run: %s\n' "$(redact "$*")"; }
 
 MODE=$(task .mode)
 REPO=$(task .repo)
@@ -122,7 +137,7 @@ commit_push() {
   git add -A -- "$@"
   if [[ -n $(git status --porcelain --untracked-files=all | grep -v '^[MADRC] ') ]]; then
     log "left out, outside what this mode may change:"
-    git status --porcelain --untracked-files=all | grep -v '^[MADRC] ' | sed 's/^/  /'
+    log "$(git status --porcelain --untracked-files=all | grep -v '^[MADRC] ' | sed 's/^/  /')"
   fi
   git diff --cached --quiet && fail "the run changed nothing it may commit"
   git commit --quiet -m "$message"
