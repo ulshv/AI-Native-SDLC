@@ -1,0 +1,38 @@
+# The runner's loop and BuildKit's configuration, shared by both runners.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runner
+  namespace: ci
+data:
+  # Each registration takes one job (--ephemeral): Gitea drops the runner when the job ends, the
+  # loop wipes the work directory and registers again. The container itself, its BuildKit
+  # sidecar and their caches live on, so the jobs of one runner are not isolated from each
+  # other: they share a trust level, which is why the platform and the products have separate
+  # runners. The registration token is the one in the pod's Secret.
+  runner.sh: |
+    set -u
+    cat /sdlc-ca/ca.crt >> /etc/ssl/certs/ca-certificates.crt
+    export NODE_EXTRA_CA_CERTS=/sdlc-ca/ca.crt
+    while :; do
+      rm -rf /data /root/.cache/act && mkdir -p /data && cd /data || exit 1
+      if /runner-bin/act_runner register --no-interactive --ephemeral \
+        --instance http://gitea-http.gitea.svc:3000 --token "$(cat /registration/token)" \
+        --name "$RUNNER_NAME-$(date +%s)" --labels "$RUNNER_LABELS"; then
+        /runner-bin/act_runner daemon || sleep 5
+      else
+        sleep 15
+      fi
+    done
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: buildkitd
+  namespace: ci
+data:
+  # BuildKit pushes to gitea.sdlc.internal through Traefik, whose certificate chains to the
+  # local CA.
+  buildkitd.toml: |
+    [registry."gitea.sdlc.internal"]
+      ca = ["/sdlc-ca/ca.crt"]

@@ -1,0 +1,34 @@
+# Builds the platform's own images on every push to main and pushes them as
+# gitea.sdlc.internal/platform/<directory>:<commit> (design decision 3). Runs only on ci-platform,
+# the runner registered on this repository alone, and pushes with ci-platform's token, a secret
+# of this repository that the target projects' workflows cannot read. A directory without a
+# Dockerfile yet is skipped.
+name: images
+on:
+  push:
+    branches: [main]
+jobs:
+  images:
+    runs-on: platform
+    steps:
+      - uses: actions/checkout@v4
+      - name: buildctl
+        run: |
+          curl -fsSL -o /tmp/buildkit.tgz https://github.com/moby/buildkit/releases/download/v0.34.2/buildkit-v0.34.2.linux-amd64.tar.gz
+          echo "b9f18b8e37eb450e9e5df03117045237cdd12d3c4a0034ffeeaa857852a15e13  /tmp/buildkit.tgz" | sha256sum -c -
+          tar -xzf /tmp/buildkit.tgz -C /usr/local bin/buildctl
+      - name: registry login
+        env:
+          TOKEN: ${{ secrets.PLATFORM_REGISTRY_TOKEN }}
+        run: |
+          mkdir -p ~/.docker
+          printf '{"auths":{"gitea.sdlc.internal":{"auth":"%s"}}}' "$(printf 'ci-platform:%s' "$TOKEN" | base64 -w0)" > ~/.docker/config.json
+      - name: build and push
+        run: |
+          for dir in orchestrator agent-runner; do
+            if [ ! -f "$dir/Dockerfile" ]; then echo "$dir: no Dockerfile yet, skipped"; continue; fi
+            buildctl --addr unix:///run/buildkit/buildkitd.sock build --frontend dockerfile.v0 \
+              --local context="$dir" --local dockerfile="$dir" \
+              --opt build-arg:COMMIT=${{ github.sha }} \
+              --output type=image,name=gitea.sdlc.internal/platform/$dir:${{ github.sha }},push=true
+          done

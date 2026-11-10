@@ -41,11 +41,15 @@ APPARMOR_PROFILE=platform/apparmor/cri-containerd.apparmor.d
 APPARMOR_TARGET=/etc/apparmor.d/cri-containerd.apparmor.d
 APPARMOR_NAME=cri-containerd.apparmor.d
 GITEA_HOST=https://gitea.sdlc.internal
-GITEA_REPO=sdlc/ai-native-sdlc
+# This repository lives in its own organization, platform, apart from the target projects in sdlc,
+# so nothing granted on sdlc (its runners, teams and CI tokens, which agent-written workflows can
+# reach) reaches the platform. Earlier versions kept it at sdlc/ai-native-sdlc.
+GITEA_REPO=platform/ai-native-sdlc
+OLD_GITEA_REPO=sdlc/ai-native-sdlc
 GITEA_REMOTE=$GITEA_HOST/$GITEA_REPO.git
 # Argo CD reads repositories over the in-cluster Service, not through the ingress: one
-# credential template for every repository of the sdlc organization.
-ARGOCD_CREDS_URL=http://gitea-http.gitea.svc:3000/sdlc/
+# credential template per organization.
+ARGOCD_CREDS=(platform sdlc)
 # Created through the Gitea API for this cluster and replaced after a rebuild, so it is not a
 # value in secrets.env.
 PUSH_TOKEN_FILE=$SECRETS_DIR/gitea-push-token
@@ -303,6 +307,26 @@ set_node_network() {
   sudo ip rule add $rule
 }
 
+# BuildKit's own profiles (design decision 12): the CI pods' BuildKit sidecars run under them.
+BUILDKIT_APPARMOR=platform/apparmor/sdlc-buildkit
+BUILDKIT_APPARMOR_TARGET=/etc/apparmor.d/sdlc-buildkit
+BUILDKIT_SECCOMP=platform/seccomp/sdlc-buildkit.json
+BUILDKIT_SECCOMP_TARGET=/var/lib/kubelet/seccomp/profiles/sdlc-buildkit.json
+
+# The kubelet's directory is root-only, hence sudo_cat for the seccomp file.
+buildkit_profiles_current() {
+  cmp -s "$BUILDKIT_APPARMOR" "$BUILDKIT_APPARMOR_TARGET" && aa-exec -p sdlc-buildkit -- true 2>/dev/null &&
+    cmp -s "$BUILDKIT_SECCOMP" <(sudo_cat "$BUILDKIT_SECCOMP_TARGET")
+}
+
+install_buildkit_profiles() {
+  apparmor_parser -Q -K -T "$BUILDKIT_APPARMOR"
+  jq -e . "$BUILDKIT_SECCOMP" >/dev/null
+  sudo install -m 0644 "$BUILDKIT_APPARMOR" "$BUILDKIT_APPARMOR_TARGET"
+  sudo apparmor_parser -r -W "$BUILDKIT_APPARMOR_TARGET"
+  sudo install -D -m 0644 "$BUILDKIT_SECCOMP" "$BUILDKIT_SECCOMP_TARGET"
+}
+
 # Two processes under the container profile can signal and trace each other. aa-exec gives a
 # process of your own user the same stacked label that containers get, so this needs no sudo
 # and fails while the profile is missing or lacks the fix.
@@ -417,7 +441,8 @@ expand() {
   printf '%s' "$out"
 }
 
-# Every Secret from the manifest's put lines, plus the root CA for cert-manager, as one
+# Every Secret from the manifest's put lines, plus the root CA for cert-manager and its public
+# certificate for CI, as one
 # kubectl List. Values travel through pipes only, never through command-line arguments.
 render_secrets() {
   local target key template value
@@ -428,6 +453,8 @@ render_secrets() {
     done
     printf 'cert-manager/root-ca tls.crt %s\n' "$(base64 -w0 <"$CA_CRT")"
     printf 'cert-manager/root-ca tls.key %s\n' "$(base64 -w0 <"$CA_KEY")"
+    # The public certificate alone, for BuildKit's pushes to gitea.sdlc.internal.
+    printf 'ci/sdlc-ca ca.crt %s\n' "$(base64 -w0 <"$CA_CRT")"
   } | jq -Rn --arg manager "$FIELD_MANAGER" '
     [inputs | split(" ") | {target: .[0], key: .[1], value: .[2]}]
     | group_by(.target)
@@ -453,7 +480,7 @@ ensure_namespace() {
 }
 
 secret_namespaces() {
-  { awk '$1 == "put" { split($2, t, "/"); print t[1] }' "$MANIFEST"; echo cert-manager; } | sort -u
+  { awk '$1 == "put" { split($2, t, "/"); print t[1] }' "$MANIFEST"; echo cert-manager; echo ci; } | sort -u
 }
 
 cluster_secrets_current() {
@@ -487,6 +514,7 @@ phase_host() {
   step "node address $NODE_IP on $NODE_IFACE; traffic to pods bypasses VPN rules" node_network_in_place set_node_network
   step "k3s config: node address $NODE_IP, bundled Traefik off" k3s_config_current write_k3s_config
   step "AppArmor lets processes of one container signal each other (containerd#14485)" apparmor_profile_current install_apparmor_profile
+  step "BuildKit's AppArmor and seccomp profiles (sdlc-buildkit) are installed" buildkit_profiles_current install_buildkit_profiles
   step "k3s $K3S_VERSION installed and running" k3s_installed install_k3s
   step "~/.kube/config points at k3s" kubeconfig_works write_kubeconfig
   step "node is Ready" node_ready wait_node_ready
@@ -611,6 +639,14 @@ gitea_api() {
     "${GITEA_URL:?}/api/v1$2"
 }
 
+# gitea_api_stdin <method> <path>: the same, with the JSON body from stdin, for bodies that hold
+# a secret.
+gitea_api_stdin() {
+  curl -fsS --max-time 20 -X "$1" -H 'Content-Type: application/json' --data @- \
+    --netrc-file <(printf 'machine 127.0.0.1 login gitea_admin password %s\n' "$(secret_value GITEA_ADMIN_PASSWORD)") \
+    "${GITEA_URL:?}/api/v1$2"
+}
+
 # gitea_token_works <token>: the token can read the repository. A yes/no check: a token from
 # an earlier cluster gets 401, which is expected and not printed.
 gitea_token_works() {
@@ -625,11 +661,37 @@ new_gitea_token() {
   gitea_api POST /users/gitea_admin/tokens "{\"name\": \"$1\", \"scopes\": [\"$2\"]}" | jq -er .sha1
 }
 
-org_exists() { [[ -n ${GITEA_URL-} ]] && gitea_api GET /orgs/sdlc >/dev/null 2>&1; }
-create_org() { gitea_api POST /orgs '{"username": "sdlc", "visibility": "private"}' >/dev/null; }
+ORGS=(platform sdlc)
 
-repo_exists() { [[ -n ${GITEA_URL-} ]] && gitea_api GET "/repos/$GITEA_REPO" >/dev/null 2>&1; }
-create_repo() { gitea_api POST /orgs/sdlc/repos '{"name": "ai-native-sdlc", "private": true}' >/dev/null; }
+orgs_exist() {
+  local org
+  [[ -n ${GITEA_URL-} ]] || return 1
+  for org in "${ORGS[@]}"; do gitea_api GET "/orgs/$org" >/dev/null 2>&1 || return 1; done
+}
+
+create_orgs() {
+  local org
+  for org in "${ORGS[@]}"; do
+    gitea_api GET "/orgs/$org" >/dev/null 2>&1 ||
+      gitea_api POST /orgs "$(jq -nc --arg org "$org" '{username: $org, visibility: "private"}')" >/dev/null
+  done
+}
+
+# Gitea's API answers a moved repository's old path with the new one, so "exists" means its real
+# full name is the current path.
+repo_exists() {
+  [[ -n ${GITEA_URL-} ]] && [[ $(gitea_api GET "/repos/$GITEA_REPO" 2>/dev/null | jq -r .full_name) == "$GITEA_REPO" ]]
+}
+
+# A repository still at the old path is moved, history, issues and settings included; Gitea
+# keeps redirecting the old path. Otherwise it is created.
+create_repo() {
+  if [[ $(gitea_api GET "/repos/$OLD_GITEA_REPO" 2>/dev/null | jq -r .full_name) == "$OLD_GITEA_REPO" ]]; then
+    gitea_api POST "/repos/$OLD_GITEA_REPO/transfer" "{\"new_owner\": \"${GITEA_REPO%%/*}\"}" >/dev/null
+  else
+    gitea_api POST "/orgs/${GITEA_REPO%%/*}/repos" "{\"name\": \"${GITEA_REPO#*/}\", \"private\": true}" >/dev/null
+  fi
+}
 
 push_token_works() {
   [[ -n ${GITEA_URL-} && -s $PUSH_TOKEN_FILE ]] && gitea_token_works "$(<"$PUSH_TOKEN_FILE")"
@@ -644,9 +706,9 @@ create_push_token() {
 # Service accounts. Nobody signs in as them: the password is random and never stored, and each
 # token lives only where it is used. agent is the orchestrator, agent-runner pushes from agent
 # runs (neither may merge into main, see seed-projects.sh), reader only reads: Argo CD reads
-# repositories and k3s pulls images with its tokens.
-SERVICE_ACCOUNTS=(agent agent-runner reader)
-READERS_TEAM=readers
+# repositories and k3s pulls images with its tokens. ci pushes the products' images and
+# releases, ci-platform the platform's images.
+SERVICE_ACCOUNTS=(agent agent-runner reader ci ci-platform)
 
 gitea_user_exists() { [[ -n ${GITEA_URL-} ]] && gitea_api GET "/users/$1" >/dev/null 2>&1; }
 
@@ -707,44 +769,157 @@ create_agent_runner_token() {
   new_user_token agent-runner agent-runs write:repository | store_token sdlc-agents/gitea-agent-runner agent-runner
 }
 
-# readers_team_id: the id of the team that may read every repository and package of sdlc.
-readers_team_id() {
-  gitea_api GET /orgs/sdlc/teams 2>/dev/null | jq -r --arg team "$READERS_TEAM" '.[] | select(.name == $team) | .id'
+# Team memberships, "<org> <team> <member> <unit=access,...>". Packages belong to an
+# organization, not to a repository, so pushing and pulling images needs a team. The platform's
+# repository and images live in their own organization, platform: the products' CI can reach sdlc
+# only, so a workflow an agent changed cannot touch the platform's code, releases or images.
+TEAMS=(
+  "sdlc readers reader repo.code=read,repo.packages=read"
+  "platform readers reader repo.code=read,repo.packages=read"
+  "sdlc ci ci repo.code=read,repo.packages=write,repo.releases=write"
+  "platform ci ci-platform repo.packages=write"
+)
+
+# team_id <org> <team>: the team's id, empty when it does not exist.
+team_id() {
+  gitea_api GET "/orgs/$1/teams" 2>/dev/null | jq -r --arg team "$2" '.[] | select(.name == $team) | .id'
 }
 
-reader_in_team() {
-  local id
-  [[ -n ${GITEA_URL-} ]] && id=$(readers_team_id) && [[ -n $id ]] &&
-    gitea_api GET "/teams/$id/members/reader" >/dev/null 2>&1
+# units_json <unit=access,...>: the units as Gitea's units_map.
+units_json() { jq -nc --arg units "$1" '$units | split(",") | map(split("=") | {(.[0]): .[1]}) | add'; }
+
+# A team is current when it grants exactly these units (others "none") and has the member.
+team_member_ok() {
+  local org team member units id
+  read -r org team member units <<<"$1"
+  id=$(team_id "$org" "$team") && [[ -n $id ]] &&
+    gitea_api GET "/teams/$id" | jq -e --argjson want "$(units_json "$units")" \
+      '.units_map | with_entries(select(.value != "none")) == $want' >/dev/null &&
+    gitea_api GET "/teams/$id/members/$member" >/dev/null 2>&1
 }
 
-# Packages belong to the organization, not to a repository, so pulling needs a team grant.
-add_reader_to_team() {
-  local id
-  id=$(readers_team_id)
-  [[ -n $id ]] || id=$(gitea_api POST /orgs/sdlc/teams "$(jq -nc --arg team "$READERS_TEAM" '{
-    name: $team, description: "Read every repository and package: Argo CD and image pulls",
-    permission: "read", includes_all_repositories: true,
-    units_map: {"repo.code": "read", "repo.packages": "read"}}')" | jq -er .id)
-  gitea_api PUT "/teams/$id/members/reader" >/dev/null
+teams_current() {
+  local spec
+  [[ -n ${GITEA_URL-} ]] || return 1
+  for spec in "${TEAMS[@]}"; do team_member_ok "$spec" || return 1; done
 }
 
-# Argo CD reads every repository under sdlc/ through one credential template (repo-creds) with
-# reader's token, so a new target project needs no Secret of its own.
+# A team covers every repository of its organization, with exactly the listed units.
+ensure_teams() {
+  local spec org team member units id body
+  for spec in "${TEAMS[@]}"; do
+    team_member_ok "$spec" && continue
+    read -r org team member units <<<"$spec"
+    body=$(jq -nc --arg team "$team" --argjson units "$(units_json "$units")" '{
+      name: $team, includes_all_repositories: true,
+      permission: (if ($units | any(.[]; . == "write")) then "write" else "read" end),
+      units_map: $units}')
+    id=$(team_id "$org" "$team")
+    if [[ -n $id ]]; then
+      gitea_api PATCH "/teams/$id" "$body" >/dev/null
+    else
+      id=$(gitea_api POST "/orgs/$org/teams" "$body" | jq -er .id)
+    fi
+    gitea_api PUT "/teams/$id/members/$member" >/dev/null
+  done
+}
+
+# CI's push tokens live only in Gitea Actions secrets: the products' one for every repository of
+# sdlc, the platform's one for this repository alone. Gitea never shows a secret again, so the
+# last eight characters of each token that went into a secret are recorded in ci/ci-push-tokens,
+# and a secret is current while its account's ci-push token still ends with them. A run that
+# stopped between replacing a token and storing it leaves a mismatch, and the next run repairs it.
+CI_TOKENS=("ci /orgs/sdlc/actions/secrets/CI_REGISTRY_TOKEN write:package write:repository"
+  "ci-platform /repos/$GITEA_REPO/actions/secrets/PLATFORM_REGISTRY_TOKEN write:package")
+
+token_last_eight() { # <user> <token name>
+  gitea_api GET "/users/$1/tokens" 2>/dev/null | jq -r --arg name "$2" '.[] | select(.name == $name) | .token_last_eight'
+}
+
+ci_secret_exists() { # <secret path>
+  gitea_api GET "${1%/*}" 2>/dev/null | jq -e --arg name "${1##*/}" 'any(.[]; .name == $name)' >/dev/null
+}
+
+ci_tokens_current() {
+  local entry user path recorded
+  [[ -n ${GITEA_URL-} ]] || return 1
+  for entry in "${CI_TOKENS[@]}"; do
+    read -r user path _ <<<"$entry"
+    recorded=$(cluster_secret ci/ci-push-tokens "$user")
+    [[ -n $recorded && $(token_last_eight "$user" ci-push) == "$recorded" ]] && ci_secret_exists "$path" || return 1
+  done
+}
+
+create_ci_tokens() {
+  local entry user path scopes token
+  for entry in "${CI_TOKENS[@]}"; do
+    read -r user path scopes <<<"$entry"
+    # shellcheck disable=SC2086 # scopes are separate arguments
+    token=$(new_user_token "$user" ci-push $scopes)
+    printf '%s' "$token" | jq -Rnc '{data: input}' | gitea_api_stdin PUT "$path" >/dev/null
+    jq -n --arg user "$user" --arg tail "${token: -8}" --arg manager "$FIELD_MANAGER" '{
+      apiVersion: "v1", kind: "Secret",
+      metadata: {namespace: "ci", name: "ci-push-tokens", labels: {"app.kubernetes.io/managed-by": $manager}},
+      stringData: {($user): $tail}}' | kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f - >/dev/null
+  done
+}
+
+# Runner registration tokens, in Secrets of namespace ci. Gitea returns the same token until it
+# is reset, so a Secret that still matches is current. ci-platform registers on this repository
+# only, ci-products on the organization.
+RUNNERS=("ci/runner-platform /repos/$GITEA_REPO" "ci/runner-products /orgs/sdlc")
+
+registration_token() { gitea_api POST "$1/actions/runners/registration-token" | jq -er .token; }
+
+# The endpoint is a POST that creates a token when there is none, so a dry run only checks that
+# the Secrets are there.
+runner_tokens_current() {
+  local entry secret path
+  [[ -n ${GITEA_URL-} ]] || return 1
+  if $DRY_RUN; then
+    for entry in "${RUNNERS[@]}"; do [[ -n $(cluster_secret "${entry%% *}" token) ]] || return 1; done
+    return 0
+  fi
+  for entry in "${RUNNERS[@]}"; do
+    read -r secret path <<<"$entry"
+    [[ -n $(cluster_secret "$secret" token) && $(cluster_secret "$secret" token) == "$(registration_token "$path" 2>/dev/null)" ]] || return 1
+  done
+}
+
+store_runner_tokens() {
+  local entry secret path
+  for entry in "${RUNNERS[@]}"; do
+    read -r secret path <<<"$entry"
+    registration_token "$path" | store_token "$secret" "${secret#ci/}"
+  done
+}
+
+# Argo CD reads every repository of both organizations through one credential template
+# (repo-creds) per organization, with reader's token, so a new target project needs no Secret of
+# its own.
 argocd_creds_work() {
-  [[ -n ${GITEA_URL-} ]] && gitea_token_works "$(cluster_secret argocd/creds-sdlc password)" &&
+  local org
+  [[ -n ${GITEA_URL-} ]] || return 1
+  for org in "${ARGOCD_CREDS[@]}"; do
+    [[ $(cluster_secret "argocd/creds-$org" url) == "http://gitea-http.gitea.svc:3000/$org/" ]] || return 1
+  done
+  gitea_token_works "$(cluster_secret argocd/creds-platform password)" &&
     ! kubectl get secret -n argocd repo-ai-native-sdlc >/dev/null 2>&1
 }
 
-# The per-repository Secret of earlier versions is removed once the template is in place.
+# The per-repository Secret of earlier versions is removed once the templates are in place.
 create_argocd_creds() {
+  local org token
   ensure_namespace argocd
-  new_user_token reader argocd read:repository | jq -Rn --arg url "$ARGOCD_CREDS_URL" --arg manager "$FIELD_MANAGER" '{
-    apiVersion: "v1", kind: "Secret",
-    metadata: {namespace: "argocd", name: "creds-sdlc",
-      labels: {"argocd.argoproj.io/secret-type": "repo-creds", "app.kubernetes.io/managed-by": $manager}},
-    stringData: {type: "git", url: $url, username: "reader", password: input}
-  }' | kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f - >/dev/null
+  token=$(new_user_token reader argocd read:repository)
+  for org in "${ARGOCD_CREDS[@]}"; do
+    printf '%s' "$token" | jq -Rn --arg org "$org" --arg manager "$FIELD_MANAGER" '{
+      apiVersion: "v1", kind: "Secret",
+      metadata: {namespace: "argocd", name: ("creds-" + $org),
+        labels: {"argocd.argoproj.io/secret-type": "repo-creds", "app.kubernetes.io/managed-by": $manager}},
+      stringData: {type: "git", url: ("http://gitea-http.gitea.svc:3000/" + $org + "/"), username: "reader", password: input}
+    }' | kubectl apply --server-side --field-manager="$FIELD_MANAGER" -f - >/dev/null
+  done
   kubectl delete secret -n argocd repo-ai-native-sdlc --ignore-not-found >/dev/null
 }
 
@@ -754,6 +929,11 @@ origin_is_gitea() { [[ $(git remote get-url origin 2>/dev/null) == "$GITEA_REMOT
 move_origin() {
   local current github
   current=$(git remote get-url origin 2>/dev/null || true)
+  # An origin on this Gitea, at the repository's old path, only gets the new one.
+  if [[ $current == "$GITEA_HOST/"* ]]; then
+    git remote set-url origin "$GITEA_REMOTE"
+    return
+  fi
   if [[ -n $current ]]; then
     github=$(git remote get-url github 2>/dev/null || true)
     if [[ -z $github ]]; then
@@ -827,14 +1007,16 @@ set_default_branch() { gitea_api PATCH "/repos/$GITEA_REPO" '{"default_branch": 
 # Creates the Gitea org and repo, moves origin to Gitea and pushes branches and tags.
 phase_repository() {
   start_gitea_forward
-  step "Gitea org sdlc exists" org_exists create_org
-  step "private repo $GITEA_REPO exists" repo_exists create_repo
+  step "Gitea orgs ${ORGS[*]} exist" orgs_exist create_orgs
+  step "private repo $GITEA_REPO exists (moved from $OLD_GITEA_REPO when there)" repo_exists create_repo
   step "push token in the secrets directory works" push_token_works create_push_token
   step "service accounts ${SERVICE_ACCOUNTS[*]} exist" service_accounts_exist create_service_accounts
-  step "reader is in team $READERS_TEAM (reads every repository and package)" reader_in_team add_reader_to_team
-  step "Argo CD reads every sdlc repository with reader's token" argocd_creds_work create_argocd_creds
+  step "teams: reader reads sdlc and platform, ci pushes to sdlc, ci-platform to platform" teams_current ensure_teams
+  step "Argo CD reads every platform/ and sdlc/ repository with reader's token" argocd_creds_work create_argocd_creds
   step "agent's token in sdlc/gitea-agent works" agent_token_works create_agent_token
   step "agent-runner's token in sdlc-agents/gitea-agent-runner works" agent_runner_token_works create_agent_runner_token
+  step "CI push tokens are Actions secrets (sdlc: CI_REGISTRY_TOKEN, $GITEA_REPO: PLATFORM_REGISTRY_TOKEN)" ci_tokens_current create_ci_tokens
+  step "runner registration tokens are in ci/runner-platform and ci/runner-products" runner_tokens_current store_runner_tokens
   step "origin is $GITEA_REMOTE (the old one kept as github)" origin_is_gitea move_origin
   step "credential helper for $GITEA_HOST reads the push token" credential_helper_set set_credential_helper
   step "Gitea has every local branch and tag" gitea_has_local_refs push_all_refs

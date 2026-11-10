@@ -73,17 +73,27 @@ platform/apparmor/, seccomp/     host profiles the bootstrap installs: container
 
 ### 2. Registry: Gitea's container registry, pulled by k3s directly
 
-Images live at `gitea.sdlc.internal/sdlc/<name>:<tag>`, in Gitea's built-in package registry
-under the `sdlc` organization. The bootstrap's host phase writes `/etc/rancher/k3s/registries.yaml`
-with the local CA and a read-only pull token for `gitea.sdlc.internal`, and restarts k3s only when
-the file changed. containerd on the host resolves the name through `/etc/hosts` to Traefik, so
+Images live in Gitea's built-in package registry, in two organizations: the platform's own
+images at `gitea.sdlc.internal/platform/<name>:<commit>`, the target projects' at
+`gitea.sdlc.internal/sdlc/<name>:<commit>`. The bootstrap's last phase writes
+`/etc/rancher/k3s/registries.yaml` with the local CA and a read-only pull token for
+`gitea.sdlc.internal`, and restarts k3s only when the file changed; it comes last because the
+token needs Gitea. containerd on the host resolves the name through `/etc/hosts` to Traefik, so
 pulls work offline, and no namespace needs an `imagePullSecret`.
 
 - **Who may push and pull (spike 1.6):** packages belong to the organization, not to a
-  repository, so a repository collaborator gets `401`. Both the pull account and the push
-  account are members of an `sdlc` team with package access (read for the pull token, write for
-  CI). Gitea Actions' own job token is refused by the registry, so CI pushes with a token of its
-  own (decision 12). `registries.yaml` names the local CA as `ca_file`.
+  repository, so a repository collaborator gets `401`, and write access covers every package of
+  the organization. The pull account `reader` is in a read team of both organizations; each
+  CI account is in a write team of one (decision 12). Gitea Actions' own job token is refused by
+  the registry, so CI pushes with a token of its own. `registries.yaml` names the local CA as
+  `ca_file`.
+- **Why two organizations:** a target project's workflow is written by an agent and runs on
+  every push, before review, on a runner registered on the whole `sdlc` organization. Anything
+  granted on `sdlc` is within its reach: the organization's runner registration token (a job
+  could register a runner of its own with any label), its teams and its CI token. So this
+  repository moved to `platform/ai-native-sdlc` too, next to the platform's images; the
+  bootstrap transfers an existing `sdlc/ai-native-sdlc` there with its history, and Gitea
+  keeps redirecting the old path. Found in the code review of group 3.
 - **Alternatives:** a separate `registry:2` (one more component with its own auth and storage);
   pushing to Gitea's in-cluster HTTP service (the image name would differ from the pull name, and
   Gitea's token realm redirects to `https://gitea.sdlc.internal` anyway).
@@ -92,7 +102,8 @@ pulls work offline, and no namespace needs an `imagePullSecret`.
 
 The orchestrator will change often, so it is built and deployed like a product. On every push to
 `main` of this repository, `.gitea/workflows/images.yaml` builds `orchestrator` and `agent-runner`
-and pushes both as `:<commit>`. The orchestrator's Application passes `$ARGOCD_APP_REVISION` to
+and pushes both as `gitea.sdlc.internal/platform/<name>:<commit>`, with a token that is a secret
+of this repository alone. The orchestrator's Application passes `$ARGOCD_APP_REVISION` to
 its manifests as the tag of both images, so a push to `main` rolls the orchestrator out within
 minutes, and the Jobs it starts use the agent image from the same commit. The rule is the same as
 for products (D19), and a commit SHA is an exact version, as `gitops-reconciliation` requires.
@@ -390,10 +401,11 @@ an environment without a commit in the product's repository.
   Implementing straight to Code review; that is how the loop runs before group 9 adds previews.
 - **The preview id** is the tracker's project identifier and work item number, lower case
   (`ewa-12`), taken from the branch name the orchestrator chose.
-- **Repository access:** the bootstrap adds an Argo CD credential template for the prefix
-  `http://gitea-http.gitea.svc:3000/sdlc/`, so every project repository is readable without a
-  per-repo secret. Its account needs read access to every repository (Gitea answers `404`
-  otherwise), so it belongs to an `sdlc` team that covers all repositories.
+- **Repository access:** the bootstrap adds an Argo CD credential template for each
+  organization's prefix (`http://gitea-http.gitea.svc:3000/platform/` and `…/sdlc/`), so every
+  repository is readable without a per-repo secret. Its account needs read access to every
+  repository (Gitea answers `404` otherwise), so it belongs to a team of each organization that
+  covers all of its repositories.
 - **Fallback if the matrix spike fails:** one ApplicationSet per project, generated from the same
   directory by a small script; the spec's "one configuration entry" is then kept by the script.
 
@@ -405,7 +417,7 @@ an environment without a commit in the product's repository.
   container, so there is no Docker daemon and no privileged Docker-in-Docker. Workflows download
   pinned `buildctl` and `crane` binaries and check their checksums. One job at a time per runner.
   `actions/checkout` clones over the runner's in-cluster instance URL, so it needs no CA.
-- **Two runners in namespace `ci`:** `ci-platform`, registered on `sdlc/ai-native-sdlc` with the
+- **Two runners in namespace `ci`:** `ci-platform`, registered on `platform/ai-native-sdlc` with the
   label `platform`, and `ci-products`, registered on the `sdlc` organization with the label
   `ubuntu-latest` (decision 3). Registration tokens come from Gitea's admin API in the bootstrap.
 - **BuildKit is a sidecar of each runner, in the pod's own user namespace** (`hostUsers: false`):
@@ -425,8 +437,14 @@ an environment without a commit in the product's repository.
   a container's profile is stacked with `unconfined` (the cause of containerd#14485), which
   Ubuntu's `apparmor_restrict_unprivileged_userns` then refuses, whatever our profile allows.
   Unconfined AppArmor and seccomp, the usual advice, were rejected.
-- **Pushing:** a `ci` account in an `sdlc` team with write access to packages and releases; its
-  token is an organization Actions secret. Gitea's job token is refused by the registry.
+- **Pushing:** the products' CI pushes as `ci`, in a team of `sdlc` with write access to
+  packages and releases, whose token is an Actions secret of the `sdlc` organization. The
+  platform's CI pushes as `ci-platform`, in a team of the `platform` organization, whose token
+  is an Actions secret of this repository only (decision 2). Gitea's job token is refused by the
+  registry.
+- **Ephemeral registrations:** each runner registers for one job (`--ephemeral`) in a loop, so
+  every job starts in a wiped directory, Gitea drops finished runners, and the pod and its
+  BuildKit cache stay.
 - **Workflows in the product repository:** `ci.yaml` on every push: `npm ci`, tests, build, image
   `:<sha>`. `release.yaml` on push to `main`: next minor tag from the latest `v*` tag, a Gitea
   release whose notes list the `EWA-*` ids from the merge commits since the previous tag, and the

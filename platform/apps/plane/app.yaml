@@ -13,7 +13,7 @@ spec:
   # Rendered through kustomization.yaml, which inflates the chart (version pinned there) with
   # values.yaml and patches its output.
   source:
-    repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
+    repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
     targetRevision: main
     path: platform/apps/plane
   syncPolicy:

@@ -18,7 +18,7 @@ spec:
         releaseName: cert-manager
         valueFiles:
           - $values/platform/apps/cert-manager/values.yaml
-    - repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
+    - repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
       targetRevision: main
       ref: values
   syncPolicy:

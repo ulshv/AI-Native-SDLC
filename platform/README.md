@@ -91,6 +91,7 @@ Phase 2 changes the host, and each change is checked first and skipped when alre
 | Both of the above come back on every k3s start, including after a reboot | `/etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf` |
 | Processes of one container may signal each other under AppArmor again: Ubuntu's kernels from 7.0.0-42 stack containerd's profile, which then denies it ([containerd#14485](https://github.com/containerd/containerd/issues/14485)). The file is containerd's own profile plus two rules; apparmor.service loads it at boot, before k3s, so containerd keeps it | `/etc/apparmor.d/cri-containerd.apparmor.d`, from [`apparmor/`](apparmor/cri-containerd.apparmor.d) |
 | k3s pulls images from Gitea's registry as `reader` (written in phase 7, see [Container registry](#container-registry)) | `/etc/rancher/k3s/registries.yaml` |
+| BuildKit's own AppArmor and seccomp profiles for the CI pods (see [CI](#ci)) | `/etc/apparmor.d/sdlc-buildkit`, `/var/lib/kubelet/seccomp/profiles/sdlc-buildkit.json`, from [`apparmor/`](apparmor/sdlc-buildkit) and [`seccomp/`](seccomp/sdlc-buildkit.json) |
 | Cluster access for you | `~/.kube/config`; a config that was already there is kept as `~/.kube/config.before-ai-native-sdlc` |
 | Service names from [`hosts.txt`](hosts.txt) → `127.0.0.1` | a block between `# BEGIN ai-native-sdlc` and `# END ai-native-sdlc` in `/etc/hosts`; the original is kept as `/etc/hosts.before-ai-native-sdlc` |
 | Root CA trusted by the system (curl, git, most tools) | `/usr/local/share/ca-certificates/ai-native-sdlc.crt` |
@@ -122,8 +123,10 @@ sudo rm -f /etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf \
   && sudo ip link del sdlc0 \
   && sudo ip rule del to 10.42.0.0/16 lookup main priority 100
 
-# 4. the registry access (k3s-uninstall.sh removes it with the rest of /etc/rancher)
-sudo rm -f /etc/rancher/k3s/registries.yaml
+# 4. the registry access (k3s-uninstall.sh removes it with the rest of /etc/rancher), and
+#    BuildKit's profiles
+sudo rm -f /etc/rancher/k3s/registries.yaml /var/lib/kubelet/seccomp/profiles/sdlc-buildkit.json \
+  && sudo apparmor_parser -R /etc/apparmor.d/sdlc-buildkit && sudo rm -f /etc/apparmor.d/sdlc-buildkit
 
 # 5. the AppArmor profile; after the reboot containerd loads its own one again
 sudo rm -f /etc/apparmor.d/cri-containerd.apparmor.d && sudo reboot
@@ -143,9 +146,11 @@ and the secrets directory stay; delete them by hand if you want them gone.
 
 Phase 4 makes the platform's Gitea the home of this repository:
 
-- creates the org `sdlc` and the private repository `sdlc/ai-native-sdlc`;
+- creates the organizations `platform` (this repository and the platform's images) and `sdlc`
+  (the target projects), and the private repository `platform/ai-native-sdlc`; a repository
+  still at `sdlc/ai-native-sdlc` from an earlier version is moved there, with its history;
 - renames the old `origin` (GitHub) to `github`, so nothing it references is lost, and adds
-  `https://gitea.sdlc.internal/sdlc/ai-native-sdlc.git` as `origin`;
+  `https://gitea.sdlc.internal/platform/ai-native-sdlc.git` as `origin`;
 - pushes every local branch and tag, and sets `main` to track `origin/main`;
 - creates the admin's Gitea token `bootstrap-push` (write access to repositories) in
   `~/.config/ai-native-sdlc/gitea-push-token`;
@@ -155,7 +160,9 @@ Phase 4 makes the platform's Gitea the home of this repository:
 |---|---|---|
 | `agent` | the orchestrator: comments, pull requests, merges into `development` where a target project allows it | `sdlc/gitea-agent` (write to repositories and issues) |
 | `agent-runner` | agent runs: pushes feature branches, may merge nothing | `sdlc-agents/gitea-agent-runner` (write to repositories) |
-| `reader` | reads every repository and package of `sdlc`, as a member of the team `readers` | `argocd/creds-sdlc` (Argo CD's credential template for every `sdlc/` repository) and `/etc/rancher/k3s/registries.yaml` (image pulls, phase 7) |
+| `reader` | reads every repository and package of `platform` and `sdlc` (team `readers` in both) | `argocd/creds-platform` and `argocd/creds-sdlc` (Argo CD's credential templates, one per organization) and `/etc/rancher/k3s/registries.yaml` (image pulls, phase 7) |
+| `ci` | the target projects' CI: pushes their images and creates their releases (team `ci` of `sdlc`) | the Actions secret `CI_REGISTRY_TOKEN` of the `sdlc` organization |
+| `ci-platform` | this repository's CI: pushes the platform's images (team `ci` of `platform`) | the Actions secret `PLATFORM_REGISTRY_TOKEN` of `platform/ai-native-sdlc` alone |
 
 Nobody signs in as a service account: its password is random and never stored. Every token
 belongs to this cluster and is replaced after a rebuild; a re-run replaces only a token that
@@ -167,21 +174,35 @@ plain `git push` goes to `gitea.sdlc.internal`: a credential helper in this clon
 `.git/config`, scoped to that host, reads the push token from the secrets directory when git
 asks, so the token itself is never written into `.git/config` or `~/.git-credentials`.
 
+**Rollback** to GitHub as `origin`:
+
+```bash
+git remote remove origin && git remote rename github origin
+git config --remove-section credential.https://gitea.sdlc.internal
+```
+
 ## Container registry
 
-Images live in Gitea's own registry as `gitea.sdlc.internal/sdlc/<name>:<tag>`, under the
-organization, not under a repository. Phase 7, the last one, lets k3s pull them in any
-namespace without a pull secret: it writes `/etc/rancher/k3s/registries.yaml` (mode 0600)
-with `reader`'s read-only package token and the local CA, and restarts k3s, which reads the
-file only on start. Pods keep running through the restart; the API is away for about half a
-minute. A re-run leaves the file and k3s alone while the token works. It comes last because
-the token needs Gitea, which runs only from phase 3.
+Images live in Gitea's own registry, and a package belongs to an organization, not to a
+repository, so write access to it is granted per organization. Hence two of them:
 
-Pushing needs write access to the organization's packages, which only CI's own account `ci`
-gets; a repository collaborator is refused, and so is Gitea Actions' job token.
+- `gitea.sdlc.internal/platform/<name>:<commit>`: the platform's own images (the orchestrator,
+  the agent runner), pushed only by this repository's CI;
+- `gitea.sdlc.internal/sdlc/<name>:<commit>`: the target projects' images, pushed by their CI.
 
-The smoke check `registry_pull` runs the newest image of `sdlc` in a pod, asking the registry
-each time; while the registry is empty it only says so.
+The target projects' workflows are written by agents and run on every push, before anyone
+reviews them, so their token must not reach the platform's images; it can push to `sdlc`
+only. A repository collaborator is refused, and so is Gitea Actions' own job token.
+
+Phase 7, the last one, lets k3s pull from both in any namespace without a pull secret: it
+writes `/etc/rancher/k3s/registries.yaml` (mode 0600) with `reader`'s read-only package token
+and the local CA, and restarts k3s, which reads the file only on start. Pods keep running
+through the restart; the API is away for about half a minute. A re-run leaves the file and k3s
+alone while the token works. It comes last because the token needs Gitea, which runs only
+from phase 3.
+
+The smoke check `registry_pull` runs the newest image of either organization in a pod, asking
+the registry each time; while the registry is empty it only says so.
 
 **Undo:**
 
@@ -189,12 +210,46 @@ each time; while the registry is empty it only says so.
 sudo rm /etc/rancher/k3s/registries.yaml && sudo systemctl restart k3s
 ```
 
-**Rollback** to GitHub as `origin`:
+## CI
 
-```bash
-git remote remove origin && git remote rename github origin
-git config --remove-section credential.https://gitea.sdlc.internal
-```
+Two Gitea Actions runners in namespace `ci` ([`apps/ci/`](apps/ci/)), each in a pod of its
+own:
+
+| Runner | Registered on | Label | Runs | Pushes with |
+|---|---|---|---|---|
+| `ci-platform` | `platform/ai-native-sdlc` only | `platform` | this repository's workflows | `ci-platform` → `platform/` |
+| `ci-products` | the `sdlc` organization | `ubuntu-latest` | the target projects' workflows | `ci` → `sdlc/` |
+
+A workflow picks its runner with `runs-on`. This repository's workflows use `platform`;
+a target project's `ubuntu-latest` never reaches `ci-platform`, which does not carry that
+label and is not registered on other repositories.
+
+**How a runner works.** Gitea's public runner image (Ubuntu 26.04 with Node, git and curl)
+runs the jobs in host mode, with `act_runner` copied in from its official image; there is no
+Docker daemon. Each registration takes a single job (`--ephemeral`): when it ends, Gitea drops
+the runner, the work directory is wiped, and the runner registers again. The container and its
+BuildKit live on between jobs, so the jobs of one runner are not isolated from each other; they
+share a trust level, which is why the platform's jobs never run on the products' runner. A workflow builds images with `buildctl` against the pod's BuildKit sidecar
+(`unix:///run/buildkit/buildkitd.sock`) and pushes them with its organization's token.
+
+**Isolation.** CI runs code an agent wrote. Each runner pod has its own user namespace
+(`hostUsers: false`): root inside is an unprivileged uid on the host. BuildKit runs there in
+its regular mode with `SYS_ADMIN`, which holds only inside that namespace, under the AppArmor
+profile [`apparmor/sdlc-buildkit`](apparmor/sdlc-buildkit) and the seccomp profile
+[`seccomp/sdlc-buildkit.json`](seccomp/sdlc-buildkit.json) that phase 2 installs. Nothing is
+privileged and no host path is mounted. A NetworkPolicy lets the pods reach DNS, Gitea, Traefik
+(the registry), each other and the internet, and no private network. The smoke checks
+`ci_runners` and `ci_unprivileged` check both.
+
+**Platform images.** [`.gitea/workflows/images.yaml`](../.gitea/workflows/images.yaml) runs on
+every push to `main`: each of `orchestrator/` and `agent-runner/` that has a `Dockerfile` is
+built and pushed as `gitea.sdlc.internal/platform/<directory>:<commit>`. Argo CD deploys the
+orchestrator with the tag of the commit it syncs, so a push to `main` reaches the cluster
+through CI and GitOps alone.
+
+**After a rebuild** there are no images yet: phase 4 pushes `main` before the runners exist,
+Gitea keeps that run queued, and `ci-platform` picks it up as soon as Argo CD has started it.
+Until the run finishes, the orchestrator's pod waits for its image.
 
 ## Changing the platform through git
 

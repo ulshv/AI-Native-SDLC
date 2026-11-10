@@ -1,0 +1,54 @@
+# CI runs code an agent wrote, so its pods reach only what a build needs: DNS, Gitea (clone,
+# API), Traefik (the registry at gitea.sdlc.internal), their own runner's pod (act_runner's cache
+# server, below) and the internet (packages, actions). Private networks are closed, which keeps
+# them away from the database, the orchestrator's and Plane's pods, the node and the local
+# network. Traefik also fronts the platform's web UIs, which ask for their own sign-in.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress
+  namespace: ci
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: gitea}}
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: traefik}}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+---
+# Each runner may reach its own pod only (act_runner's cache server listens on the pod's
+# address), so a target project's job cannot reach ci-platform.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: self-ci-platform
+  namespace: ci
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: ci-platform}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: ci-platform}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: self-ci-products
+  namespace: ci
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: ci-products}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: ci-products}}

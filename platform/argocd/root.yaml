@@ -12,7 +12,7 @@ spec:
     server: https://kubernetes.default.svc
     namespace: argocd
   source:
-    repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
+    repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
     targetRevision: main
     path: platform
     directory:

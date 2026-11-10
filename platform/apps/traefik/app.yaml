@@ -18,10 +18,10 @@ spec:
         releaseName: traefik
         valueFiles:
           - $values/platform/apps/traefik/values.yaml
-    - repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
+    - repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
       targetRevision: main
       ref: values
-    - repoURL: http://gitea-http.gitea.svc:3000/sdlc/ai-native-sdlc.git
+    - repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
       targetRevision: main
       path: platform/apps/traefik
       directory:

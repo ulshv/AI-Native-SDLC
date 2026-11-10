@@ -1,0 +1,147 @@
+# Two Actions runners, each with its own BuildKit (design decision 12). ci-platform is
+# registered on this repository only and builds the platform's images (label platform);
+# ci-products is registered on the sdlc organization and runs the target projects' workflows
+# (label ubuntu-latest), which agents write. Registration tokens come from the bootstrap.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ci-platform
+  namespace: ci
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: ci-platform}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: ci-platform, app.kubernetes.io/part-of: ci}
+    spec:
+      # The pod has its own user namespace: root in it is an unprivileged uid on the host.
+      hostUsers: false
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      initContainers:
+        # act_runner comes from its official image; the job environment is Gitea's public
+        # runner image, so no image of our own is needed.
+        - name: act-runner
+          image: docker.io/gitea/act_runner:0.6.1
+          command: [cp, /usr/local/bin/act_runner, /runner-bin/]
+          volumeMounts:
+            - {name: runner-bin, mountPath: /runner-bin}
+      containers:
+        # Jobs run here in host mode: no Docker daemon, no privileges.
+        - name: runner
+          image: docker.io/gitea/runner-images:ubuntu-26.04-v26.11.03
+          command: [sh, /etc/runner/runner.sh]
+          env:
+            - {name: RUNNER_NAME, value: ci-platform}
+            - {name: RUNNER_LABELS, value: "platform:host"}
+          securityContext:
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 2Gi}
+          volumeMounts:
+            - {name: runner-bin, mountPath: /runner-bin}
+            - {name: runner-script, mountPath: /etc/runner}
+            - {name: registration, mountPath: /registration}
+            - {name: sdlc-ca, mountPath: /sdlc-ca}
+            - {name: buildkit-socket, mountPath: /run/buildkit}
+        # BuildKit in its regular mode: SYS_ADMIN holds only inside the pod's user namespace, and
+        # the sdlc-buildkit AppArmor and seccomp profiles from the bootstrap bound it (design
+        # decision 12). Rootless BuildKit cannot create its user namespace on this kernel.
+        - name: buildkitd
+          image: docker.io/moby/buildkit:v0.34.2
+          args: [--addr, unix:///run/buildkit/buildkitd.sock, --oci-worker-no-process-sandbox, --config, /etc/buildkit/buildkitd.toml]
+          securityContext:
+            capabilities: {add: [SYS_ADMIN]}
+            appArmorProfile: {type: Localhost, localhostProfile: sdlc-buildkit}
+            seccompProfile: {type: Localhost, localhostProfile: profiles/sdlc-buildkit.json}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 2Gi}
+          volumeMounts:
+            - {name: buildkit-socket, mountPath: /run/buildkit}
+            - {name: buildkit-state, mountPath: /var/lib/buildkit}
+            - {name: buildkitd-config, mountPath: /etc/buildkit}
+            - {name: sdlc-ca, mountPath: /sdlc-ca}
+      volumes:
+        - {name: runner-bin, emptyDir: {}}
+        - {name: buildkit-socket, emptyDir: {}}
+        - {name: buildkit-state, emptyDir: {sizeLimit: 10Gi}}
+        - {name: runner-script, configMap: {name: runner}}
+        - {name: buildkitd-config, configMap: {name: buildkitd}}
+        - {name: sdlc-ca, secret: {secretName: sdlc-ca}}
+        - {name: registration, secret: {secretName: runner-platform}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ci-products
+  namespace: ci
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: ci-products}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: ci-products, app.kubernetes.io/part-of: ci}
+    spec:
+      # The pod has its own user namespace: root in it is an unprivileged uid on the host.
+      hostUsers: false
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      initContainers:
+        # act_runner comes from its official image; the job environment is Gitea's public
+        # runner image, so no image of our own is needed.
+        - name: act-runner
+          image: docker.io/gitea/act_runner:0.6.1
+          command: [cp, /usr/local/bin/act_runner, /runner-bin/]
+          volumeMounts:
+            - {name: runner-bin, mountPath: /runner-bin}
+      containers:
+        # Jobs run here in host mode: no Docker daemon, no privileges.
+        - name: runner
+          image: docker.io/gitea/runner-images:ubuntu-26.04-v26.11.03
+          command: [sh, /etc/runner/runner.sh]
+          env:
+            - {name: RUNNER_NAME, value: ci-products}
+            - {name: RUNNER_LABELS, value: "ubuntu-latest:host"}
+          securityContext:
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 2Gi}
+          volumeMounts:
+            - {name: runner-bin, mountPath: /runner-bin}
+            - {name: runner-script, mountPath: /etc/runner}
+            - {name: registration, mountPath: /registration}
+            - {name: sdlc-ca, mountPath: /sdlc-ca}
+            - {name: buildkit-socket, mountPath: /run/buildkit}
+        # BuildKit in its regular mode: SYS_ADMIN holds only inside the pod's user namespace, and
+        # the sdlc-buildkit AppArmor and seccomp profiles from the bootstrap bound it (design
+        # decision 12). Rootless BuildKit cannot create its user namespace on this kernel.
+        - name: buildkitd
+          image: docker.io/moby/buildkit:v0.34.2
+          args: [--addr, unix:///run/buildkit/buildkitd.sock, --oci-worker-no-process-sandbox, --config, /etc/buildkit/buildkitd.toml]
+          securityContext:
+            capabilities: {add: [SYS_ADMIN]}
+            appArmorProfile: {type: Localhost, localhostProfile: sdlc-buildkit}
+            seccompProfile: {type: Localhost, localhostProfile: profiles/sdlc-buildkit.json}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 2Gi}
+          volumeMounts:
+            - {name: buildkit-socket, mountPath: /run/buildkit}
+            - {name: buildkit-state, mountPath: /var/lib/buildkit}
+            - {name: buildkitd-config, mountPath: /etc/buildkit}
+            - {name: sdlc-ca, mountPath: /sdlc-ca}
+      volumes:
+        - {name: runner-bin, emptyDir: {}}
+        - {name: buildkit-socket, emptyDir: {}}
+        - {name: buildkit-state, emptyDir: {sizeLimit: 10Gi}}
+        - {name: runner-script, configMap: {name: runner}}
+        - {name: buildkitd-config, configMap: {name: buildkitd}}
+        - {name: sdlc-ca, secret: {secretName: sdlc-ca}}
+        - {name: registration, secret: {secretName: runner-products}}

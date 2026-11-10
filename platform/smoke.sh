@@ -146,36 +146,90 @@ gitea_admin_is_admin() {
     { echo "gitea_admin cannot sign in as an admin"; return 1; }
 }
 
-# newest_sdlc_image (inside with_gitea): the newest tagged container image of the sdlc
-# organization in Gitea's registry, empty when there is none.
-newest_sdlc_image() {
+# gitea_admin_get <path> (inside with_gitea): a GET on Gitea's API as the admin.
+gitea_admin_get() {
   local password
   password=$(sed -n 's/^GITEA_ADMIN_PASSWORD=//p' "$SECRETS_FILE")
   curl -fsS --max-time 10 --netrc-file <(printf 'machine 127.0.0.1 login gitea_admin password %s\n' "$password") \
-    "$GITEA_URL/api/v1/packages/sdlc?type=container&limit=50" |
-    jq -r '[.[] | select(.version | startswith("sha256:") | not)] | sort_by(.created_at) | last
-      | if . then "gitea.sdlc.internal/sdlc/\(.name):\(.version)" else empty end'
+    "$GITEA_URL/api/v1$1"
 }
 
-# A pod in any namespace pulls an image from Gitea's registry without a pull secret: k3s uses
-# reader's token from /etc/rancher/k3s/registries.yaml. imagePullPolicy Always makes the node
-# ask the registry even when it has the image. Passes with a note while the registry is empty.
-register registry_pull
-check_registry_pull() {
-  local image pod=smoke-registry-pull state i
-  image=$(with_gitea newest_sdlc_image) || return 1
-  [[ -n $image ]] || { echo "  (no image in the sdlc registry yet: nothing to pull)"; return 0; }
+# newest_image <org> (inside with_gitea): the newest tagged container image of an organization
+# in Gitea's registry, empty when it has none.
+newest_image() {
+  gitea_admin_get "/packages/$1?type=container&limit=50" |
+    jq -r --arg org "$1" '[.[] | select(.version | startswith("sha256:") | not)] | sort_by(.created_at) | last
+      | if . then "gitea.sdlc.internal/\($org)/\(.name):\(.version)" else empty end'
+}
+
+newest_images() { newest_image platform; newest_image sdlc; }
+
+# pulls <image>: a pod in namespace default pulls the image without a pull secret. The command
+# does not exist, so nothing of the image runs; imagePullPolicy Always makes the node ask the
+# registry even when it has the image.
+pulls() {
+  local pod=smoke-registry-pull state="" uid
   kubectl delete pod "$pod" -n default --ignore-not-found --wait=true >/dev/null
-  kubectl run "$pod" -n default --restart=Never --image="$image" --image-pull-policy=Always >/dev/null || return 1
-  for i in $(seq 60); do
-    state=$(kubectl get pod "$pod" -n default -o json | jq -r '.status.containerStatuses[0] |
-      if .imageID != null and .imageID != "" then "pulled"
-      else (.state.waiting.reason // "pending") end')
-    [[ $state == pulled || $state == ErrImagePull || $state == ImagePullBackOff ]] && break
+  kubectl run "$pod" -n default --restart=Never --image="$1" --image-pull-policy=Always \
+    --command -- /smoke-registry-pull-runs-nothing >/dev/null || return 1
+  # Events outlive their pod, so only this pod's (by uid) count.
+  uid=$(kubectl get pod "$pod" -n default -o jsonpath='{.metadata.uid}') || return 1
+  for _ in $(seq 60); do
+    if [[ -n $(kubectl get events -n default -o name \
+      --field-selector "involvedObject.uid=$uid,reason=Pulled" 2>/dev/null) ]]; then
+      state=pulled
+      break
+    fi
+    state=$(kubectl get pod "$pod" -n default -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null)
+    [[ $state == ErrImagePull || $state == ImagePullBackOff ]] && break
     sleep 2
   done
-  kubectl delete pod "$pod" -n default --wait=false >/dev/null
-  [[ $state == pulled ]] || { echo "$image: $state"; return 1; }
+  kubectl delete pod "$pod" -n default --wait=true >/dev/null
+  [[ $state == pulled ]] || { echo "$1: ${state:-not pulled in 2 minutes}"; return 1; }
+}
+
+# k3s pulls from both organizations of Gitea's registry as reader (registries.yaml): the newest
+# image of each is pulled. An organization without images yet is only reported.
+register registry_pull
+check_registry_pull() {
+  local images image org
+  images=$(with_gitea newest_images) || return 1
+  for org in platform sdlc; do
+    image=$(grep "^gitea.sdlc.internal/$org/" <<<"$images" || true)
+    if [[ -z $image ]]; then echo "  (no image in $org yet: nothing to pull)"; continue; fi
+    pulls "$image" || return 1
+  done
+}
+
+# Both Actions runners are online, each where it belongs: ci-platform on this repository only,
+# ci-products on the sdlc organization. Ephemeral runners re-register after every job, so the
+# check looks for an online runner whose name starts with the runner's.
+ci_runners_online() {
+  gitea_admin_get /repos/platform/ai-native-sdlc/actions/runners |
+    jq -e '[.runners[]? | select(.status == "online" and (.name | startswith("ci-platform")))] | length > 0' >/dev/null ||
+    { echo "ci-platform is not online on platform/ai-native-sdlc"; return 1; }
+  gitea_admin_get /orgs/sdlc/actions/runners |
+    jq -e '[.runners[]? | select(.status == "online" and (.name | startswith("ci-products")))] | length > 0' >/dev/null ||
+    { echo "ci-products is not online on the sdlc organization"; return 1; }
+  ! gitea_admin_get /orgs/sdlc/actions/runners | jq -e 'any(.runners[]?; .name | startswith("ci-platform"))' >/dev/null ||
+    { echo "ci-platform is registered on the whole organization"; return 1; }
+}
+
+register ci_runners
+check_ci_runners() { with_gitea ci_runners_online; }
+
+# CI runs code an agent wrote: no pod in ci is privileged, mounts a host path (a container
+# runtime socket among them) or shares the host's user namespace.
+register ci_unprivileged
+check_ci_unprivileged() {
+  local bad
+  bad=$(kubectl get pods -n ci -o json | jq -r '.items[] | select(
+      .spec.hostUsers != false
+      or any(.spec.volumes[]?; .hostPath)
+      or any((.spec.initContainers // []) + .spec.containers | .[]; .securityContext.privileged == true)
+    ) | .metadata.name')
+  [[ -z $bad ]] || { echo "pods in ci that are privileged, mount a host path or share the host's users:"; echo "$bad"; return 1; }
+  [[ -n $(kubectl get pods -n ci -o name) ]] || { echo "no pods in ci"; return 1; }
 }
 
 register gitea_admin_login
@@ -186,7 +240,7 @@ gitea_main_head() {
   local password
   password=$(sed -n 's/^GITEA_ADMIN_PASSWORD=//p' "$SECRETS_FILE")
   curl -fsS --max-time 10 --netrc-file <(printf 'machine 127.0.0.1 login gitea_admin password %s\n' "$password") \
-    "$GITEA_URL/api/v1/repos/sdlc/ai-native-sdlc/branches/main" | jq -er .commit.id
+    "$GITEA_URL/api/v1/repos/platform/ai-native-sdlc/branches/main" | jq -er .commit.id
 }
 
 # apps_synced_at <commit>: every Application is Synced and Healthy at that commit. A
