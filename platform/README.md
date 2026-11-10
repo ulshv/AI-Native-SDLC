@@ -363,7 +363,35 @@ Job ([`apps/plane/admin-job.yaml`](apps/plane/admin-job.yaml)) that runs after e
 does nothing once an admin exists, so the first-run wizard never opens. For the same reason,
 changing `PLANE_ADMIN_PASSWORD` later does not change the password: change it in Plane
 (Profile settings → Security) and keep `secrets.env` in step. A rebuild creates a new admin
-from `secrets.env`, because the data does not survive it.
+from `secrets.env`, because the data does not survive it. The Job also keeps the admin's
+username at `admin` (Plane generates a random one), because project files name people by
+username.
+
+**Set up for the delivery loop.** A second Job after every sync
+([`apps/plane/setup-job.yaml`](apps/plane/setup-job.yaml), script
+[`apps/plane/setup.py`](apps/plane/setup.py)) makes, for every target project in
+[`projects/`](projects/), what the loop needs, and changes nothing on a second run:
+
+- the account `agent`, which people assign tickets to and mention, with its e-mail
+  notifications off, and its API key in the Secret `sdlc/plane-agent` for the orchestrator;
+- the project's workspace (`sdlc`) and project (`EWA`, "Example webapp": Plane allows no
+  special characters in a project's name), with the loop's statuses (Drafting, Needs info,
+  Spec review, Approved, Implementing, Deploying to QA, Code review, On dev, Released, Closed)
+  next to Backlog, where new tickets land. Plane's other default statuses are removed once,
+  when the project is created; statuses people add later stay;
+- `agent` and the project file's people as members. A person is named by Plane username, which
+  must stay the same across rebuilds: the admin's is kept at `admin`, and anyone else needs one
+  set on purpose. A person without a Plane account is skipped and named in the Job's log;
+- one webhook per workspace to `http://orchestrator.sdlc.svc/hooks/plane` for work items and
+  comments, signed with `PLANE_WEBHOOK_SECRET`.
+
+Users, API keys and webhooks have no public API, so the script uses Plane's Django models for
+them; projects, statuses and members go through Plane's public API, in-process. Plane allows an
+API key 60 calls a minute (`API_KEY_RATE_LIMIT`), so the Job waits out a `429` instead of
+failing. Nothing needs a manual step. The smoke check `plane_loop_project` checks the statuses,
+the members, the webhook and its secret, and agent's key. A new target project needs its file in
+`projects/` and one line in [`projects/kustomization.yaml`](projects/kustomization.yaml). See
+the Job's log with `kubectl logs -n plane job/plane-setup`.
 
 **API key.** In Plane: Profile settings → Personal Access Tokens → Add token. A client sends it
 in the `X-API-Key` header to `https://plane.sdlc.internal/api/v1/`, for example:

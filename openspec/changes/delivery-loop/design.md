@@ -498,6 +498,15 @@ it. The default states except Backlog are deleted; Backlog stays the default sta
 tickets land before intake moves them to Drafting. Plane e-mails assignees and mentioned users,
 so the Job turns the agent's e-mail notifications off.
 
+Built in group 4: the project files reach the Job as the ConfigMap `target-projects`, generated
+by `platform/projects/kustomization.yaml`, which the orchestrator can include too; the Job
+writes the agent's key into `sdlc` through a Role limited to that Secret; the admin Job keeps the
+instance admin's username at `admin`, which Plane would otherwise generate anew on every
+rebuild, so a project file can name the admin as a person (anyone else needs a username set on
+purpose); Plane's default statuses are removed only when the project is created, so statuses
+people add stay. Plane limits every API key to 60 calls a minute (`API_KEY_RATE_LIMIT`, global,
+not per key): the Job waits out a `429`, and the orchestrator's Plane client must too.
+
 ### 15. Releases are prepared by the orchestrator itself
 
 `prepare_release` needs no agent run. The orchestrator compares `main` with `development` through

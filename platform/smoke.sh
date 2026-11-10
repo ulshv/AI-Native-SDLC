@@ -479,6 +479,57 @@ EOF
 register plane_webhook_in_cluster
 check_plane_webhook_in_cluster() { with_plane_key plane_webhook_delivered; }
 
+# Plane is set up for the loop (apps/plane/setup.py): for every target project, its Plane project
+# has every status of the loop, and agent and the file's people with a Plane account as members;
+# its workspace has an active webhook to the orchestrator for work items and comments, signed
+# with PLANE_WEBHOOK_SECRET; and agent's API key in sdlc/plane-agent works. The statuses are read
+# from setup.py, so the two cannot drift apart.
+loop_states() {
+  python3 -c 'import ast, json, sys
+tree = ast.parse(open(sys.argv[1]).read())
+node = next(n for n in tree.body if isinstance(n, ast.Assign) and n.targets[0].id == "LOOP_STATES")
+print(json.dumps([s[0] for s in ast.literal_eval(node.value)]))' platform/apps/plane/setup.py
+}
+
+register plane_loop_project
+check_plane_loop_project() {
+  local file workspace identifier people states problems key
+  states=$(loop_states) || return 1
+  for file in platform/projects/*/project.yaml; do
+    workspace=$(yq -r .tracker.workspace <"$file")
+    identifier=$(yq -r .tracker.identifier <"$file")
+    people=$(yq -o json -I0 '[.people[] | select(.plane) | .plane]' <"$file")
+    # The webhook secret travels on the shell's stdin, never as an argument.
+    problems=$(plane_shell <<EOF
+from plane.db.models import Project, ProjectMember, State, Webhook
+problems = []
+project = Project.objects.filter(workspace__slug="$workspace", identifier="$identifier").first()
+if project is None:
+    problems.append("no project $identifier in workspace $workspace")
+else:
+    have = set(State.objects.filter(project=project).values_list("name", flat=True))
+    missing = [s for s in $states if s not in have]
+    if missing:
+        problems.append("$identifier lacks the statuses " + ", ".join(missing))
+    members = set(ProjectMember.objects.filter(project=project, is_active=True).values_list("member__username", flat=True))
+    absent = [u for u in ["agent"] + $people if u not in members]
+    if absent:
+        problems.append("not members of $identifier: " + ", ".join(absent))
+if not Webhook.objects.filter(workspace__slug="$workspace", url="http://orchestrator.sdlc.svc/hooks/plane",
+                              is_active=True, issue=True, issue_comment=True,
+                              secret_key="$(sed -n 's/^PLANE_WEBHOOK_SECRET=//p' "$SECRETS_FILE")").exists():
+    problems.append("workspace $workspace has no active webhook to the orchestrator signed with PLANE_WEBHOOK_SECRET")
+print("SMOKE", "; ".join(problems) or "ok")
+EOF
+    )
+    [[ $problems == ok ]] || { echo "${problems:-no answer from the Plane shell}"; return 1; }
+  done
+  key=$(kubectl get secret -n sdlc plane-agent -o jsonpath='{.data.api-key}' | base64 -d)
+  curl -fsS --max-time 20 -o /dev/null -H @<(printf 'X-API-Key: %s\n' "$key") \
+    "https://plane.sdlc.internal/api/v1/workspaces/$workspace/projects/" ||
+    { echo "agent's API key in sdlc/plane-agent does not work"; return 1; }
+}
+
 # The public mirror holds main and nothing else: no other branch, no tag. Read anonymously over
 # HTTPS from the github remote's address; passes when there is no github remote.
 register mirror_only_main

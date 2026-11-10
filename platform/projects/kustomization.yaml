@@ -1,0 +1,7 @@
+# Every target project's file as one ConfigMap, target-projects, for whoever includes this
+# directory as a resource: Plane's setup Job now, the orchestrator later. A new project adds one
+# line here. Argo CD's ApplicationSets read the files directly, not through this.
+configMapGenerator:
+  - name: target-projects
+    files:
+      - example-webapp.yaml=example-webapp/project.yaml

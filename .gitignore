@@ -2,3 +2,6 @@
 secrets.env
 *.key
 .secrets/
+
+# Charts a local `kubectl kustomize --enable-helm` downloads next to a kustomization.
+platform/apps/*/charts/

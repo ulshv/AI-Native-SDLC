@@ -11,6 +11,15 @@ helmCharts:
 resources:
   - limit-range.yaml
   - admin-job.yaml
+  - setup-job.yaml
+  # the ConfigMap target-projects, with every target project's file, for the setup Job
+  - ../../projects
+
+# The setup Job's script.
+configMapGenerator:
+  - name: plane-setup
+    files:
+      - setup.py
 
 patches:
   # The chart stamps every pod template with the render time, and Argo CD renders again after

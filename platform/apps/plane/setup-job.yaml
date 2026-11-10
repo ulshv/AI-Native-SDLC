@@ -1,0 +1,92 @@
+# Sets Plane up for the delivery loop after every sync (setup.py, design decision 14): the agent
+# account and its API key, each target project's workspace, project, statuses and members, and the
+# webhook to the orchestrator. It runs after plane-create-admin, which it needs.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: plane-setup
+  namespace: plane
+---
+# The Job writes one Secret, the agent's API key, into the orchestrator's namespace. Kubernetes
+# cannot limit "create" to a name, so creating is allowed in sdlc and the rest only on that one.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: plane-setup
+  namespace: sdlc
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [plane-agent]
+    verbs: [get, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: plane-setup
+  namespace: sdlc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: plane-setup
+subjects:
+  - kind: ServiceAccount
+    name: plane-setup
+    namespace: plane
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: plane-setup
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    # after plane-create-admin (wave 0)
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: plane-setup
+      containers:
+        - name: setup
+          # Same image and tag as Plane's API (planeVersion in values.yaml).
+          image: artifacts.plane.so/makeplane/plane-backend:v1.4.3
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: plane-app-vars
+            - secretRef:
+                name: plane-app-env
+            - secretRef:
+                name: plane-doc-store
+            - secretRef:
+                name: plane-app-keys
+          env:
+            - name: WEBHOOK_URL
+              value: http://orchestrator.sdlc.svc/hooks/plane
+            - name: WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef: {name: plane-setup, key: webhook-secret}
+          resources:
+            requests:
+              memory: 192Mi
+            limits:
+              memory: 512Mi
+          # -W: the static files are collected only in the API pod, so whitenoise warns here.
+          command: [python, -W, "ignore:No directory at", manage.py, shell, --no-imports, -c,
+                    "exec(open('/setup/setup.py').read())"]
+          volumeMounts:
+            - {name: setup, mountPath: /setup}
+            - {name: projects, mountPath: /projects}
+      volumes:
+        - name: setup
+          configMap:
+            name: plane-setup
+        - name: projects
+          configMap:
+            name: target-projects
