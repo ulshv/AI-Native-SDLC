@@ -1,7 +1,7 @@
 # Tasks
 
 > **TL;DR**
-> - **12 groups, 64 tasks:** spikes → platform additions → CI → Plane setup → `example-webapp` → agent runs → orchestrator → the loop end to end → environments → releases → hardening → docs and final checks.
+> - **12 groups, 71 tasks:** spikes → platform additions → CI → Plane setup → `example-webapp` → agent runs → orchestrator → the loop end to end → environments → releases → hardening → docs and final checks.
 > - **CI comes early,** because it builds the orchestrator and the agent image: from group 3 on, a push to `main` builds the platform's images and Argo CD rolls them out.
 > - **The loop works after group 8:** a ticket goes from assignment to a merge into `development` with both gates; previews and releases come after it, so a demo can happen there.
 > - **Spikes first (group 1):** OpenCode unattended with an OpenAI-compatible provider, the wildcard resolver against the VPN client, Plane's setup by script and its webhook payloads, Gitea's merge allowlists, the ApplicationSet matrix, the runner in host mode with BuildKit. Any of them can send us back to the design.
@@ -81,6 +81,16 @@
 - [x] 7.9 Add the thread API from design decision 4 (`/threads/{thread_id}`, its messages, and lookup by link). Verify with tests that a thread shows its phase and links and is found by its PR
 - [ ] 7.10 Add `platform/apps/orchestrator/` (a PreSync Job running `orchestrator migrate` with the same image, Deployment with a rolling update that keeps the old pod until the new one is ready, Service, config, project files through `configMapGenerator`, RBAC from design decision 7, Secrets, image tag from `$ARGOCD_APP_REVISION`). Verify a push to `main` rolls out the new image within 10 minutes, a commit whose build fails leaves the old pod running, the Gitea organization webhook to the orchestrator (registered by the bootstrap, signed with `GITEA_WEBHOOK_SECRET`) exists, and a smoke check covers health and webhooks
 - [x] 7.11 Write `orchestrator/README.md` (layout, local run, tests, configuration, how a change reaches the cluster), and verify the commands work as written
+
+Tasks 7.12–7.18 bring the orchestrator to the engineering standards in `AGENTS.md`. They come before 7.10's rollout check, since they change the migrate Job and the probes.
+
+- [ ] 7.12 Replace the hand-written schema in `db.py` with Alembic: the first revision creates today's tables, later changes are one revision each, forward-only; `orchestrator migrate` runs `alembic upgrade head` and LangGraph's checkpoint setup; `serve` refuses to start unless the database is at the image's head revision. Verify with tests that migrate on an empty database reaches head and is safe to repeat, and that `serve` refuses a database one revision behind
+- [ ] 7.13 Replace `config.py` with one pydantic-settings model (environment over `config.yaml`), validated at start, with no default duplicated elsewhere. Verify with tests that a missing `DATABASE_URL` or `LLM_API_KEY`, or a malformed value, stops the process with a message naming the setting
+- [ ] 7.14 Give every call to Plane, Gitea, the model provider and the Kubernetes API a timeout, and replace the retry loop in `http.py` with tenacity: bounded exponential backoff for 429, 5xx and connection errors, `Retry-After` honoured, no retry for other 4xx. Verify with tests against a mock transport that a 429 and a 503 are retried and a 404 is not, and that a hanging call ends at its timeout
+- [ ] 7.15 Add ruff (lint and format) and `mypy --strict` to `pyproject.toml` and to the `test` job of `.gitea/workflows/images.yaml`, before the tests, and fix what they find: an `Executor` protocol in the ports, intents as one enum shared by the policy, the model and the intent reader. Verify the job fails on a type error and on a lint error, and passes on `main`
+- [ ] 7.16 Make the service operable: JSON logs through structlog with the delivery, thread and run ids bound to every line; `/livez` (the process answers) and `/readyz` (the database answers) as separate probes; graceful shutdown on SIGTERM (stop taking events, release leased ones, stop the watcher); `/metrics` for Prometheus with queue depth and oldest event age, failed events, active and waiting runs, and errors of calls to the outside. Verify that stopping Postgres turns the pod unready without a restart, that a SIGTERM leaves no leased rows, and that the metrics show a queued event
+- [ ] 7.17 Take the hot path's repeated work out: the dispatcher reads a thread's item once per delivery and hands it to the step, and `LiveProjects` checks its files at most every few seconds instead of on every lookup. Verify with tests that one delivery reads its checkpoint once and that a changed project file is still picked up
+- [ ] 7.18 Add `shellcheck` for `platform/*.sh` and `agent-runner/entrypoint.sh` to CI and fix what it finds, and record the choices of 7.12–7.17 (Alembic, pydantic-settings, tenacity, structlog, the probes) in design decision 4 and `orchestrator/README.md`. Verify the CI job fails on a shellcheck error and the README's commands work as written
 
 ## 8. The loop end to end
 
