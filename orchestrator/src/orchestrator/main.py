@@ -83,11 +83,17 @@ def serve(settings: config.Settings, host: str, port: int) -> int:
             agent_model=settings.agent_model,
             threshold=settings.intent_threshold,
             checkpointer=checkpointer,
+            max_attempts=settings.max_attempts,
         )
         workers = Workers(queue, the_agent, settings.workers)
         workers.start()
         stack.callback(workers.stop)
-        uvicorn.run(create_app(pool, queue, links, the_agent.view), host=host, port=port, log_config=None)
+        secrets = {
+            "plane": settings.plane_webhook_secret.get_secret_value(),
+            "gitea": settings.gitea_webhook_secret.get_secret_value(),
+        }
+        app = create_app(pool, queue, links, the_agent.view, secrets)
+        uvicorn.run(app, host=host, port=port, log_config=None)
     return 0
 
 

@@ -13,7 +13,7 @@ from orchestrator import agent, intents
 from orchestrator.agent import Agent
 from orchestrator.links import Link, Links
 from orchestrator.projects import Projects
-from orchestrator.queue import PostgresQueue
+from orchestrator.queue import Delivery, PostgresQueue
 
 REPO_PROJECTS = Path(__file__).parents[2] / "platform" / "projects"
 AGENT = "acf51e1d-b7bc-4e95-a61d-9deba97c5a30"
@@ -80,7 +80,10 @@ class FakeCodeHost:
 
 class FakeExecutor:
     def __init__(self):
-        self.runs = {}
+        self.runs, self.cancelled = {}, []
+
+    def cancel(self, name):
+        self.cancelled.append(name)
 
     def start(self, run):
         self.runs.setdefault(run.name, run)
@@ -311,7 +314,7 @@ def test_the_thread_api_shows_a_thread_and_its_messages(world, pool):
 
     assign(world)
     world.finish({"result": "spec_ready"})
-    client = TestClient(create_app(pool, world.queue, world.svc.links, world.dispatch.view))
+    client = TestClient(create_app(pool, world.queue, world.svc.links, world.dispatch.view, {}))
     thread_id = client.get("/threads", params={"link": "gitea_pr:sdlc/example-webapp#3"}).json()["thread_id"]
     shown = client.get(f"/threads/{thread_id}").json()
     assert (
@@ -340,6 +343,7 @@ def test_one_run_at_a_time_and_a_late_result_counts_no_more(world):
     world.hook("plane", "comment_mention_agent")
     assert world.runs[-1] == "ewa-1-archive-3" and "still on the archive run" in world.svc.tracker.comments[-1][1]
     world.hook("plane", "issue_state_closed")
+    assert world.svc.executor.cancelled == ["ewa-1-archive-3"]
     world.finish({"result": "archived"})  # the archive run ends after the item was closed
     assert world.item.phase == "Closed" and not world.svc.code_host.merged
     assign(world)  # assigned again: new runs get new names
@@ -396,3 +400,30 @@ def test_closing_an_item_that_waits_for_answers_drops_the_questions(world):
     world.finish({"result": "questions", "questions": ["Should the filter survive a reload?"]})
     world.hook("plane", "issue_state_closed")
     assert world.item.phase == "Closed" and world.item.paused is None and world.item.summary()["questions"] == []
+
+
+def test_a_status_set_by_hand_follows_the_work_again(world):
+    assign(world)
+    world.hook("plane", "issue_state_approved", data__state__name="Code review")  # dragged on the board
+    assert world.svc.tracker.statuses[-1] == "Drafting"
+
+
+def test_a_run_result_that_fails_its_last_attempt_stops_the_wait_for_the_run(world):
+    to_code_review(world)
+    world.svc.chat.answers["@agent ok, merge it into dev"] = ("merge", 0.9)
+    world.hook("gitea", "review_approved", sender__login="gitea_admin")
+    thread = world.svc.links.thread_of(Link.parse(ITEM))
+
+    def refused(repo, number):
+        raise RuntimeError("405 the pull request cannot be merged")
+
+    world.svc.code_host.merge = refused
+    result = {"job": "ewa-1-archive-3", "thread_id": thread, "result": {"result": "archived"}}
+    for attempt in (1, 5):  # an earlier attempt leaves it to the retry; the last one gives up
+        with pytest.raises(RuntimeError):
+            world.dispatch(Delivery(0, "job", "ewa-1-archive-3/uid", thread, {}, result, attempt))
+        assert (world.item.running is None) is (attempt == 5)
+    assert "could not finish a step" in world.svc.tracker.comments[-1][1]
+    world.svc.chat.answers["@agent looks good, go ahead"] = ("merge", 0.9)
+    world.hook("plane", "comment_mention_agent")
+    assert world.runs[-1] == "ewa-1-archive-4", "people can act again"

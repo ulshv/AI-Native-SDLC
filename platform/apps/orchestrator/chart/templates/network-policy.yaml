@@ -1,0 +1,21 @@
+# Only the two tools reach the orchestrator, and only its port: Plane's webhook workers and Gitea.
+# The signatures (X-Plane-Signature, X-Gitea-Signature) check what they send; this keeps everyone
+# else, agent runs and previews of agent-written code included, from even trying. The kubelet's
+# probes and `kubectl port-forward` come from the node and are not affected.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: orchestrator-ingress
+  labels: {{- include "orchestrator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: orchestrator}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: plane}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: gitea}
+      ports:
+        - {protocol: TCP, port: 8000}

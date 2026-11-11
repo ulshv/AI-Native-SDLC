@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
 
-from .queue import Delivery, Queue
+from .queue import Handler, Queue
 
 log = logging.getLogger(__name__)
 
 
 class Workers:
-    def __init__(self, queue: Queue, handler: Callable[[Delivery], None], count: int = 2, idle: float = 1.0):
+    def __init__(self, queue: Queue, handler: Handler, count: int = 2, idle: float = 1.0):
         self.queue, self.handler, self.count, self.idle = queue, handler, count, idle
         self.stopping = threading.Event()
         self.threads: list[threading.Thread] = []

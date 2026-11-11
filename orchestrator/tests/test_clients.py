@@ -234,3 +234,16 @@ def test_a_rate_limit_wait_reads_seconds_epochs_and_dates_and_stays_bounded():
     assert 1 <= wait_for(str(time.time() + 20)) <= 21
     assert wait_for("Wed, 21 Oct 2015 07:28:00 GMT") == 1  # a date gone by
     assert wait_for("soon") == 10
+
+
+def test_no_retry_waits_past_the_calls_budget():
+    calls = []
+
+    def rate_limited(request):  # asking for a minute
+        calls.append(request)
+        return httpx.Response(429, headers={"Retry-After": "60"})
+
+    api = Api("http://x", {}, transport=httpx.MockTransport(rate_limited), budget=30)
+    with pytest.raises(ApiError):
+        api.call("GET", "/thing")
+    assert len(calls) == 1, "waiting a minute would take the call past its 30 s"

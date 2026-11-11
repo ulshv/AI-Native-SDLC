@@ -27,7 +27,9 @@ from psycopg_pool import ConnectionPool
 
 log = logging.getLogger(__name__)
 
-LEASE_SECONDS = 900  # longer than any handler takes: model calls and the tracker's rate limits
+# Longer than any handler takes: a step makes a few calls, each bounded by http.CALL_BUDGET and
+# intents.MODEL_TIMEOUT with its retries.
+LEASE_SECONDS = 900
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,9 @@ class Delivery:
     attempts: int
 
 
+Handler = Callable[[Delivery], None]
+
+
 class Queue(Protocol):
     def put(
         self,
@@ -52,7 +57,7 @@ class Queue(Protocol):
     ) -> bool:
         """Records an event; False when this delivery was recorded before."""
 
-    def process(self, handler: Callable[[Delivery], None]) -> bool:
+    def process(self, handler: Handler) -> bool:
         """Runs the handler on the next event that may run; False when there is none."""
 
     def rekey(self, old: str, new: str) -> None:
@@ -109,7 +114,7 @@ class PostgresQueue:
             row = conn.execute(TAKE, {"lease": self.lease}).fetchone()
         return Delivery(*row) if row else None
 
-    def process(self, handler: Callable[[Delivery], None]) -> bool:
+    def process(self, handler: Handler) -> bool:
         delivery = self.take()
         if delivery is None:
             return False

@@ -26,7 +26,7 @@ from psycopg_pool import ConnectionPool
 from . import machine
 from .dispatch import Dispatcher
 from .links import Links
-from .model import COMMANDS, Command, Intake, WorkItem
+from .model import COMMANDS, Command, Intake, StepFailed, WorkItem
 from .ports import CodeHost, RunStarter, Tracker
 from .projects import Projects
 from .queue import Delivery, Queue
@@ -74,8 +74,9 @@ class Agent:
         agent_model: str,
         threshold: float,
         checkpointer: BaseCheckpointSaver[Any],
+        max_attempts: int = 5,
     ) -> None:
-        self.projects = projects
+        self.projects, self.max_attempts = projects, max_attempts
         self.ports = machine.Ports(tracker, code_host, links, executor, agent_model)
         self.dispatcher = Dispatcher(projects, links, queue, tracker, code_host, chat, threshold, self)
         graph = StateGraph(State)
@@ -85,7 +86,22 @@ class Agent:
         self.graph = graph.compile(checkpointer=checkpointer)
 
     def __call__(self, delivery: Delivery) -> None:
-        self.dispatcher(delivery)
+        try:
+            self.dispatcher(delivery)
+        except Exception as error:
+            if delivery.source == "job" and delivery.attempts >= self.max_attempts:
+                self._result_given_up(delivery, error)
+            raise
+
+    def _result_given_up(self, delivery: Delivery, error: Exception) -> None:
+        """A run's result failed its last attempt (the queue gives it up next): its thread stops
+        waiting for the run and says why, so the people can act again."""
+        thread_id = delivery.payload["thread_id"]
+        reason = f"{type(error).__name__}: {error}"[:500]
+        try:
+            self.run(thread_id, StepFailed(delivery=f"failed/{delivery.delivery_id}", reason=reason))
+        except Exception:
+            log.exception("thread %s could not be told that a run's result was given up", thread_id)
 
     def _step(self, state: State, config: RunnableConfig) -> State:
         thread_id = str(config["configurable"]["thread_id"])

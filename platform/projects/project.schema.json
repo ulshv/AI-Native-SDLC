@@ -81,8 +81,8 @@
       "pattern": "^[a-z0-9.-]+\\.sdlc\\.internal$"
     },
     "previews": {
-      "description": "A preview per pull request, and the Deploying to QA phase.",
-      "type": "boolean"
+      "description": "A preview per pull request, and the Deploying to QA phase. Only false until previews are built (delivery-loop task 9.3): with true, an item would wait in Deploying to QA for a preview nothing deploys.",
+      "const": false
     },
     "checks": {
       "description": "Commands an implementation run must pass in the clone, in order, before it pushes, such as the tests.",

@@ -16,7 +16,15 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
-from tenacity import RetryCallState, Retrying, retry_if_exception, stop_after_attempt, wait_exponential_jitter
+from tenacity import (
+    RetryCallState,
+    Retrying,
+    retry_if_exception,
+    stop_after_attempt,
+    stop_any,
+    stop_before_delay,
+    wait_exponential_jitter,
+)
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +49,10 @@ class ApiError(Exception):
         self.status = status
 
 
-MAX_WAIT = 65.0  # a rate-limit window of Plane's; far below the queue's lease
+MAX_WAIT = 65.0  # a rate-limit window of Plane's
+# One call with its retries ends within this, so a step of a few calls ends well within the
+# queue's lease (queue.LEASE_SECONDS) and no second worker takes the same event meanwhile.
+CALL_BUDGET = 120.0
 
 
 def rate_limit_wait(response: httpx.Response) -> float:
@@ -101,11 +112,12 @@ class Api:
         sleep: Callable[[float], None] = time.sleep,
         attempts: int = 6,
         timeout: httpx.Timeout = TIMEOUT,
+        budget: float = CALL_BUDGET,
     ):
         self.client = httpx.Client(base_url=base_url, headers=headers, timeout=timeout, transport=transport)
         self.retrying = {
             idempotent: Retrying(
-                stop=stop_after_attempt(attempts),
+                stop=stop_any(stop_after_attempt(attempts), stop_before_delay(budget)),
                 wait=wait,
                 retry=retry_if_exception(worth_retrying(idempotent)),
                 sleep=sleep,

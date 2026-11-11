@@ -1,17 +1,18 @@
 """The orchestrator's HTTP side (design decision 4): webhooks in, threads out.
 
-A webhook is recorded in the queue and answered at once; the workers act on it later. The event
-is routed by what it is about: the thread linked to that object, or the object itself until it
-has a thread. The thread API follows LangGraph's Agent Protocol in shape (threads, their state
-and messages).
+A webhook whose signature holds is recorded in the queue and answered at once; the workers act on
+it later. The event is routed by what it is about: the thread linked to that object, or the object
+itself until it has a thread. The thread API follows LangGraph's Agent Protocol in shape
+(threads, their state and messages).
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -25,6 +26,8 @@ from .queue import Queue
 log = logging.getLogger(__name__)
 
 DELIVERY_HEADER = {"plane": "X-Plane-Delivery", "gitea": "X-Gitea-Delivery"}
+# Both sign the body with HMAC-SHA256 and the webhook's secret, hex-encoded.
+SIGNATURE_HEADER = {"plane": "X-Plane-Signature", "gitea": "X-Gitea-Signature"}
 LINK_OF = {"plane": plane.link_of, "gitea": gitea.link_of}
 
 
@@ -37,8 +40,19 @@ def routing_key(links: Links, link: Link | None, source: str) -> str:
 View = dict[str, Any]
 
 
+def signed(secret: str, body: bytes, signature: str | None) -> bool:
+    """Whether the signature is the body's under the secret; never without a secret."""
+    if not secret or not signature:
+        return False
+    return hmac.compare_digest(hmac.new(secret.encode(), body, hashlib.sha256).hexdigest(), signature)
+
+
 def create_app(
-    pool: ConnectionPool, queue: Queue, links: Links, view_of: Callable[[str], View] | None = None
+    pool: ConnectionPool,
+    queue: Queue,
+    links: Links,
+    view_of: Callable[[str], View],
+    secrets: Mapping[str, str],
 ) -> FastAPI:
     """view_of(thread_id) returns what a thread shows ({"values": ..., "messages": ...}, as
     Threads.view), or {} for a thread without a work item."""
@@ -55,6 +69,9 @@ def create_app(
         if source not in LINK_OF:
             raise HTTPException(404, f"no webhooks from {source}")
         raw = await request.body()
+        if not signed(secrets.get(source, ""), raw, request.headers.get(SIGNATURE_HEADER[source])):
+            log.warning("a %s webhook without a valid signature: refused", source)
+            raise HTTPException(401, "the signature is missing or wrong")
         try:
             body = json.loads(raw)
         except json.JSONDecodeError as error:
@@ -81,7 +98,7 @@ def create_app(
         return {"thread_id": thread, "links": [str(other) for other in links.links_of(thread)]}
 
     def view_or_404(thread_id: str) -> View:
-        view = view_of(thread_id) if view_of else {}
+        view = view_of(thread_id)
         if not view and not links.links_of(thread_id):
             raise HTTPException(404, f"no thread {thread_id}")
         return view

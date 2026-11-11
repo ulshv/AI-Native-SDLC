@@ -279,7 +279,10 @@ need to know.
 - **Echo:** an event whose actor is the agent's Plane user or Gitea's `agent` or `agent-runner`
   is recorded and dropped.
 - **Signatures:** Plane's `X-Plane-Signature` and Gitea's `X-Gitea-Signature` are HMAC-SHA256
-  over the body with generated secrets; verified in the hardening group, after the loop works.
+  over the raw body with generated secrets, hex-encoded (checked against the live Plane). A
+  webhook without a valid signature gets 401 and is not recorded; without a configured secret,
+  none is accepted. A NetworkPolicy lets only Plane's and Gitea's namespaces reach the
+  orchestrator at all.
 
 ### 7. Agent runs: one Kubernetes Job per run
 
@@ -306,10 +309,17 @@ need to know.
   `archive/<key>` from `development` and opens a PR with only that commit.
 - **One run per item at a time:** the thread remembers the run going on and takes only that run's
   result. A request that needs another run while one goes gets "ask again when it is done";
-  closing the item or merging its PR ends the wait, and a result that arrives after that is
-  dropped. Runs keep counting when a closed item is assigned again, so their names stay new.
+  closing the item or merging its PR cancels the run (out of the pending queue, its Job deleted),
+  and a result that arrives after that is dropped. Runs keep counting when a closed item is
+  assigned again, so their names stay new.
 - **A failed run** moves the item to Needs info with the reason; the next comment mentioning
-  `@agent` runs the same mode again, with whatever the person wrote added as an answer.
+  `@agent` runs the same mode again, with whatever the person wrote added as an answer. An item
+  already on dev (a failed archive PR run) stays there, and asking for the archive again retries.
+- **A run's result that cannot be acted on** (Gitea refuses the merge, Plane is down) fails its
+  attempts like any event; on the last one the thread stops waiting for that run, which has
+  ended, and tells the people why, so they can act again.
+- **The status follows the work:** a status a person sets by hand that is no request is set
+  back to the item's phase.
 - **Changes after the archive:** a request for changes after the `archive` run takes the archive
   commit back (`git revert` in the `fix` run) before the fix, so the next approval archives
   again and the archive commit stays the last one before the merge.

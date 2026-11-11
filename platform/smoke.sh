@@ -239,8 +239,8 @@ check_ci_unprivileged() {
 }
 
 # Agent runs (namespace sdlc-agents) reach Gitea and the model provider, and nothing private: not
-# the database, Plane, Traefik (and the web UIs behind it) or the Kubernetes API (design decision
-# 7). A pod there tries each with a TCP connect.
+# the database, Plane, the orchestrator, Traefik (and the web UIs behind it) or the Kubernetes API
+# (design decision 7). A pod there tries each with a TCP connect.
 register agents_network
 check_agents_network() {
   local provider
@@ -252,7 +252,8 @@ check_agents_network() {
       for ok in gitea-http.gitea.svc:3000 $provider:443; do
         nc -z -w 5 \${ok%:*} \${ok#*:} || { echo \"cannot reach \$ok\"; fail=1; }
       done
-      for no in platform-pg-rw.databases.svc:5432 plane-api.plane.svc:8000 traefik.traefik.svc:443 kubernetes.default.svc:443; do
+      for no in platform-pg-rw.databases.svc:5432 plane-api.plane.svc:8000 orchestrator.sdlc.svc:80 \
+        traefik.traefik.svc:443 kubernetes.default.svc:443; do
         ! nc -z -w 3 \${no%:*} \${no#*:} || { echo \"reached \$no, which agent runs must not\"; fail=1; }
       done
       exit \$fail"

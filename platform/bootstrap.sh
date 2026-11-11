@@ -82,10 +82,15 @@ secret_value() {
 # Names of values in secrets.env that start or end with a quote or contain white space.
 malformed_secrets() {
   [[ -f $SECRETS_FILE ]] || return 0
-  sed -n 's/^\([A-Za-z0-9_]*\)=\(.*\)$/\1 \2/p' "$SECRETS_FILE" |
-    while read -r name value; do
-      [[ $value =~ ^[\"\'] || $value =~ [\"\']$ || $value =~ [[:space:]] ]] && echo "$name"
-    done || true
+  local line name value
+  # The whole line, untrimmed: a space at either end of a value is the mistake to catch.
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ $line =~ ^([A-Za-z0-9_]+)=(.*)$ ]] || continue
+    name=${BASH_REMATCH[1]} value=${BASH_REMATCH[2]}
+    if [[ $value =~ ^[\"\'] || $value =~ [\"\']$ || $value =~ [[:space:]] ]]; then
+      echo "$name"
+    fi
+  done <"$SECRETS_FILE"
 }
 
 required_external_secrets() {

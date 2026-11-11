@@ -18,7 +18,8 @@
 # "reason": "..."}.
 #
 # The run pushes to its own branch only, as agent-runner, which no branch protection lets merge.
-set -euo pipefail
+# -E: the ERR trap below fires inside functions too, so every failure ends with a result.
+set -Eeuo pipefail
 
 TASK=${TASK:-/task/task.json}
 TOKEN_FILE=${TOKEN_FILE:-/secrets/gitea/token}
@@ -41,8 +42,25 @@ redact() {
   printf '%s' "$text"
 }
 
-# result <json>: the run's one answer. A termination message holds at most 4 KiB, so long texts
-# are cut short before they get there.
+# result <json>: the run's one answer. A termination message holds at most 4096 bytes and the
+# kubelet cuts it there, which breaks the JSON: whoever builds a result keeps it under
+# MAX_RESULT_BYTES, counting bytes, not characters (Cyrillic takes two, escapes up to six).
+MAX_RESULT_BYTES=3900
+fits() { (($(printf '%s' "$1" | wc -c) <= MAX_RESULT_BYTES)); }
+
+# fitted <n> <jq arguments...>: the JSON jq builds with $n as the length of its long texts, $n
+# halved until it fits.
+fitted() {
+  local n=$1 message
+  shift
+  while :; do
+    message=$(jq -c --argjson n "$n" "$@")
+    if fits "$message" || ((n == 0)); then break; fi
+    n=$((n / 2))
+  done
+  printf '%s' "$message"
+}
+
 result() {
   local message
   message=$(redact "$1")
@@ -52,7 +70,8 @@ result() {
 
 fail() {
   trap - ERR
-  result "$(jq -nc --arg reason "${1:0:1500}" --arg branch "${BRANCH-}" '{result: "failed", reason: $reason, branch: $branch}')"
+  result "$(fitted 1500 -n --arg reason "$1" --arg branch "${BRANCH-}" \
+    '{result: "failed", reason: $reason[0:$n], branch: $branch}')"
   exit 1
 }
 trap 'fail "the run stopped at line $LINENO of agent-run"' ERR
@@ -110,21 +129,25 @@ opencode_run() {
   opencode run --pure --format json --model "$MODEL" --command "$1" "$2" </dev/null \
     >/tmp/opencode.jsonl 2>/tmp/opencode.err ||
     fail "opencode exited with $?: $(tail -c 400 /tmp/opencode.err)"
-  log "opencode took $((SECONDS - started)) s, $(jq -s '[.[] | select(.type == "step_finish")] | length' /tmp/opencode.jsonl) steps"
+  log "opencode took $((SECONDS - started)) s, $(jq -s '[.[] | select(.type == "step_finish")] | length' \
+    /tmp/opencode.jsonl 2>/dev/null || echo "?") steps"
   log "the agent's last words: $(last_words)"
 }
 
 # The model's final message, for the log and for a failure's reason.
 last_words() {
-  jq -rs '[.[] | select(.type == "text") | .part.text // empty] | last // "(none)"' /tmp/opencode.jsonl 2>/dev/null |
-    tr '\n' ' ' | cut -c1-600
+  # A log cut short (OpenCode stopped while writing) does not parse: then there are none.
+  [[ -s /tmp/opencode.jsonl ]] || { echo "(none)" && return; }
+  { jq -rs '[.[] | select(.type == "text") | .part.text // empty] | last // "(none)"' /tmp/opencode.jsonl 2>/dev/null ||
+    echo "(none)"; } | tr '\n' ' ' | cut -c1-600
 }
 
 # The agent asks by writing .agent/result.json (AGENTS.md of the target project); the run then
 # pushes nothing.
 questions_asked() { [[ -f .agent/result.json ]] && jq -e '.status == "questions"' .agent/result.json >/dev/null 2>&1; }
 answer_with_questions() {
-  result "$(jq -c '{result: "questions", questions: ((.questions // [])[:6] | map(tostring | .[0:550]))}' .agent/result.json)"
+  result "$(fitted 550 '{result: "questions", questions: ((.questions // [])[:6] | map(tostring | .[0:$n]))}' \
+    .agent/result.json)"
   exit 0
 }
 

@@ -18,7 +18,17 @@ from . import intents
 from .adapters import gitea, plane
 from .events import Event
 from .links import Link, Links
-from .model import Command, Intake, PrChanged, Request, RunFinished, RunResult, Where, WorkItem
+from .model import (
+    Command,
+    Intake,
+    PrChanged,
+    Request,
+    RunFinished,
+    RunResult,
+    StatusSet,
+    Where,
+    WorkItem,
+)
 from .policy import Intent, Phase, signal
 from .ports import CodeHost, Tracker
 from .projects import Person, Project, Projects
@@ -91,17 +101,17 @@ class Dispatcher:
             "assigned": self._intake,
             "pr_merged": lambda delivery, event, project, item: PrChanged(delivery=delivery, merged=True),
             "pr_closed": lambda delivery, event, project, item: PrChanged(delivery=delivery, merged=False),
+            "status": self._status,
         }
 
     def __call__(self, delivery: Delivery) -> None:
         if delivery.source == "job":  # an agent run's result names its thread itself
-            payload = delivery.payload
-            self.threads.run(
-                payload["thread_id"],
-                RunFinished(
-                    delivery=f"job/{delivery.delivery_id}", job=payload.get("job", ""), result=result_of(payload)
-                ),
+            result = RunFinished(
+                delivery=f"job/{delivery.delivery_id}",
+                job=delivery.payload.get("job", ""),
+                result=result_of(delivery.payload),
             )
+            self.threads.run(delivery.payload["thread_id"], result)
             return
         adapter = self.adapters.get(delivery.source)
         event = adapter(delivery) if adapter else None
@@ -150,6 +160,12 @@ class Dispatcher:
             project_id=data.get("project_id", ""),
             work_item_id=data.get("work_item_id", ""),
         )
+
+    def _status(self, delivery: str, event: Event, project: Project, item: WorkItem) -> Command | None:
+        """A status that stands for a request (Approved, Closed) is one; any other is set back."""
+        if signal(event.kind, event.data):
+            return self._request(delivery, event, project, item)
+        return StatusSet(delivery=delivery, project=project.name, status=event.data.get("state", ""))
 
     def _request(self, delivery: str, event: Event, project: Project, item: WorkItem) -> Request | None:
         person = self._person(project, event)

@@ -23,6 +23,9 @@ class FakeCluster:
     def finish(self, name, result):
         self.jobs[name]["done"] = result
 
+    def delete_run(self, name):
+        self.jobs.pop(name, None)
+
     def finished_jobs(self):
         return [
             Finished(
@@ -65,6 +68,17 @@ def test_a_third_run_waits_until_one_finishes(pool):
     cluster.finish(names[0], {"result": "spec_ready"})
     ex.start_waiting()
     assert names[2] in cluster.jobs
+
+
+def test_a_cancelled_run_neither_waits_nor_runs_and_its_room_goes_to_the_next(pool):
+    cluster = FakeCluster()
+    ex = executor(pool, cluster)
+    names = [run_name(f"EWA-{n}", "propose", 1) for n in (1, 2, 3, 4)]
+    for i, name in enumerate(names):
+        ex.start(Run(name, f"t-{i}", task(f"EWA-{i + 1}")))
+    ex.cancel(names[3])  # waiting
+    ex.cancel(names[0])  # going: EWA-3, waiting longest, takes its room
+    assert set(cluster.jobs) == {names[1], names[2]}
 
 
 def test_starting_a_run_twice_finds_the_first(pool):

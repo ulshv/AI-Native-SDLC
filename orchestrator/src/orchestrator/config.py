@@ -57,6 +57,7 @@ class Settings(MigrateSettings):
 
     model_config = SettingsConfigDict(extra="forbid", env_ignore_empty=True)
 
+    # Secrets: required, so a pod without one stops at start instead of failing every call.
     llm_api_key: SecretStr
     # The model provider (any OpenAI-compatible API) and the models for reading intents and for runs.
     llm_base_url: str = "https://routerai.ru/api/v1"
@@ -72,13 +73,13 @@ class Settings(MigrateSettings):
     orchestrator_commit: str = "unknown"
     agent_image: str = ""
     plane_url: str = "http://plane-api.plane.svc:8000"
-    plane_api_key: SecretStr = SecretStr("")
+    plane_api_key: SecretStr
     plane_people: dict[str, str] = {}  # username -> Plane user id, from the Secret sdlc/plane-agent
     gitea_url: str = "http://gitea-http.gitea.svc:3000"
     gitea_public_url: str = "https://gitea.sdlc.internal"  # for the addresses people open
-    gitea_token: SecretStr = SecretStr("")
-    plane_webhook_secret: SecretStr = SecretStr("")
-    gitea_webhook_secret: SecretStr = SecretStr("")
+    gitea_token: SecretStr
+    plane_webhook_secret: SecretStr
+    gitea_webhook_secret: SecretStr
 
     @model_validator(mode="after")
     def _agent_image_of_the_commit(self) -> Self:

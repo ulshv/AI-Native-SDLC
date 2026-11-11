@@ -53,3 +53,6 @@ class CodeHost(Protocol):
 class RunStarter(Protocol):
     def start(self, run: Run) -> str:
         """Starts the run, or queues it while others go; starting it again finds the first try's."""
+
+    def cancel(self, name: str) -> None:
+        """Takes the run out of the queue, or stops its Job; nothing when it is gone already."""

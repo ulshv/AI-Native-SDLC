@@ -32,6 +32,8 @@ from .model import (
     Request,
     RunFinished,
     RunResult,
+    StatusSet,
+    StepFailed,
     Then,
     Ticket,
     Where,
@@ -166,8 +168,10 @@ class Step:
         self.start(run.mode, run.then, branch=run.branch, unarchive=run.unarchive)
 
     def stop(self) -> None:
-        """The item moved on: whatever run goes on, its result no longer counts, and questions
-        asked before wait for no answer."""
+        """The item moved on: the run going on is cancelled (its result would no longer count),
+        and questions asked before wait for no answer."""
+        if self.item.running and self.ports.executor:
+            self.ports.executor.cancel(self.item.running.name(self.key))
         self.item.running = None
         self.item.paused = None
 
@@ -374,13 +378,14 @@ def questions(s: Step, run: AgentRun, result: RunResult) -> None:
 
 
 def failed(s: Step, run: AgentRun, result: RunResult) -> None:
-    """A failed run, or a result the loop does not know: a person decides whether to retry."""
-    s.pause(
-        run,
-        [],
-        f"The {run.mode} run failed: {result.reason or 'no reason given'}. "
-        "Reply with @agent to run it again; anything you add goes to the agent.",
-    )
+    """A failed run, or a result the loop does not know: a person decides whether to retry. An
+    item already merged (the archive pull request's run) stays where it is: asking for the
+    archive again retries it, and nothing reopens work that is on dev."""
+    reason = f"The {run.mode} run failed: {result.reason or 'no reason given'}."
+    if s.item.phase not in OPEN:
+        s.say(f"{reason} Ask @agent again to retry.")
+        return
+    s.pause(run, [], f"{reason} Reply with @agent to run it again; anything you add goes to the agent.")
 
 
 OUTCOMES = {"spec_ready": spec_ready, "code_ready": code_ready, "archived": archived, "questions": questions}
@@ -442,6 +447,22 @@ def pr_changed(s: Step, c: PrChanged) -> None:
         PR_EVENTS[c.merged](s)
 
 
+# --- what is not a request ------------------------------------------------------------------------
+
+
+def status_set(s: Step, c: StatusSet) -> None:
+    """The ticket's status follows the work: one a person set by hand goes back to the phase."""
+    if s.item.phase and c.status != s.item.phase:
+        s.set_status(s.item.phase)
+
+
+def step_failed(s: Step, c: StepFailed) -> None:
+    """A run's result could not be acted on, however often it was tried (Gitea refused the merge,
+    say): the item stops waiting for that run, which has ended, so the people can act again."""
+    s.item.running = None
+    s.say(f"I could not finish a step on {s.key}: {c.reason}. Fix what blocks it, then ask @agent again.")
+
+
 # --- a step --------------------------------------------------------------------------------------
 
 STEPS: dict[type, Callable[[Step, Any], None]] = {
@@ -449,6 +470,8 @@ STEPS: dict[type, Callable[[Step, Any], None]] = {
     Request: request,
     RunFinished: run_finished,
     PrChanged: pr_changed,
+    StatusSet: status_set,
+    StepFailed: step_failed,
 }
 
 

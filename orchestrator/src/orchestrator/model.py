@@ -185,5 +185,19 @@ class PrChanged(CommandBase):
     merged: bool
 
 
-Command = Annotated[Intake | Request | RunFinished | PrChanged, Field(discriminator="kind")]
+class StatusSet(CommandBase):
+    """A person set the ticket's status in the tracker to something that is not a request."""
+
+    kind: Literal["status"] = "status"
+    status: str
+
+
+class StepFailed(CommandBase):
+    """A step of the thread failed every time it was tried, and its event was given up."""
+
+    kind: Literal["failed"] = "failed"
+    reason: str
+
+
+Command = Annotated[Intake | Request | RunFinished | PrChanged | StatusSet | StepFailed, Field(discriminator="kind")]
 COMMANDS: TypeAdapter[Command] = TypeAdapter(Command)

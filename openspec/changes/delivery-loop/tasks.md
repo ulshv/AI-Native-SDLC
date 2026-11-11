@@ -1,7 +1,7 @@
 # Tasks
 
 > **TL;DR**
-> - **12 groups, 71 tasks:** spikes → platform additions → CI → Plane setup → `example-webapp` → agent runs → orchestrator → the loop end to end → environments → releases → hardening → docs and final checks.
+> - **12 groups, 76 tasks:** spikes → platform additions → CI → Plane setup → `example-webapp` → agent runs → orchestrator → the loop end to end → environments → releases → hardening → docs and final checks.
 > - **CI comes early,** because it builds the orchestrator and the agent image: from group 3 on, a push to `main` builds the platform's images and Argo CD rolls them out.
 > - **The loop works after group 8:** a ticket goes from assignment to a merge into `development` with both gates; previews and releases come after it, so a demo can happen there.
 > - **Spikes first (group 1):** OpenCode unattended with an OpenAI-compatible provider, the wildcard resolver against the VPN client, Plane's setup by script and its webhook payloads, Gitea's merge allowlists, the ApplicationSet matrix, the runner in host mode with BuildKit. Any of them can send us back to the design.
@@ -82,7 +82,7 @@
 - [ ] 7.10 Add `platform/apps/orchestrator/` (a PreSync Job running `orchestrator migrate` with the same image, Deployment with a rolling update that keeps the old pod until the new one is ready, Service, config, project files through `configMapGenerator`, RBAC from design decision 7, Secrets, image tag from `$ARGOCD_APP_REVISION`). Verify a push to `main` rolls out the new image within 10 minutes, a commit whose build fails leaves the old pod running, the Gitea organization webhook to the orchestrator (registered by the bootstrap, signed with `GITEA_WEBHOOK_SECRET`) exists, and a smoke check covers health and webhooks
 - [x] 7.11 Write `orchestrator/README.md` (layout, local run, tests, configuration, how a change reaches the cluster), and verify the commands work as written
 
-Tasks 7.12–7.18 bring the orchestrator to the engineering standards in `AGENTS.md`. They come before 7.10's rollout check, since they change the migrate Job and the probes.
+Tasks 7.12–7.23 bring the orchestrator to the engineering standards in `AGENTS.md`. They come before 7.10's rollout check, since they change the migrate Job and the probes.
 
 - [x] 7.12 Replace the hand-written schema in `db.py` with Alembic: the first revision creates today's tables, later changes are one revision each, forward-only; `orchestrator migrate` runs `alembic upgrade head` and LangGraph's checkpoint setup; `serve` refuses to start unless the database is at the image's head revision. Verify with tests that migrate on an empty database reaches head and is safe to repeat, and that `serve` refuses a database one revision behind
 - [x] 7.13 Replace `config.py` with one pydantic-settings model (environment over `config.yaml`), validated at start, with no default duplicated elsewhere. Verify with tests that a missing `DATABASE_URL` or `LLM_API_KEY`, or a malformed value, stops the process with a message naming the setting
@@ -91,6 +91,11 @@ Tasks 7.12–7.18 bring the orchestrator to the engineering standards in `AGENTS
 - [ ] 7.16 Make the service operable: JSON logs through structlog with the delivery, thread and run ids bound to every line; `/livez` (the process answers) and `/readyz` (the database answers) as separate probes; graceful shutdown on SIGTERM (stop taking events, release leased ones, stop the watcher); `/metrics` for Prometheus with queue depth and oldest event age, failed events, active and waiting runs, and errors of calls to the outside. Verify that stopping Postgres turns the pod unready without a restart, that a SIGTERM leaves no leased rows, and that the metrics show a queued event
 - [ ] 7.17 Take the hot path's repeated work out: the dispatcher reads a thread's item once per delivery and hands it to the step, and `LiveProjects` checks its files at most every few seconds instead of on every lookup. Verify with tests that one delivery reads its checkpoint once and that a changed project file is still picked up
 - [ ] 7.18 Add `shellcheck` for `platform/*.sh` and `agent-runner/entrypoint.sh` to CI and fix what it finds, and record the choices of 7.12–7.17 (Alembic, pydantic-settings, tenacity, structlog, the probes) in design decision 4 and `orchestrator/README.md`. Verify the CI job fails on a shellcheck error and the README's commands work as written
+- [ ] 7.19 Read a request once: keep the command a delivery was read as with the delivery, and use it on every retry, so a model call that reads differently the second time cannot turn an approval into a revision. Verify with a test where the second reading differs
+- [ ] 7.20 Make every idempotence lookup see everything: the item's pull request by an exact head and base lookup, labels and Plane's comments across all pages. Verify with tests against fakes holding more than one page
+- [ ] 7.21 Close the routing race: a worker that takes an event whose object got a thread meanwhile moves it to the thread's key and puts it back instead of running it beside the thread's own events. Verify with a test where the link appears between recording and taking
+- [ ] 7.22 Let the run watcher continue from the last listing's resourceVersion and resync only on start and after an error. Verify with a test on a fake cluster that a finished Job is recorded once per cycle
+- [ ] 7.23 Type the events: their kinds as an enum and their data as a model per kind, and the adapters' parsing as a table by event header instead of a chain of ifs. Verify that mypy finds a misspelled kind or data field, and the adapter tests pass unchanged
 
 ## 8. The loop end to end
 
@@ -103,7 +108,7 @@ Tasks 7.12–7.18 bring the orchestrator to the engineering standards in `AGENTS
 
 - [ ] 9.1 Add the wildcard resolver to the bootstrap's host phase as spike 1.2 ran it: a `dnsmasq` systemd unit on `127.0.0.2` and a DNS delegate with `Domains=~sdlc.internal`. Verify, with the VPN client on and offline, that a new name at any depth under `sdlc.internal` resolves on the host without editing `hosts.txt`, that `sdlc.internal` is not in the search list and a failed lookup of another name never returns `127.0.0.1`, and document how to undo it
 - [ ] 9.2 Add the dev and prod ApplicationSet from design decision 11. Verify `https://dev.example-webapp.sdlc.internal` and `https://example-webapp.sdlc.internal` load without certificate warnings and run the image of their branch's head commit, and that the dev deployment scaled by hand returns to its declared state within 5 minutes
-- [ ] 9.3 Add the preview ApplicationSet (one `<project>-preview` namespace per project, Helm release named after the preview id) and cert-manager's `enableCertificateOwnerRef`, turn `previews` on for `example-webapp`, and make the orchestrator label the PR on `code_ready` and poll the preview's `/version.json`. Verify the item goes Implementing → Deploying to QA → Code review with the preview link once the preview serves the commit, that the preview loads over HTTPS without certificate warnings, that the preview follows a pushed fix and disappears within 5 minutes of the merge leaving nothing of it, its TLS Secret included, in the preview namespace, and that a failed build moves the item to Code review after 15 minutes with the reason
+- [ ] 9.3 Add the preview ApplicationSet (one `<project>-preview` namespace per project, Helm release named after the preview id) and cert-manager's `enableCertificateOwnerRef`, allow `previews: true` in `project.schema.json` (only `false` until then) and turn it on for `example-webapp`, and make the orchestrator label the PR on `code_ready` and poll the preview's `/version.json`. Verify the item goes Implementing → Deploying to QA → Code review with the preview link once the preview serves the commit, that the preview loads over HTTPS without certificate warnings, that the preview follows a pushed fix and disappears within 5 minutes of the merge leaving nothing of it, its TLS Secret included, in the preview namespace, and that a failed build moves the item to Code review after 15 minutes with the reason
 - [ ] 9.4 Add smoke checks for the environments and document them in `platform/README.md`, and verify the checks fail when the dev Application is out of sync
 
 ## 10. Releases
@@ -114,7 +119,7 @@ Tasks 7.12–7.18 bring the orchestrator to the engineering standards in `AGENTS
 
 ## 11. Hardening
 
-- [ ] 11.1 Verify webhook signatures (`X-Plane-Signature`, `X-Gitea-Signature`) with the generated secrets. Verify with tests that a wrong or missing signature gets 401 and records nothing
+- [x] 11.1 Verify webhook signatures (`X-Plane-Signature`, `X-Gitea-Signature`) with the generated secrets. Verify with tests that a wrong or missing signature gets 401 and records nothing (done in group 7, with a NetworkPolicy that admits only Plane and Gitea)
 - [ ] 11.2 Comment in the ticket when a run fails or times out. Verify with tests for a failed run and for a run past its deadline
 - [ ] 11.3 Extend the smoke checks for NetworkPolicies: `sdlc-agents` and `ci` cannot reach Postgres, Plane or the orchestrator. Verify they pass and fail when a policy is removed
 

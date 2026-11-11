@@ -60,6 +60,9 @@ class Cluster(Protocol):
     def create_run(self, run: Run, manifest: dict[str, Any], task_json: str) -> None:
         """Creates the run's ConfigMap and Job, each unless it exists: a retry completes a half-done start."""
 
+    def delete_run(self, name: str) -> None:
+        """Deletes the run's Job and ConfigMap, each unless it is gone."""
+
     def finished_jobs(self) -> list[Finished]: ...
 
     def watch_finished(self, stop: threading.Event) -> Iterator[Finished]: ...
@@ -167,6 +170,17 @@ class Executor:
             return "started"
         log.info("run %s waits: %d runs are going", run.name, self.max_active)
         return "waiting"
+
+    def cancel(self, name: str) -> None:
+        """A run nobody waits for any more: out of the queue, its Job stopped and deleted, and its
+        room given to the next. Under the run limit's lock, so start_waiting cannot be starting
+        it at the same moment."""
+        with self.pool.connection() as conn, conn.transaction():
+            conn.execute("SELECT pg_advisory_xact_lock(%s)", (LOCK,))
+            conn.execute("DELETE FROM pending_runs WHERE name = %s", (name,))
+            self.cluster.delete_run(name)
+        log.info("cancelled run %s", name)
+        self.start_waiting()
 
     def _create(self, run: Run) -> None:
         self.cluster.create_run(run, job_manifest(run, self.image, self.namespace), json.dumps(run.task))
@@ -290,6 +304,24 @@ class KubernetesCluster:
             },
             _request_timeout=API_TIMEOUT,
         )
+
+    def delete_run(self, name: str) -> None:
+        from kubernetes.client import V1DeleteOptions
+        from kubernetes.client.exceptions import ApiException
+
+        # The pod goes with the Job (background propagation), the ConfigMap with its owner, the
+        # Job; deleting the ConfigMap too covers a start that stopped before the Job.
+        for delete in (self.batch.delete_namespaced_job, self.core.delete_namespaced_config_map):
+            try:
+                delete(
+                    name,
+                    self.namespace,
+                    body=V1DeleteOptions(propagation_policy="Background"),
+                    _request_timeout=API_TIMEOUT,
+                )
+            except ApiException as error:
+                if error.status != 404:
+                    raise
 
     def _finished(self, job: V1Job) -> Finished:
         pods = self.core.list_namespaced_pod(

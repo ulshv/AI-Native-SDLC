@@ -75,20 +75,22 @@ runner, before any image is built.
 ## Local run
 
 The service needs its tables first: `migrate` creates or updates them, and `serve` refuses to
-start while any are missing. With the Postgres above:
+start while any are missing. It also refuses to start without its secrets. With the Postgres
+above, and any values while nothing calls out:
 
 ```bash
 export DATABASE_URL=postgresql://postgres:test@127.0.0.1:55432/postgres
 export ORCHESTRATOR_CONFIG=/dev/null PROJECTS_DIR=../platform/projects
 uv run --python 3.13 orchestrator migrate
-LLM_API_KEY=... uv run --python 3.13 orchestrator serve --port 8000
+export LLM_API_KEY=... PLANE_API_KEY=... GITEA_TOKEN=... PLANE_WEBHOOK_SECRET=x GITEA_WEBHOOK_SECRET=x
+uv run --python 3.13 orchestrator serve --port 8000
 curl -s localhost:8000/healthz
 ```
 
 Without `ORCHESTRATOR_COMMIT` or `AGENT_IMAGE`, agent runs are off: the service reads events and
 answers, and an action that needs a run fails. Plane and Gitea are reached at their in-cluster
 addresses by default. From the host, set `plane_url` and `gitea_url` in a config file to
-`https://plane.sdlc.internal` and `https://gitea.sdlc.internal`, and give it `PLANE_API_KEY` and
+`https://plane.sdlc.internal` and `https://gitea.sdlc.internal`, with real `PLANE_API_KEY` and
 `GITEA_TOKEN`.
 
 ## Schema changes
@@ -137,7 +139,7 @@ The environment holds the secrets and connections (`migrate` needs `DATABASE_URL
 |---|---|
 | `DATABASE_URL` | the Secret `sdlc/orchestrator-env` |
 | `LLM_API_KEY` | `sdlc/orchestrator-env` (from `secrets.env`) |
-| `PLANE_WEBHOOK_SECRET`, `GITEA_WEBHOOK_SECRET` | `sdlc/orchestrator-env`; signatures are checked from the hardening group on |
+| `PLANE_WEBHOOK_SECRET`, `GITEA_WEBHOOK_SECRET` | `sdlc/orchestrator-env`; a webhook without a valid signature gets 401 |
 | `PLANE_API_KEY`, `PLANE_PEOPLE` | `sdlc/plane-agent`, from Plane's setup Job |
 | `GITEA_TOKEN` | `sdlc/gitea-agent`, from the bootstrap |
 | `PROJECTS_DIR` | the ConfigMap `target-projects`; a changed file is read again without a restart |

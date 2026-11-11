@@ -4,16 +4,19 @@ import pytest
 
 from orchestrator import config
 
+SECRETS = ("LLM_API_KEY", "PLANE_API_KEY", "GITEA_TOKEN", "PLANE_WEBHOOK_SECRET", "GITEA_WEBHOOK_SECRET")
+
 
 @pytest.fixture
 def env(monkeypatch, tmp_path):
-    for name in ("DATABASE_URL", "LLM_API_KEY", "ORCHESTRATOR_COMMIT", "AGENT_IMAGE", "WORKERS"):
+    for name in ("DATABASE_URL", "ORCHESTRATOR_COMMIT", "AGENT_IMAGE", "WORKERS", *SECRETS):
         monkeypatch.delenv(name, raising=False)
     file = tmp_path / "config.yaml"
     file.write_text("workers: 3\nintent_threshold: 0.8\n")
     monkeypatch.setenv("ORCHESTRATOR_CONFIG", str(file))
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db/o")
-    monkeypatch.setenv("LLM_API_KEY", "key")
+    for name in SECRETS:
+        monkeypatch.setenv(name, "secret")
     return monkeypatch
 
 
@@ -30,6 +33,7 @@ def test_the_environment_wins_over_the_file_and_the_agent_image_follows_the_comm
     [
         (lambda env: env.delenv("DATABASE_URL"), "DATABASE_URL: Field required"),
         (lambda env: env.delenv("LLM_API_KEY"), "LLM_API_KEY: Field required"),
+        (lambda env: env.setenv("GITEA_WEBHOOK_SECRET", ""), "GITEA_WEBHOOK_SECRET: Field required"),
         (lambda env: env.setenv("WORKERS", "many"), "WORKERS:"),
         (lambda env: env.setenv("INTENT_THRESHOLD", "2"), "INTENT_THRESHOLD:"),
     ],
