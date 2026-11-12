@@ -18,6 +18,7 @@ src/orchestrator/
   model.py       the work item a thread keeps, and the commands of its steps
   policy.py      phases, rules (intent, phases, roles), explicit signals
   intents.py     reading a request with one model call
+  llm.py         the model provider's clients, chosen by the model's prefix
   logs.py        JSON logs through structlog, with the ids bound to a delivery, thread or run
   metrics.py     the Prometheus metrics at /metrics
   config.py      settings: config.yaml (ORCHESTRATOR_CONFIG) overlaid with the environment
@@ -126,7 +127,7 @@ the file.
 | Setting | Default | |
 |---|---|---|
 | `llm_base_url` | `https://routerai.ru/api/v1` | any OpenAI-compatible API |
-| `intent_model` | `deepseek/deepseek-v4-flash-0731` | reads requests; `deepseek/*` gets ChatDeepSeek, others ChatOpenAI |
+| `intent_model` | `deepseek/deepseek-v4-flash-0731` | reads requests, at temperature 0; `deepseek/*` gets ChatDeepSeek, others ChatOpenAI |
 | `agent_model` | `llm/deepseek/deepseek-v4-flash-0731` | for agent runs; one of `platform/apps/agents/opencode-config.yaml` |
 | `intent_threshold` | `0.7` | below it, the agent asks what was meant |
 | `workers` | `2` | threads taking events |

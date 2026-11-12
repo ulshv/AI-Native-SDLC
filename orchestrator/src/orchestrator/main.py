@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
 from psycopg_pool import ConnectionPool
 
-from . import agent, config, db, intents, logs
+from . import agent, config, db, intents, llm, logs
 from .adapters.gitea import GiteaCodeHost
 from .adapters.plane import PlaneTracker
 from .api import create_app
@@ -81,8 +81,11 @@ def serve(settings: config.Settings, host: str, port: int) -> int:
                 settings.gitea_url, settings.gitea_token.get_secret_value(), settings.gitea_public_url
             ),
             executor=executor,
-            chat=intents.chat_model(
-                settings.intent_model, settings.llm_base_url, settings.llm_api_key.get_secret_value()
+            chat=llm.chat_model(
+                settings.intent_model,
+                settings.llm_base_url,
+                settings.llm_api_key.get_secret_value(),
+                temperature=intents.TEMPERATURE,
             ),
             agent_model=settings.agent_model,
             threshold=settings.intent_threshold,

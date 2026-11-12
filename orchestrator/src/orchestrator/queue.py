@@ -32,7 +32,7 @@ from .metrics import GIVEN_UP, failed_call
 log = logging.getLogger(__name__)
 
 # Longer than any handler takes: a step makes a few calls, each bounded by http.CALL_BUDGET and
-# intents.MODEL_TIMEOUT with its retries.
+# llm.TIMEOUT with its retries.
 LEASE_SECONDS = 900
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator import intents
+from orchestrator import intents, llm
 from orchestrator.machine import POLICY
 from orchestrator.policy import OPEN, Intent, Phase
 from orchestrator.projects import LiveProjects, Projects
@@ -134,8 +134,8 @@ def test_the_model_client_is_chosen_by_the_models_prefix():
     from langchain_deepseek import ChatDeepSeek
     from langchain_openai import ChatOpenAI
 
-    assert isinstance(intents.chat_model("deepseek/deepseek-v4-flash-0731", "https://x/v1", "k"), ChatDeepSeek)
-    assert isinstance(intents.chat_model("z-ai/glm-5.2", "https://x/v1", "k"), ChatOpenAI)
+    assert isinstance(llm.chat_model("deepseek/deepseek-v4-flash-0731", "https://x/v1", "k", 0), ChatDeepSeek)
+    assert isinstance(llm.chat_model("z-ai/glm-5.2", "https://x/v1", "k", 0), ChatOpenAI)
 
 
 def test_an_unsure_reading_or_none_is_not_acted_on():
@@ -146,10 +146,11 @@ def test_an_unsure_reading_or_none_is_not_acted_on():
 
 @pytest.mark.skipif(not os.environ.get("LLM_API_KEY"), reason="a live call needs LLM_API_KEY")
 def test_live_a_plain_approval_reads_as_approve():
-    chat = intents.chat_model(
+    chat = llm.chat_model(
         os.environ.get("INTENT_MODEL", "deepseek/deepseek-v4-flash-0731"),
         os.environ.get("LLM_BASE_URL", "https://routerai.ru/api/v1"),
         os.environ["LLM_API_KEY"],
+        intents.TEMPERATURE,
     )
     reading = intents.read(chat, "@agent looks good, go ahead", "Spec review", "The spec is ready for review.")
     assert reading.intent is Intent.APPROVE and reading.confidence >= 0.7
