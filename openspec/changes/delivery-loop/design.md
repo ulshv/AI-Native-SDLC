@@ -166,10 +166,24 @@ worker: take the oldest unprocessed row for a thread not being handled (FOR UPDA
 - FastAPI for the endpoints; one worker loop in the same process; Postgres database
   `orchestrator` in the shared cluster for the inbox, `thread_link` and LangGraph's
   checkpoints.
-- **Migrations are a step of their own:** `orchestrator migrate` (the orchestrator's tables and
-  LangGraph's) runs as an Argo CD PreSync Job with the same image before every rollout; the
-  service never changes the schema and refuses to start while a table is missing. CI runs the
-  tests but never reaches the database.
+- **Migrations are a step of their own:** the orchestrator's tables are Alembic revisions,
+  forward-only and expand-then-contract; `orchestrator migrate` (those and LangGraph's
+  checkpoint tables) runs as an Argo CD PreSync Job with the same image before every rollout.
+  The service never changes the schema: it refuses to start on a database behind its code, and
+  runs on one a newer release migrated, which is what makes a rollback work. CI runs the tests
+  but never reaches the database.
+- **Standard parts** (the engineering standards in `AGENTS.md`): settings are one pydantic-settings
+  model per command, checked at start, with every secret required; calls to Plane, Gitea, the
+  model and Kubernetes have timeouts, and tenacity retries only what is safe to send again (429
+  and refused connections always, server errors and lost answers for idempotent methods),
+  within 120 s a call; webhook payloads are parsed into pydantic models and events are typed
+  (their kind, and the work item, pull request or release they are about); Pyright strict, the
+  checker Pylance runs in the editor, and ruff gate CI.
+- **Operating it:** JSON logs through structlog with the delivery, thread and run bound to every
+  line; `/livez` (the process) apart from `/readyz` (its database), so a database outage takes
+  the pod out of the Service without restarting it; on SIGTERM the workers stop in the app's
+  lifespan, finish within 45 s and release what is still leased; Prometheus metrics at
+  `/metrics` for the queue, the runs and failed calls to the outside.
 - **The queue is a table, behind an interface.** Events and the graph's checkpoints live in one
   database (the inbox pattern, as in Oban, graphile-worker or pgmq). Duplicates are caught by
   the unique delivery id for as long as the row exists, while Gitea can redeliver a webhook days
@@ -195,7 +209,13 @@ worker: take the oldest unprocessed row for a thread not being handled (FOR UPDA
   `GET /threads/{thread_id}/messages`, and `GET /threads?link=<kind>:<ref>` to find a thread by
   what it is linked to.
 - **Restart:** unprocessed inbox rows are simply picked up again; the Job watcher lists existing
-  Jobs on start and enqueues results it has not recorded.
+  Jobs on start and enqueues results it has not recorded, then watches on from that listing's
+  version, listing again only after an error.
+- **CI before an image:** the orchestrator's lint, types and tests; shellcheck on every script;
+  the manifests Argo CD applies from this repository, rendered and checked with kubeconform (the
+  external charts are not rendered: their values are not manifests, and a chart takes unknown
+  values silently); and agent-runner's tests, a stage of its Dockerfile that runs its entrypoint
+  for every mode with OpenCode and OpenSpec stubbed.
 - **Alternatives:** LangChain DeepAgents (`create_deep_agent` with its middleware), dropping to
   LangGraph only where the middleware falls short. It is a harness for an agent that loops and
   picks its own next tool, while the orchestrator is a state machine with one model call to read

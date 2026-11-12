@@ -105,7 +105,7 @@ with the version still running during a rollout: add first, drop or rename in a 
 
 ```bash
 export DATABASE_URL=postgresql://postgres:test@127.0.0.1:55432/postgres
-uv run --python 3.13 alembic revision -m "add a column" --rev-id 0002   # then write upgrade()
+uv run --python 3.13 alembic revision -m "add a column" --rev-id 0003   # then write upgrade()
 uv run --python 3.13 orchestrator migrate                               # what the PreSync Job runs
 ```
 
@@ -153,8 +153,10 @@ only `DATABASE_URL`:
 
 ## How a change reaches the cluster
 
-1. A push to `main` in Gitea starts `.gitea/workflows/images.yaml`: lint, types and tests, then
-   `platform/orchestrator:<commit>` and `platform/agent-runner:<commit>`.
+1. A push to `main` in Gitea starts `.gitea/workflows/images.yaml`: the orchestrator's lint,
+   types and tests, shellcheck on the scripts and the manifests' check, then
+   `platform/orchestrator:<commit>` and `platform/agent-runner:<commit>` (after agent-runner's own
+   tests in its image).
 2. Argo CD syncs `platform/apps/orchestrator/` with `image.tag=$ARGOCD_APP_REVISION`, the same
    commit. Its PreSync Job runs `orchestrator migrate` with the new image, and then the
    Deployment rolls over. The old pod keeps serving until the new one is ready. If the build
