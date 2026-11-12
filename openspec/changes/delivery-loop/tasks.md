@@ -1,7 +1,7 @@
 # Tasks
 
 > **TL;DR**
-> - **12 groups, 79 tasks:** spikes → platform additions → CI → Plane setup → `example-webapp` → agent runs → orchestrator → the loop end to end → environments → releases → hardening → docs and final checks.
+> - **12 groups, 80 tasks:** spikes → platform additions → CI → Plane setup → `example-webapp` → agent runs → orchestrator → the loop end to end → environments → releases → hardening → docs and final checks.
 > - **CI comes early,** because it builds the orchestrator and the agent image: from group 3 on, a push to `main` builds the platform's images and Argo CD rolls them out.
 > - **The loop works after group 8:** a ticket goes from assignment to a merge into `development` with both gates; previews and releases come after it, so a demo can happen there.
 > - **Spikes first (group 1):** OpenCode unattended with an OpenAI-compatible provider, the wildcard resolver against the VPN client, Plane's setup by script and its webhook payloads, Gitea's merge allowlists, the ApplicationSet matrix, the runner in host mode with BuildKit. Any of them can send us back to the design.
@@ -82,7 +82,7 @@
 - [x] 7.10 Add `platform/apps/orchestrator/` (a PreSync Job running `orchestrator migrate` with the same image, Deployment with a rolling update that keeps the old pod until the new one is ready, Service, config, project files through `configMapGenerator`, RBAC from design decision 7, Secrets, image tag from `$ARGOCD_APP_REVISION`). Verify a push to `main` rolls out the new image within 10 minutes, a commit whose build fails leaves the old pod running, the Gitea organization webhook to the orchestrator (registered by the bootstrap, signed with `GITEA_WEBHOOK_SECRET`) exists, and a smoke check covers health and webhooks
 - [x] 7.11 Write `orchestrator/README.md` (layout, local run, tests, configuration, how a change reaches the cluster), and verify the commands work as written
 
-Tasks 7.12–7.26 bring the orchestrator and the platform's CI to the engineering standards in `AGENTS.md`. They come before 7.10's rollout check, since they change the migrate Job and the probes.
+Tasks 7.12–7.27 bring the orchestrator and the platform's CI to the engineering standards in `AGENTS.md`. They come before 7.10's rollout check, since they change the migrate Job and the probes.
 
 - [x] 7.12 Replace the hand-written schema in `db.py` with Alembic: the first revision creates today's tables, later changes are one revision each, forward-only; `orchestrator migrate` runs `alembic upgrade head` and LangGraph's checkpoint setup; `serve` refuses to start unless the database is at the image's head revision. Verify with tests that migrate on an empty database reaches head and is safe to repeat, and that `serve` refuses a database one revision behind
 - [x] 7.13 Replace `config.py` with one pydantic-settings model (environment over `config.yaml`), validated at start, with no default duplicated elsewhere. Verify with tests that a missing `DATABASE_URL` or `LLM_API_KEY`, or a malformed value, stops the process with a message naming the setting
@@ -99,6 +99,7 @@ Tasks 7.12–7.26 bring the orchestrator and the platform's CI to the engineerin
 - [x] 7.24 Add a `scripts` job to `.gitea/workflows/images.yaml`: `shellcheck` on `platform/*.sh`, `platform/hooks/*` and `agent-runner/entrypoint.sh`, and fix what it finds. Verify the job fails on a shellcheck error and passes on `main`
 - [x] 7.25 Add a `manifests` job: render every `platform/apps/*` (`helm template` for the charts, `kustomize build` for the rest), check the output with kubeconform against Kubernetes' schemas and those of the CRDs in use (Argo CD, cert-manager, CloudNativePG), and check `platform/projects/*/project.yaml` against `project.schema.json`. Verify the job fails on a broken manifest, an unknown field and a project file outside the schema, and passes on `main`
 - [x] 7.26 Test agent-runner in CI: a `test` stage of its Dockerfile runs `entrypoint.sh` in the image against a throwaway git repository with OpenCode and the OpenSpec CLI stubbed, for each mode's result (spec_ready, code_ready, archived, questions, failed), the 4 KiB limit with long non-ASCII questions, the archive taken back before a fix, and the refusal to push another branch; the `images` job builds that stage before the image and needs `test`, `scripts` and `manifests`. Verify a broken result format fails the job
+- [ ] 7.27 Let the orchestrator follow the people's Plane ids as it follows the project files: mount `people.json` of the Secret `sdlc/plane-agent` as a file and read it again when it changes, instead of the environment variable read once at start. Verify that a person added to a project file and to Plane is recognised without restarting the orchestrator
 
 ## 8. The loop end to end
 
