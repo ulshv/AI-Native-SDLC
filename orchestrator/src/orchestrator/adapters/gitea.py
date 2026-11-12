@@ -24,6 +24,7 @@ from ..links import Link
 from .plane import header
 
 KIND = "gitea_pr"
+PAGE, MAX_PAGES = 50, 100  # a page of Gitea's lists, and how many are read at most
 AGENT_ACCOUNTS = {"agent", "agent-runner"}
 MENTION = re.compile(r"(?<![\w@])@agent(?![\w-])")
 REVIEWS = {
@@ -160,9 +161,20 @@ class GiteaCodeHost:
     def pr_url(self, repo: str, number: int) -> str:
         return f"{self.public_url}/{repo}/pulls/{number}"
 
+    def every(self, path: str, **params: str) -> list[dict[str, Any]]:
+        """Every item of one of Gitea's paged lists (page, limit), so a lookup never misses one
+        past the first page."""
+        items: list[dict[str, Any]] = []
+        for page in range(1, MAX_PAGES + 1):
+            batch = self.api.json("GET", path, params={**params, "limit": PAGE, "page": page}) or []
+            items += batch
+            if len(batch) < PAGE:
+                break
+        return items
+
     def open_pr(self, repo: str, head: str, base: str) -> int | None:
         """The open pull request from head into base, if there is one."""
-        for pr in self.api.json("GET", f"/repos/{repo}/pulls", params={"state": "open", "limit": 50}) or []:
+        for pr in self.every(f"/repos/{repo}/pulls", state="open"):
             if (pr.get("head") or {}).get("ref") == head and (pr.get("base") or {}).get("ref") == base:
                 return int(pr["number"])
         return None
@@ -185,16 +197,13 @@ class GiteaCodeHost:
 
     def comment(self, repo: str, number: int, text: str, marker: str) -> None:
         note = marker_html(marker)
-        comments = self.api.json("GET", f"/repos/{repo}/issues/{number}/comments")
+        comments = self.api.json("GET", f"/repos/{repo}/issues/{number}/comments")  # all of them: not paged
         if any(note in (c.get("body") or "") for c in comments or []):
             return
         self.api.call("POST", f"/repos/{repo}/issues/{number}/comments", json={"body": f"{text}\n\n{note}"})
 
     def label(self, repo: str, number: int, label: str) -> None:
-        labels = {
-            entry["name"]: entry["id"]
-            for entry in self.api.json("GET", f"/repos/{repo}/labels", params={"limit": 50}) or []
-        }
+        labels = {entry["name"]: entry["id"] for entry in self.every(f"/repos/{repo}/labels")}
         if label not in labels:
             labels[label] = self.api.json("POST", f"/repos/{repo}/labels", json={"name": label, "color": "#0ea5e9"})[
                 "id"
@@ -218,7 +227,7 @@ class GiteaCodeHost:
     def review_comments(self, repo: str, number: int, reviewer: str) -> list[str]:
         reviews = [
             r
-            for r in self.api.json("GET", f"/repos/{repo}/pulls/{number}/reviews", params={"limit": 50}) or []
+            for r in self.every(f"/repos/{repo}/pulls/{number}/reviews")
             if (r.get("user") or {}).get("login") == reviewer
         ]
         if not reviews:

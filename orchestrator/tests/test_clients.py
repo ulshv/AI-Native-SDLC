@@ -38,7 +38,18 @@ class FakePlane:
             if request.method == "POST":
                 self.comments.append(json.loads(request.content)["comment_html"])
                 return httpx.Response(201, json={})
-            return httpx.Response(200, json={"results": [{"comment_html": c} for c in self.comments]})
+            # Plane's cursor pages: per_page, then next_cursor while next_page_results
+            size = int(request.url.params.get("per_page", 100))
+            start = int(request.url.params.get("cursor", "0"))
+            rest = self.comments[start + size :]
+            return httpx.Response(
+                200,
+                json={
+                    "results": [{"comment_html": c} for c in self.comments[start : start + size]],
+                    "next_cursor": str(start + size),
+                    "next_page_results": bool(rest),
+                },
+            )
         return httpx.Response(404)
 
 
@@ -77,6 +88,12 @@ def test_plane_waits_out_its_rate_limit():
     assert len(fake.calls) == 3
 
 
+def paged(request: httpx.Request, items: list) -> httpx.Response:
+    """A page of one of Gitea's lists, as its page and limit ask."""
+    limit, page = int(request.url.params.get("limit", 30)), int(request.url.params.get("page", 1))
+    return httpx.Response(200, json=items[(page - 1) * limit : page * limit])
+
+
 class FakeGitea:
     def __init__(self):
         self.prs, self.comments, self.labels, self.issue_labels, self.merges = {}, [], {}, set(), 0
@@ -88,9 +105,9 @@ class FakeGitea:
             pr = next((p for p in self.prs.values() if p["base"] == m.group(1) and p["head"] == m.group(2)), None)
             return httpx.Response(200, json=pr) if pr else httpx.Response(404)
         if path == "/pulls" and method == "GET":
-            return httpx.Response(
-                200,
-                json=[
+            return paged(
+                request,
+                [
                     {"number": p["number"], "head": {"ref": p["head"]}, "base": {"ref": p["base"]}}
                     for p in self.prs.values()
                     if p["state"] == "open"
@@ -118,7 +135,7 @@ class FakeGitea:
             if method == "POST":
                 self.labels[body["name"]] = len(self.labels) + 1
                 return httpx.Response(201, json={"id": self.labels[body["name"]]})
-            return httpx.Response(200, json=[{"name": n, "id": i} for n, i in self.labels.items()])
+            return paged(request, [{"name": n, "id": i} for n, i in self.labels.items()])
         if re.fullmatch(r"/issues/\d+/labels", path):
             self.issue_labels.update(body["labels"])
             return httpx.Response(200, json=[])
@@ -247,3 +264,21 @@ def test_no_retry_waits_past_the_calls_budget():
     with pytest.raises(ApiError):
         api.call("GET", "/thing")
     assert len(calls) == 1, "waiting a minute would take the call past its 30 s"
+
+
+def test_lookups_see_past_the_first_page():
+    fake = FakeGitea()
+    host = gitea(fake)
+    repo = "sdlc/example-webapp"
+    for n in range(1, 61):  # other branches' pull requests, then the item's own
+        fake.prs[n] = {"number": n, "head": f"feat/X-{n}_y", "base": "development", "state": "open", "merged": False}
+    fake.prs[61] = {"number": 61, "head": "feat/EWA-12_x", "base": "development", "state": "open", "merged": False}
+    assert host.find_or_open_pr(repo, "feat/EWA-12_x", "development", "t", "b") == 61 and len(fake.prs) == 61
+    fake.labels = {f"label-{n}": n for n in range(1, 61)} | {"preview": 61}
+    host.label(repo, 61, "preview")
+    assert len(fake.labels) == 61 and fake.issue_labels == {61}, "found, not created again"
+
+    plane_fake = FakePlane()
+    plane_fake.comments = [f"<p>c{n}</p>" for n in range(150)] + ["<p>done</p><!-- agent:evt-1 -->"]
+    plane(plane_fake).comment("sdlc", "p-1", "i-1", "done", marker="evt-1")
+    assert len(plane_fake.comments) == 151, "the marker on the second page counts"

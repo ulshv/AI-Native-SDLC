@@ -19,6 +19,7 @@ from .adapters import gitea, plane
 from .events import Event
 from .links import Link, Links
 from .model import (
+    COMMANDS,
     Command,
     Intake,
     PrChanged,
@@ -32,7 +33,7 @@ from .model import (
 from .policy import Intent, Phase, signal
 from .ports import CodeHost, Tracker
 from .projects import Person, Project, Projects
-from .queue import Delivery, Queue
+from .queue import Delivery, Queue, Requeue
 
 log = logging.getLogger(__name__)
 
@@ -126,14 +127,27 @@ class Dispatcher:
             log.info("%s on %s, which no thread works on: left alone", event.kind, event.link)
             return
         if delivery.routing_key != thread_id:
-            # The object got its thread after this event was recorded: its waiting events follow.
+            # The object got its thread after this event was recorded, so it may have been taken
+            # beside the thread's own events: it and the object's other waiting events move to the
+            # thread's key, and it waits there in order.
             self.queue.rekey(delivery.routing_key, thread_id)
+            raise Requeue(f"moved to thread {thread_id}")
         key, item = f"{delivery.source}/{delivery.delivery_id}", self.threads.item(thread_id)
         if item.applied_before(key):
             return  # a replay: nothing needs reading
-        command = self.commands.get(event.kind, self._request)(key, event, project, item)
+        command = self._command(delivery, key, event, project, item)
         if command is not None:
             self.threads.run(thread_id, command)
+
+    def _command(self, delivery: Delivery, key: str, event: Event, project: Project, item: WorkItem) -> Command | None:
+        """What the event means for the item, read once: a retry acts on the first attempt's
+        reading, so a model that reads a comment differently the second time changes nothing."""
+        if delivery.command is not None:
+            return COMMANDS.validate_python(delivery.command)
+        command = self.commands.get(event.kind, self._request)(key, event, project, item)
+        if command is not None:
+            self.queue.keep_command(delivery, command.model_dump(mode="json"))
+        return command
 
     def _thread_of(self, event: Event, project: Project) -> str | None:
         """The event's thread; a ticket assigned to @agent gets one, linked to the work item and

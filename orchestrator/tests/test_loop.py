@@ -427,3 +427,39 @@ def test_a_run_result_that_fails_its_last_attempt_stops_the_wait_for_the_run(wor
     world.svc.chat.answers["@agent looks good, go ahead"] = ("merge", 0.9)
     world.hook("plane", "comment_mention_agent")
     assert world.runs[-1] == "ewa-1-archive-4", "people can act again"
+
+
+def test_a_retry_acts_on_the_first_reading_of_a_comment(world):
+    assign(world)
+    world.finish({"result": "spec_ready"})
+    executor, chat = world.svc.executor, world.svc.chat
+    chat.answers["@agent looks good, go ahead"] = ("approve", 0.95)
+
+    def down(run):
+        raise RuntimeError("the Kubernetes API does not answer")
+
+    executor.start, start = down, executor.start
+    with pytest.raises(AssertionError):  # the attempt fails after the comment was read
+        world.hook("plane", "comment_mention_agent")
+    executor.start = start
+    chat.answers["@agent looks good, go ahead"] = ("request_changes", 0.95)  # a model that reads it anew
+    with world.svc.queue.pool.connection() as conn:
+        conn.execute("UPDATE inbox SET available_at = now()")  # the retry, without its backoff
+    world.drain()
+    assert world.runs[-1] == "ewa-1-apply-2" and chat.calls == 1, "approved, as read the first time"
+
+
+def test_an_event_recorded_under_its_object_after_the_thread_was_linked_waits_in_the_threads_order(world):
+    assign(world)
+    thread = world.svc.links.thread_of(Link.parse(ITEM))
+    d = json.loads((FIXTURES / "plane" / "comment_mention_agent.json").read_text())
+    world.queue.put("plane", "late", ITEM, d["body"], d["headers"])  # routed before the link was seen
+    assert world.queue.process(world.dispatch)  # taken, but not run beside the thread's events
+    with world.svc.queue.pool.connection() as conn:
+        key, attempts, done = conn.execute(
+            "SELECT routing_key, attempts, processed_at IS NOT NULL FROM inbox WHERE delivery_id = 'late'"
+        ).fetchone()
+    assert (key, attempts, done) == (thread, 0, False), "moved to the thread's key, handed back untried"
+    world.drain()
+    with world.svc.queue.pool.connection() as conn:
+        assert conn.execute("SELECT processed_at IS NOT NULL FROM inbox WHERE delivery_id = 'late'").fetchone()[0]

@@ -141,6 +141,19 @@ class PlaneTracker:
         self._projects: dict[tuple[str, str], str] = {}
         self._states: dict[str, dict[str, str]] = {}
 
+    def every(self, path: str) -> list[dict[str, Any]]:
+        """Every item of one of Plane's lists, following its cursor (per_page, next_cursor), so a
+        lookup never misses one past the first page."""
+        items: list[dict[str, Any]] = []
+        params: dict[str, str | int] = {"per_page": PER_PAGE}
+        for _ in range(MAX_PAGES):
+            page = self.api.json("GET", path, params=params)
+            items += results(page)
+            if not (isinstance(page, dict) and page.get("next_page_results") and page.get("next_cursor")):
+                break
+            params = {"per_page": PER_PAGE, "cursor": page["next_cursor"]}
+        return items
+
     def agent_id(self) -> str:
         return self.people.get("agent") or str(self.api.json("GET", "/users/me/")["id"])
 
@@ -148,7 +161,7 @@ class PlaneTracker:
         return next((name for name, uid in self.people.items() if uid == user_id), "")
 
     def _load_projects(self, workspace: str) -> None:
-        for project in results(self.api.json("GET", f"/workspaces/{workspace}/projects/")):
+        for project in self.every(f"/workspaces/{workspace}/projects/"):
             self._projects[(workspace, project["identifier"])] = project["id"]
 
     def project_id(self, workspace: str, identifier: str) -> str:
@@ -170,7 +183,7 @@ class PlaneTracker:
 
     def _state_ids(self, workspace: str, project_id: str) -> dict[str, str]:
         if project_id not in self._states:
-            states = results(self.api.json("GET", f"/workspaces/{workspace}/projects/{project_id}/states/"))
+            states = self.every(f"/workspaces/{workspace}/projects/{project_id}/states/")
             self._states[project_id] = {s["name"]: s["id"] for s in states}
         return self._states[project_id]
 
@@ -183,10 +196,13 @@ class PlaneTracker:
     def comment(self, workspace: str, project_id: str, item_id: str, text: str, marker: str) -> None:
         path = f"/workspaces/{workspace}/projects/{project_id}/issues/{item_id}/comments/"
         note = marker_html(marker)
-        if any(note in (c.get("comment_html") or "") for c in results(self.api.json("GET", path))):
+        if any(note in (c.get("comment_html") or "") for c in self.every(path)):
             return
         paragraphs = "".join(f"<p>{html.escape(line)}</p>" for line in text.split("\n") if line.strip())
         self.api.call("POST", path, json={"comment_html": paragraphs + note})
+
+
+PER_PAGE, MAX_PAGES = 100, 100  # a page of Plane's lists, and how many are read at most
 
 
 def results(page: Any) -> list[dict[str, Any]]:

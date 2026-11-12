@@ -1,6 +1,7 @@
 """Agent runs as Jobs (task 7.7), against a fake cluster."""
 
 import json
+import threading
 
 from orchestrator.executor import Executor, Finished, Run
 from orchestrator.model import run_name
@@ -28,6 +29,7 @@ class FakeCluster:
         self.jobs.pop(name, None)
 
     def finished_jobs(self):
+        self.listings = getattr(self, "listings", 0) + 1
         return [
             Finished(
                 n,
@@ -38,10 +40,15 @@ class FakeCluster:
             )
             for n, j in self.jobs.items()
             if j["done"]
-        ]
+        ], "v1"
 
-    def watch_finished(self, stop):
-        return iter(())
+    def watch_finished(self, stop, since):
+        """Two watches: the first reports a run that finishes (version v2), the second nothing."""
+        self.watched_since = [*getattr(self, "watched_since", []), since]
+        if len(self.watched_since) == 1:
+            yield "v2", Finished("ewa-2-propose-1", "t-2", True, {"result": "spec_ready"}, uid="uid-x")
+        else:
+            stop.set()
 
 
 def task(key, mode="propose", model="llm/deepseek/deepseek-v4-flash-0731"):
@@ -80,6 +87,18 @@ def test_a_cancelled_run_neither_waits_nor_runs_and_its_room_goes_to_the_next(po
     ex.cancel(names[3])  # waiting
     ex.cancel(names[0])  # going: EWA-3, waiting longest, takes its room
     assert set(cluster.jobs) == {names[1], names[2]}
+
+
+def test_the_watcher_goes_on_from_the_last_version_and_lists_only_on_start(pool):
+    cluster = FakeCluster()
+    ex = executor(pool, cluster)
+    ex.start(Run("ewa-1-propose-1", "t-1", task("EWA-1")))
+    cluster.finish("ewa-1-propose-1", {"result": "spec_ready"})
+    ex.watch(threading.Event())
+    assert cluster.listings == 1 and cluster.watched_since == ["v1", "v2"]
+    with pool.connection() as conn:
+        recorded = conn.execute("SELECT delivery_id FROM inbox WHERE source = 'job' ORDER BY id").fetchall()
+    assert recorded == [("ewa-1-propose-1/uid-ewa-1-propose-1",), ("ewa-2-propose-1/uid-x",)], "each once"
 
 
 def test_starting_a_run_twice_finds_the_first(pool):

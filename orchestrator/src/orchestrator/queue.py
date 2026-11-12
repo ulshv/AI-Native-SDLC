@@ -45,9 +45,15 @@ class Delivery:
     headers: dict[str, str]
     payload: dict[str, Any]
     attempts: int
+    command: dict[str, Any] | None = None  # what an earlier attempt read it as (keep_command)
 
 
 Handler = Callable[[Delivery], None]
+
+
+class Requeue(Exception):
+    """A handler hands its event back untried: it waits again, in its key's order, and the attempt
+    does not count."""
 
 
 class Queue(Protocol):
@@ -70,6 +76,10 @@ class Queue(Protocol):
         """Moves the waiting events of a key to another one (an object that got a thread)."""
         ...
 
+    def keep_command(self, delivery: Delivery, command: dict[str, Any]) -> None:
+        """Keeps what the event was read as, for its retries to act on the same reading."""
+        ...
+
     def release_unfinished(self) -> int:
         """Gives the events this process is still handling back, as if never taken, for another
         process to take at once instead of after their lease; returns how many."""
@@ -88,7 +98,7 @@ WHERE id = (
     ORDER BY id
     FOR UPDATE SKIP LOCKED
     LIMIT 1)
-RETURNING id, source, delivery_id, routing_key, headers, payload, attempts
+RETURNING id, source, delivery_id, routing_key, headers, payload, attempts, command
 """
 
 
@@ -149,6 +159,13 @@ class PostgresQueue:
     def _handle(self, handler: Handler, delivery: Delivery) -> None:
         try:
             handler(delivery)
+        except Requeue as reason:
+            log.info("event %s handed back: %s", delivery.id, reason)
+            with self.pool.connection() as conn:
+                conn.execute(
+                    "UPDATE inbox SET leased_until = NULL, attempts = attempts - 1 WHERE id = %s", (delivery.id,)
+                )
+            return
         except Exception as error:
             self.failed(delivery, error)
             return
@@ -197,6 +214,10 @@ class PostgresQueue:
             )
         if final:
             GIVEN_UP.inc()
+
+    def keep_command(self, delivery: Delivery, command: dict[str, Any]) -> None:
+        with self.pool.connection() as conn:
+            conn.execute("UPDATE inbox SET command = %s WHERE id = %s", (Jsonb(command), delivery.id))
 
     def rekey(self, old: str, new: str) -> None:
         with self.pool.connection() as conn:

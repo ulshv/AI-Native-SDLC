@@ -64,9 +64,14 @@ class Cluster(Protocol):
     def delete_run(self, name: str) -> None:
         """Deletes the run's Job and ConfigMap, each unless it is gone."""
 
-    def finished_jobs(self) -> list[Finished]: ...
+    def finished_jobs(self) -> tuple[list[Finished], str]:
+        """The finished runs, and the listing's resourceVersion to watch on from."""
+        ...
 
-    def watch_finished(self, stop: threading.Event) -> Iterator[Finished]: ...
+    def watch_finished(self, stop: threading.Event, since: str) -> Iterator[tuple[str, Finished | None]]:
+        """Every change after the version `since`: its resourceVersion, and the run when it is a
+        finished one. Ends when the API server ends the watch."""
+        ...
 
 
 def job_manifest(run: Run, image: str, namespace: str) -> dict[str, Any]:
@@ -222,25 +227,35 @@ class Executor:
             },
         )
 
-    def resync(self) -> None:
-        for finished in self.cluster.finished_jobs():
+    def resync(self) -> str:
+        """Records every finished run and fills the room; returns the version to watch on from."""
+        jobs, version = self.cluster.finished_jobs()
+        for finished in jobs:
             self.record(finished)
         self.start_waiting()
+        return version
 
     def watch(self, stop: threading.Event) -> None:
-        """Runs in its own thread: records finished runs and fills the room they leave."""
+        """Runs in its own thread: records finished runs and fills the room they leave. It reads
+        every Job on start and after an error (an expired version included); in between, each watch
+        goes on from the last version seen, so a finished Job is not reported again."""
+        version: str | None = None
         while not stop.is_set():
             try:
-                self.resync()
-                for finished in self.cluster.watch_finished(stop):
+                since = version if version is not None else self.resync()
+                version = since
+                for seen, finished in self.cluster.watch_finished(stop, since):
                     if stop.is_set():
                         return
-                    with bound(run=finished.name, thread=finished.thread_id):
-                        self.record(finished)
-                    self.start_waiting()
+                    version = seen
+                    if finished:
+                        with bound(run=finished.name, thread=finished.thread_id):
+                            self.record(finished)
+                        self.start_waiting()
             except Exception as error:
                 if stop.is_set():
                     return  # shutting down: the pools may be closed already
+                version = None
                 failed_call(error)
                 log.exception("watching agent runs failed")
                 stop.wait(5)
@@ -363,13 +378,14 @@ class KubernetesCluster:
             metadata.uid or "",
         )
 
-    def finished_jobs(self) -> list[Finished]:
-        jobs = self.batch.list_namespaced_job(
+    def finished_jobs(self) -> tuple[list[Finished], str]:
+        listing = self.batch.list_namespaced_job(
             self.namespace, label_selector=self.selector, _request_timeout=API_TIMEOUT
-        ).items
-        return [self._finished(job) for job in jobs if finished(job)]
+        )
+        version = (listing.metadata.resource_version if listing.metadata else None) or ""
+        return [self._finished(job) for job in listing.items if finished(job)], version
 
-    def watch_finished(self, stop: threading.Event) -> Iterator[Finished]:
+    def watch_finished(self, stop: threading.Event, since: str) -> Iterator[tuple[str, Finished | None]]:
         from kubernetes import watch
 
         w = watch.Watch()
@@ -380,6 +396,7 @@ class KubernetesCluster:
                 self.batch.list_namespaced_job,
                 self.namespace,
                 label_selector=self.selector,
+                resource_version=since,
                 timeout_seconds=WATCH_SECONDS,
                 _request_timeout=WATCH_SECONDS + 30,
             ),
@@ -390,8 +407,9 @@ class KubernetesCluster:
                 return
             item = cast(dict[str, Any], event)  # the client's watch is untyped: {"type", "object"}
             job = cast(V1Job, item["object"])
-            if item["type"] in ("ADDED", "MODIFIED") and finished(job):
-                yield self._finished(job)
+            done = item["type"] in ("ADDED", "MODIFIED") and finished(job)
+            # An expired version ends here with an ApiException (410): the caller lists again.
+            yield meta(job).resource_version or since, self._finished(job) if done else None
 
 
 def meta(job: V1Job) -> V1ObjectMeta:
