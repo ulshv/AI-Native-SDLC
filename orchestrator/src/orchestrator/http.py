@@ -44,9 +44,11 @@ class Retryable(Exception):
 
 
 class ApiError(Exception):
-    def __init__(self, method: str, path: str, status: int, text: str):
+    """A call that failed after its retries: an answer that was not ok (status), or none (0)."""
+
+    def __init__(self, method: str, path: str, status: int, text: str, target: str = ""):
         super().__init__(f"{method} {path}: {status} {text}")
-        self.status = status
+        self.status, self.target = status, target
 
 
 MAX_WAIT = 65.0  # a rate-limit window of Plane's
@@ -113,7 +115,9 @@ class Api:
         attempts: int = 6,
         timeout: httpx.Timeout = TIMEOUT,
         budget: float = CALL_BUDGET,
+        target: str = "api",
     ):
+        self.target = target  # whom the calls go to, named in their errors
         self.client = httpx.Client(base_url=base_url, headers=headers, timeout=timeout, transport=transport)
         self.retrying = {
             idempotent: Retrying(
@@ -138,8 +142,10 @@ class Api:
             response = self.retrying[method in IDEMPOTENT](self._send, method, path, **kwargs)
         except Retryable as error:  # retried as far as it was safe to
             response = error.response
+        except httpx.TransportError as error:
+            raise ApiError(method, path, 0, f"{type(error).__name__}: {error}", self.target) from error
         if response.status_code not in ok:
-            raise ApiError(method, path, response.status_code, response.text[:300])
+            raise ApiError(method, path, response.status_code, response.text[:300], self.target)
         return response
 
     def json(self, method: str, path: str, **kwargs: Any) -> Any:

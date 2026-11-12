@@ -79,7 +79,7 @@ def test_unknown_sources_and_bodies_that_are_not_json_are_refused(pool):
     assert client.post("/hooks/jira", content="{}").status_code == 404
     signature = hmac.new(b"plane-secret", b"not json", hashlib.sha256).hexdigest()
     assert client.post("/hooks/plane", content="not json", headers={"X-Plane-Signature": signature}).status_code == 400
-    assert client.get("/healthz").json() == {"ok": True}
+    assert client.get("/livez").json() == {"ok": True}
 
 
 def test_a_webhook_without_its_signature_is_refused_and_not_recorded(pool):
@@ -124,7 +124,7 @@ def test_a_database_behind_the_code_is_told_apart_from_one_ahead_of_it():
     assert db.fit(script, "9999", "0001") is db.Fit.AHEAD and db.fit(script, None, "0001") is db.Fit.EMPTY
 
 
-def test_the_service_refuses_to_start_before_the_migration_and_starts_after_it(empty_database_url):
+def test_the_service_refuses_to_start_before_the_migration_starts_after_it_and_stops_cleanly(empty_database_url):
     refused = run(["serve", "--port", "1"], empty_database_url)
     assert refused.returncode == 1 and "orchestrator migrate" in refused.stderr
     run(["migrate"], empty_database_url)
@@ -148,13 +148,17 @@ def test_the_service_refuses_to_start_before_the_migration_and_starts_after_it(e
     try:
         for _ in range(60):
             try:
-                if httpx.get(f"http://127.0.0.1:{port}/healthz", timeout=1).json() == {"ok": True}:
+                if httpx.get(f"http://127.0.0.1:{port}/readyz", timeout=1).json() == {"ok": True}:
                     break
             except httpx.HTTPError:
                 time.sleep(0.5)
         else:
             service.terminate()
-            raise AssertionError("the service did not answer /healthz: " + service.communicate(timeout=20)[1][-1500:])
+            raise AssertionError("the service did not answer /readyz: " + service.communicate(timeout=20)[1][-1500:])
+        service.terminate()  # SIGTERM, as Kubernetes sends it
+        stderr = service.communicate(timeout=60)[1]
+        assert "workers stopped" in stderr, "the workers stop before the process ends: " + stderr[-1500:]
     finally:
-        service.terminate()
-        service.wait(timeout=20)
+        if service.poll() is None:
+            service.kill()
+            service.wait(timeout=20)

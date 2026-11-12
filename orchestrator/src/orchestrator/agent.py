@@ -26,6 +26,7 @@ from psycopg_pool import ConnectionPool
 from . import machine
 from .dispatch import Dispatcher
 from .links import Links
+from .logs import bound
 from .model import COMMANDS, Command, Intake, StepFailed, WorkItem
 from .ports import CodeHost, RunStarter, Tracker
 from .projects import Projects
@@ -124,7 +125,8 @@ class Agent:
         return {"item": new.model_dump(mode="json")}
 
     def run(self, thread_id: str, command: Command) -> None:
-        self.graph.invoke({"command": command.model_dump(mode="json")}, {"configurable": {"thread_id": thread_id}})
+        with bound(thread=thread_id):
+            self.graph.invoke({"command": command.model_dump(mode="json")}, {"configurable": {"thread_id": thread_id}})
 
     def item(self, thread_id: str) -> WorkItem:
         snapshot = self.graph.get_state({"configurable": {"thread_id": thread_id}})

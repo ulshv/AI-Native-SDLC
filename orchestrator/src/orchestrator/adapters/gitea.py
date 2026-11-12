@@ -145,7 +145,7 @@ class GiteaCodeHost:
         sleep: Callable[[float], None] = time.sleep,
     ):
         headers = {"Authorization": f"token {token}"}
-        self.api = Api(base_url.rstrip("/") + "/api/v1", headers, transport=transport, sleep=sleep)
+        self.api = Api(base_url.rstrip("/") + "/api/v1", headers, transport=transport, sleep=sleep, target="gitea")
         # Payloads' html_url follow the host a request came through, so addresses for people are
         # built from this.
         self.public_url = public_url.rstrip("/")

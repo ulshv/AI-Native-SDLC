@@ -18,12 +18,16 @@ events, only has to keep this interface.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
+
+from .logs import bound
+from .metrics import GIVEN_UP, failed_call
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +67,10 @@ class Queue(Protocol):
     def rekey(self, old: str, new: str) -> None:
         """Moves the waiting events of a key to another one (an object that got a thread)."""
 
+    def release_unfinished(self) -> int:
+        """Gives the events this process is still handling back, as if never taken, for another
+        process to take at once instead of after their lease; returns how many."""
+
 
 # The oldest waiting event whose key has no older unfinished event; a leased one is unfinished.
 TAKE = """
@@ -83,6 +91,8 @@ RETURNING id, source, delivery_id, routing_key, headers, payload, attempts
 class PostgresQueue:
     def __init__(self, pool: ConnectionPool, max_attempts: int = 5, lease: int = LEASE_SECONDS):
         self.pool, self.max_attempts, self.lease = pool, max_attempts, lease
+        self._handling: set[int] = set()  # the events this process has taken and not finished
+        self._lock = threading.Lock()
 
     def put(
         self,
@@ -105,50 +115,84 @@ class PostgresQueue:
     def take(self) -> Delivery | None:
         with self.pool.connection() as conn:
             # An event whose every attempt ended with the worker gone is closed, not taken again.
-            conn.execute(
+            closed = conn.execute(
                 """UPDATE inbox SET processed_at = clock_timestamp(), leased_until = NULL,
                      error = 'the worker stopped while handling it, ' || attempts || ' times'
                    WHERE processed_at IS NULL AND attempts >= %s AND leased_until < clock_timestamp()""",
                 (self.max_attempts,),
-            )
+            ).rowcount
             row = conn.execute(TAKE, {"lease": self.lease}).fetchone()
+        if closed:
+            GIVEN_UP.inc(closed)
         return Delivery(*row) if row else None
 
     def process(self, handler: Handler) -> bool:
         delivery = self.take()
         if delivery is None:
             return False
+        with self._lock:
+            self._handling.add(delivery.id)
+        # Every line logged meanwhile, the failure's included, names the event and its thread (or,
+        # before the item has one, the object it is about).
+        with bound(delivery=f"{delivery.source}/{delivery.delivery_id}", thread=delivery.routing_key):
+            try:
+                self._handle(handler, delivery)
+            finally:
+                with self._lock:
+                    self._handling.discard(delivery.id)
+        return True
+
+    def _handle(self, handler: Handler, delivery: Delivery) -> None:
         try:
             handler(delivery)
         except Exception as error:
             self.failed(delivery, error)
-            return True
+            return
         with self.pool.connection() as conn:
             conn.execute(
                 "UPDATE inbox SET processed_at = clock_timestamp(), leased_until = NULL, error = NULL WHERE id = %s",
                 (delivery.id,),
             )
-        return True
+
+    def release_unfinished(self) -> int:
+        with self._lock:
+            ids = list(self._handling)
+        if not ids:
+            return 0
+        # The attempt still counts: an event in flight at every stop is given up in the end. The
+        # process ends right after this, so its handler does not finish beside the next pod's.
+        with self.pool.connection() as conn:
+            released = conn.execute(
+                "UPDATE inbox SET leased_until = NULL WHERE id = ANY(%s) AND processed_at IS NULL", (ids,)
+            ).rowcount
+        log.info("released %d events still being handled", released)
+        return released
 
     def failed(self, delivery: Delivery, error: Exception) -> None:
         final = delivery.attempts >= self.max_attempts
         log.exception(
-            "event %s (%s/%s) failed, attempt %d%s",
+            "event %s failed, attempt %d%s",
             delivery.id,
-            delivery.source,
-            delivery.delivery_id,
             delivery.attempts,
             ", giving up" if final else "",
             exc_info=error,
         )
+        failed_call(error)
         with self.pool.connection() as conn:
             conn.execute(
                 """UPDATE inbox SET error = %s, leased_until = NULL,
                      available_at = clock_timestamp() + make_interval(secs => %s),
                      processed_at = CASE WHEN %s THEN clock_timestamp() END
                    WHERE id = %s""",
-                (f"{type(error).__name__}: {error}"[:2000], min(2**delivery.attempts, 300), final, delivery.id),
+                (
+                    f"{type(error).__name__}: {error}"[:2000],
+                    min(2**delivery.attempts, 300),
+                    final,
+                    delivery.id,
+                ),
             )
+        if final:
+            GIVEN_UP.inc()
 
     def rekey(self, old: str, new: str) -> None:
         with self.pool.connection() as conn:

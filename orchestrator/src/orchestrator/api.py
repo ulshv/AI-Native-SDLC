@@ -13,14 +13,18 @@ import hmac
 import json
 import logging
 from collections.abc import Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from psycopg_pool import ConnectionPool
 
 from .adapters import gitea, plane
 from .links import Link, Links
+from .metrics import registry
 from .queue import Queue
 
 log = logging.getLogger(__name__)
@@ -38,6 +42,7 @@ def routing_key(links: Links, link: Link | None, source: str) -> str:
 
 
 View = dict[str, Any]
+Lifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 
 
 def signed(secret: str, body: bytes, signature: str | None) -> bool:
@@ -53,15 +58,34 @@ def create_app(
     links: Links,
     view_of: Callable[[str], View],
     secrets: Mapping[str, str],
+    lifespan: Lifespan | None = None,
 ) -> FastAPI:
     """view_of(thread_id) returns what a thread shows ({"values": ..., "messages": ...}, as
     Threads.view), or {} for a thread without a work item."""
-    app = FastAPI(title="orchestrator", docs_url=None, redoc_url=None)
+    app = FastAPI(title="orchestrator", docs_url=None, redoc_url=None, lifespan=lifespan)
 
-    @app.get("/healthz")
-    def healthz() -> dict[str, bool]:
-        with pool.connection() as conn:
-            conn.execute("SELECT 1")
+    scraped = registry(pool)
+
+    @app.get("/metrics")
+    def metrics_page() -> Response:
+        """Collected in a worker thread (a sync route): the reads it makes never hold up the event
+        loop, so the probes and the webhooks are answered meanwhile."""
+        return Response(generate_latest(scraped), media_type=CONTENT_TYPE_LATEST)
+
+    @app.get("/livez")
+    async def livez() -> dict[str, bool]:
+        """The process answers; nothing outside it is asked, and on the event loop itself, not in the
+        thread pool other routes may hold, so an outage elsewhere never gets the pod restarted."""
+        return {"ok": True}
+
+    @app.get("/readyz")
+    def readyz() -> dict[str, bool]:
+        """The process can serve: its database answers."""
+        try:
+            with pool.connection(timeout=2) as conn:
+                conn.execute("SELECT 1")
+        except Exception as error:
+            raise HTTPException(503, "the database does not answer") from error
         return {"ok": True}
 
     @app.post("/hooks/{source}")

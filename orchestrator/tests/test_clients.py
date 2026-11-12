@@ -220,7 +220,7 @@ def test_a_hanging_call_ends_at_its_timeout():
             timeout=httpx.Timeout(0.3),
         )
         started = time.monotonic()
-        with pytest.raises(httpx.ReadTimeout):
+        with pytest.raises(ApiError, match="ReadTimeout"):
             api.call("GET", "/thing")
         assert time.monotonic() - started < 3
 

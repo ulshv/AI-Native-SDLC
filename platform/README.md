@@ -361,7 +361,7 @@ syncs as the image tag:
 Plane's webhook is set up by its setup Job, and the `sdlc` organization's Gitea webhook by the
 bootstrap. Gitea never shows a webhook's secret again, so after `GITEA_WEBHOOK_SECRET` changes,
 delete the webhook in Gitea and run the bootstrap again. The smoke check `orchestrator_running`
-checks the rollout, `/healthz` and the Gitea webhook.
+checks the rollout, `/readyz` and the Gitea webhook.
 
 ## Changing the platform through git
 

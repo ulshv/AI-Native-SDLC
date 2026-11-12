@@ -18,14 +18,17 @@ src/orchestrator/
   model.py       the work item a thread keeps, and the commands of its steps
   policy.py      phases, rules (intent, phases, roles), explicit signals
   intents.py     reading a request with one model call
+  logs.py        JSON logs through structlog, with the ids bound to a delivery, thread or run
+  metrics.py     the Prometheus metrics at /metrics
   config.py      settings: config.yaml (ORCHESTRATOR_CONFIG) overlaid with the environment
   db.py          the pool, `migrate` (Alembic) and the schema revision check
   migrations/    Alembic revisions of the tables (inbox, thread_link, pending_runs)
   queue.py       the leased event queue: one event per thread at a time, in arrival order
   worker.py      the workers that take events from the queue
   links.py       thread_link: a ticket, a pull request -> their thread
-  api.py         /healthz, /hooks/{plane,gitea}, the thread API (/threads...)
+  api.py         /livez, /readyz, /metrics, /hooks/{plane,gitea}, the thread API (/threads...)
   adapters/      Plane and Gitea: payload -> Event, and the clients for the ports
+  http.py        the clients' HTTP: timeouts, bounded retries (tenacity), errors naming their target
   ports.py       the Tracker and CodeHost ports
   events.py      the normalized event
   projects.py    platform/projects/*/project.yaml: projects, people and roles
@@ -74,9 +77,9 @@ runner, before any image is built.
 
 ## Local run
 
-The service needs its tables first: `migrate` creates or updates them, and `serve` refuses to
-start while any are missing. It also refuses to start without its secrets. With the Postgres
-above, and any values while nothing calls out:
+The service needs its schema first: `migrate` brings it to the code's revision, and `serve`
+refuses to start on a database behind it. It also refuses to start without its secrets. With the
+Postgres above, and any values while nothing calls out:
 
 ```bash
 export DATABASE_URL=postgresql://postgres:test@127.0.0.1:55432/postgres
@@ -84,7 +87,7 @@ export ORCHESTRATOR_CONFIG=/dev/null PROJECTS_DIR=../platform/projects
 uv run --python 3.13 orchestrator migrate
 export LLM_API_KEY=... PLANE_API_KEY=... GITEA_TOKEN=... PLANE_WEBHOOK_SECRET=x GITEA_WEBHOOK_SECRET=x
 uv run --python 3.13 orchestrator serve --port 8000
-curl -s localhost:8000/healthz
+curl -s localhost:8000/readyz
 ```
 
 Without `ORCHESTRATOR_COMMIT` or `AGENT_IMAGE`, agent runs are off: the service reads events and
@@ -127,13 +130,14 @@ the file.
 | `agent_model` | `llm/deepseek/deepseek-v4-flash-0731` | for agent runs; one of `platform/apps/agents/opencode-config.yaml` |
 | `intent_threshold` | `0.7` | below it, the agent asks what was meant |
 | `workers` | `2` | threads taking events |
-| `max_attempts` | `5` | an event that killed a worker this often is closed |
+| `max_attempts` | `5` | an event that failed this often is given up (closed with its error) |
 | `max_active_runs` | `2` | agent runs at a time; the rest wait in `pending_runs` |
 | `agent_namespace` | `sdlc-agents` | |
 | `plane_url`, `gitea_url` | the in-cluster services | |
 | `gitea_public_url` | `https://gitea.sdlc.internal` | for the pull request links people open |
 
-The environment holds the secrets and connections (`migrate` needs `DATABASE_URL` only):
+The environment holds the secrets and connections. `serve` needs every one of them, `migrate`
+only `DATABASE_URL`:
 
 | Variable | In the cluster from |
 |---|---|
@@ -148,7 +152,7 @@ The environment holds the secrets and connections (`migrate` needs `DATABASE_URL
 
 ## How a change reaches the cluster
 
-1. A push to `main` in Gitea starts `.gitea/workflows/images.yaml`: the tests, then
+1. A push to `main` in Gitea starts `.gitea/workflows/images.yaml`: lint, types and tests, then
    `platform/orchestrator:<commit>` and `platform/agent-runner:<commit>`.
 2. Argo CD syncs `platform/apps/orchestrator/` with `image.tag=$ARGOCD_APP_REVISION`, the same
    commit. Its PreSync Job runs `orchestrator migrate` with the new image, and then the
@@ -156,8 +160,26 @@ The environment holds the secrets and connections (`migrate` needs `DATABASE_URL
    failed, the new pod waits for an image that never comes, and the old one keeps running.
 3. Two pods at once are safe: events are leased, and the run limit is a lock in Postgres.
 
-`platform/smoke.sh orchestrator_running` checks the rollout, `/healthz` and Gitea's
+`platform/smoke.sh orchestrator_running` checks the rollout, `/readyz` and Gitea's
 organization webhook. `plane_loop_project` checks Plane's webhook.
+
+## Operating it
+
+- **Network:** a NetworkPolicy lets only Plane's and Gitea's namespaces reach the pod, and the
+  webhooks need their signatures. `kubectl port-forward` comes from the node and still works.
+- **Probes:** `/livez` answers while the process does; `/readyz` while its database answers. A
+  database outage takes the pod out of the Service and never gets it restarted.
+- **Logs:** one JSON line per record, with the `delivery`, `thread` and `run` it is about, so one
+  item can be followed: `kubectl logs -n sdlc deploy/orchestrator | jq 'select(.thread == "<id>")'`.
+  Before an item has a thread, `thread` is the link of the object an event is about.
+- **Metrics** for Prometheus at `/metrics`: `orchestrator_queue_depth`,
+  `orchestrator_queue_oldest_seconds`, `orchestrator_runs_active`, `orchestrator_runs_waiting`,
+  `orchestrator_events_given_up_total`, and `orchestrator_external_errors_total{target}`: event
+  attempts and watch rounds that failed on a call to plane, gitea, the model or kubernetes. An
+  error of the code's own is in the logs, not there. Nothing scrapes them yet; the NetworkPolicy
+  will need a rule for a scraper.
+- **Stopping:** on SIGTERM the workers take no more events and finish theirs within 45 s; what is
+  still being handled then is released for the next pod to take at once, and the attempt counts.
 
 ## The thread API
 

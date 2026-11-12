@@ -20,6 +20,9 @@ spec:
         checksum/config: {{ toYaml .Values.config | sha256sum }}
     spec:
       serviceAccountName: orchestrator
+      # On SIGTERM the workers take no more events and finish theirs within 45 s, then release
+      # what is still leased (orchestrator.worker); the rest of this is for that.
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -52,11 +55,13 @@ spec:
             # From the bootstrap: agent's Gitea token.
             - name: GITEA_TOKEN
               valueFrom: {secretKeyRef: {name: gitea-agent, key: token}}
+          # Ready while its database answers; alive while the process does: a database outage
+          # takes the pod out of the Service without restarting it.
           readinessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /readyz, port: http}
             periodSeconds: 5
           livenessProbe:
-            httpGet: {path: /healthz, port: http}
+            httpGet: {path: /livez, port: http}
             initialDelaySeconds: 20
             periodSeconds: 20
           securityContext:

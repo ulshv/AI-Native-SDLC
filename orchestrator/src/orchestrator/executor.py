@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from .logs import bound
+from .metrics import RUNS_ACTIVE, failed_call
 from .model import run_name  # noqa: F401 - a run's name is the work item's
 from .queue import Queue
 
@@ -187,10 +189,15 @@ class Executor:
         log.info("started run %s for thread %s", run.name, run.thread_id)
 
     def start_waiting(self) -> None:
-        """Starts waiting runs, oldest first, while fewer than max_active go."""
+        """Starts waiting runs, oldest first, while fewer than max_active go. The count of runs
+        going is the metrics' too."""
         with self.pool.connection() as conn, conn.transaction():
             conn.execute("SELECT pg_advisory_xact_lock(%s)", (LOCK,))
-            while self.cluster.active_jobs() < self.max_active:
+            while True:
+                active = self.cluster.active_jobs()
+                RUNS_ACTIVE.set(active)
+                if active >= self.max_active:
+                    return
                 row = conn.execute(
                     "SELECT name, thread_id, task FROM pending_runs ORDER BY created_at, name LIMIT 1"
                 ).fetchone()
@@ -227,9 +234,15 @@ class Executor:
             try:
                 self.resync()
                 for finished in self.cluster.watch_finished(stop):
-                    self.record(finished)
+                    if stop.is_set():
+                        return
+                    with bound(run=finished.name, thread=finished.thread_id):
+                        self.record(finished)
                     self.start_waiting()
-            except Exception:
+            except Exception as error:
+                if stop.is_set():
+                    return  # shutting down: the pools may be closed already
+                failed_call(error)
                 log.exception("watching agent runs failed")
                 stop.wait(5)
 

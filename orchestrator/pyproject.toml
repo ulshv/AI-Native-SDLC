@@ -21,6 +21,8 @@ dependencies = [
     "sqlalchemy==2.1.8",
     "pydantic-settings[yaml]==2.16.2",
     "tenacity==9.2.1",
+    "structlog==26.1.0",
+    "prometheus-client==0.26.0",
 ]
 
 [dependency-groups]

@@ -10,13 +10,15 @@ import argparse
 import logging
 import sys
 import threading
-from collections.abc import Callable
-from contextlib import ExitStack
+from collections.abc import AsyncIterator, Callable
+from contextlib import ExitStack, asynccontextmanager
 
 import uvicorn
+from fastapi import FastAPI
+from fastapi.concurrency import run_in_threadpool
 from psycopg_pool import ConnectionPool
 
-from . import agent, config, db, intents
+from . import agent, config, db, intents, logs
 from .adapters.gitea import GiteaCodeHost
 from .adapters.plane import PlaneTracker
 from .api import create_app
@@ -62,12 +64,14 @@ def serve(settings: config.Settings, host: str, port: int) -> int:
     if problem:
         log.error("%s", problem)
         return 1
+    # The stop lives in the app's lifespan: on SIGTERM uvicorn passes the signal on after its
+    # shutdown, and what follows uvicorn.run may never run. The stack only closes the pools.
     with ExitStack() as stack:
         pool = stack.enter_context(db.connect(database_url, size=settings.workers + 6))
         checkpointer = stack.enter_context(agent.checkpointer(database_url, settings.workers + 2))
         stop = threading.Event()
-        stack.callback(stop.set)
         queue, links = PostgresQueue(pool, settings.max_attempts), Links(pool)
+        executor = executor_of(settings, pool, queue, stop)
         the_agent = agent.Agent(
             projects=LiveProjects(settings.projects_dir),
             links=links,
@@ -76,7 +80,7 @@ def serve(settings: config.Settings, host: str, port: int) -> int:
             code_host=GiteaCodeHost(
                 settings.gitea_url, settings.gitea_token.get_secret_value(), settings.gitea_public_url
             ),
-            executor=executor_of(settings, pool, queue, stop),
+            executor=executor,
             chat=intents.chat_model(
                 settings.intent_model, settings.llm_base_url, settings.llm_api_key.get_secret_value()
             ),
@@ -86,13 +90,23 @@ def serve(settings: config.Settings, host: str, port: int) -> int:
             max_attempts=settings.max_attempts,
         )
         workers = Workers(queue, the_agent, settings.workers)
-        workers.start()
-        stack.callback(workers.stop)
+
+        @asynccontextmanager
+        async def running(app: FastAPI) -> AsyncIterator[None]:
+            """The workers and the run watcher live as long as the app. Stopping them is part of
+            uvicorn's shutdown, which runs before it passes SIGTERM on and the process ends."""
+            workers.start()
+            try:
+                yield
+            finally:
+                stop.set()
+                await run_in_threadpool(workers.stop)
+
         secrets = {
             "plane": settings.plane_webhook_secret.get_secret_value(),
             "gitea": settings.gitea_webhook_secret.get_secret_value(),
         }
-        app = create_app(pool, queue, links, the_agent.view, secrets)
+        app = create_app(pool, queue, links, the_agent.view, secrets, running)
         uvicorn.run(app, host=host, port=port, log_config=None)
     return 0
 
@@ -112,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--host", default="0.0.0.0")
     run.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logs.configure()  # before the settings, so a settings error is logged too
     try:
         return COMMANDS[args.command](args)
     except config.ConfigError as error:

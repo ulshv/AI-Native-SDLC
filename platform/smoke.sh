@@ -590,12 +590,12 @@ EOF
 }
 
 # The orchestrator runs (platform/apps/orchestrator): its Deployment is rolled out with the image
-# of a commit on main, it answers /healthz (which reads its database) through its Service, and
+# of a commit on main, it answers /readyz (which reads its database) through its Service, and
 # the webhooks of both tools point at it: the sdlc organization's in Gitea (registered by the
 # bootstrap) and each target project's workspace in Plane (check plane_loop_project).
 orchestrator_healthy() {
-  curl -fsS --max-time 10 "$SERVICE_URL/healthz" | jq -e '.ok' >/dev/null ||
-    { echo "the orchestrator does not answer /healthz"; return 1; }
+  curl -fsS --max-time 10 "$SERVICE_URL/readyz" | jq -e '.ok' >/dev/null ||
+    { echo "the orchestrator is not ready (/readyz)"; return 1; }
 }
 
 org_webhook_to_orchestrator() {

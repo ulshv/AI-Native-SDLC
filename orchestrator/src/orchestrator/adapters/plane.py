@@ -130,7 +130,9 @@ class PlaneTracker:
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ):
-        self.api = Api(base_url.rstrip("/") + "/api/v1", {"X-API-Key": api_key}, transport=transport, sleep=sleep)
+        self.api = Api(
+            base_url.rstrip("/") + "/api/v1", {"X-API-Key": api_key}, transport=transport, sleep=sleep, target="plane"
+        )
         self.people = people
         self._projects: dict[tuple[str, str], str] = {}
         self._states: dict[str, dict[str, str]] = {}
