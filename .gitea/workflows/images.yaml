@@ -1,7 +1,8 @@
-# Tests the orchestrator, then builds the platform's own images on every push to main and pushes them as
+# On every push to main: tests the orchestrator, checks the scripts and the manifests, then
+# builds the platform's own images and pushes them as
 # gitea.sdlc.internal/platform/<directory>:<commit> (design decision 3). Runs only on ci-platform,
-# the runner registered on this repository alone, and pushes with ci-platform's token, a secret
-# of this repository that the target projects' workflows cannot read. A directory without a
+# the runner registered on this repository alone, and pushes with ci-platform's token, a secret of
+# this repository that the target projects' workflows cannot read. A directory without a
 # Dockerfile yet is skipped.
 name: images
 on:
@@ -37,8 +38,47 @@ jobs:
         env:
           ORCHESTRATOR_TEST_DSN: postgresql://postgres:test@127.0.0.1:5432/postgres
         run: uv run --locked pytest
+  # shellcheck on every script of the platform, with the repository's .shellcheckrc, the same
+  # version as `uvx --from shellcheck-py==0.11.0.1 shellcheck` locally.
+  scripts:
+    runs-on: platform
+    steps:
+      - uses: actions/checkout@v4
+      - name: uv
+        run: |
+          curl -fsSL -o /tmp/uv.tgz https://github.com/astral-sh/uv/releases/download/0.11.22/uv-x86_64-unknown-linux-gnu.tar.gz
+          echo "30075b14624a62021198319f22e08f1651a97d4026a8c84dab6abcbfaba0d81c  /tmp/uv.tgz" | sha256sum -c -
+          tar -xzf /tmp/uv.tgz -C /usr/local/bin --strip-components=1
+      - name: shellcheck
+        run: uvx --from shellcheck-py==0.11.0.1 shellcheck platform/*.sh platform/hooks/* agent-runner/entrypoint.sh
+  # What Argo CD applies from this repository, rendered and checked by platform/manifests.sh.
+  manifests:
+    runs-on: platform
+    steps:
+      - uses: actions/checkout@v4
+      - name: helm, kustomize, kubeconform and uv
+        run: |
+          fetch() { # fetch <url> <sha256>: an archive, checked, unpacked into /usr/local/bin
+            curl -fsSL -o /tmp/tool.tgz "$1"
+            echo "$2  /tmp/tool.tgz" | sha256sum -c -
+            tar -xzf /tmp/tool.tgz -C /tmp
+          }
+          fetch https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz \
+            0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
+          install /tmp/linux-amd64/helm /usr/local/bin/
+          fetch https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.3/kustomize_v5.8.3_linux_amd64.tar.gz \
+            cb9e31198d3f63b44848bd0afc4c8efc56e6cfef9c93a4a39a211940e6decd61
+          install /tmp/kustomize /usr/local/bin/
+          fetch https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz \
+            9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+          install /tmp/kubeconform /usr/local/bin/
+          fetch https://github.com/astral-sh/uv/releases/download/0.11.22/uv-x86_64-unknown-linux-gnu.tar.gz \
+            30075b14624a62021198319f22e08f1651a97d4026a8c84dab6abcbfaba0d81c
+          install /tmp/uv-x86_64-unknown-linux-gnu/uv /tmp/uv-x86_64-unknown-linux-gnu/uvx /usr/local/bin/
+      - name: render and check
+        run: platform/manifests.sh check
   images:
-    needs: test
+    needs: [test, scripts, manifests]
     runs-on: platform
     steps:
       - uses: actions/checkout@v4

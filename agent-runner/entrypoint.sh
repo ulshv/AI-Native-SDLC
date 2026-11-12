@@ -166,6 +166,8 @@ commit_push() {
   local message=$1
   shift
   git add -A -- "$@"
+  # Not grep -q: under pipefail, its early exit can fail git status with SIGPIPE.
+  # shellcheck disable=SC2143
   if [[ -n $(git status --porcelain --untracked-files=all | grep -v '^[MADRC] ') ]]; then
     log "left out, outside what this mode may change:"
     log "$(git status --porcelain --untracked-files=all | grep -v '^[MADRC] ' | sed 's/^/  /')"

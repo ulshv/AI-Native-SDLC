@@ -288,6 +288,7 @@ write_kubeconfig() {
   if [[ -s $KUBECONFIG && ! -e $KUBECONFIG.before-ai-native-sdlc ]]; then
     cp -p "$KUBECONFIG" "$KUBECONFIG.before-ai-native-sdlc"
   fi
+  # shellcheck disable=SC2024 # sudo reads the root-owned file; the user writes their own copy
   (umask 077 && sudo cat /etc/rancher/k3s/k3s.yaml >"$KUBECONFIG")
 }
 
@@ -315,15 +316,15 @@ node_network_in_place() {
 
 # Writes the drop-in and does now what it does on every k3s start.
 set_node_network() {
-  local rule="to $POD_CIDR lookup main priority $POD_ROUTE_PRIORITY"
+  local rule=(to "$POD_CIDR" lookup main priority "$POD_ROUTE_PRIORITY")
   sudo mkdir -p "$(dirname "$K3S_ROUTING_DROPIN")"
   routing_dropin | sudo tee "$K3S_ROUTING_DROPIN" >/dev/null
   sudo systemctl daemon-reload
   ip link show "$NODE_IFACE" >/dev/null 2>&1 || sudo ip link add "$NODE_IFACE" type dummy
   sudo ip addr replace "$NODE_IP/32" dev "$NODE_IFACE"
   sudo ip link set "$NODE_IFACE" up
-  sudo ip rule del $rule 2>/dev/null || true
-  sudo ip rule add $rule
+  sudo ip rule del "${rule[@]}" 2>/dev/null || true
+  sudo ip rule add "${rule[@]}"
 }
 
 # BuildKit's own profiles (design decision 12): the CI pods' BuildKit sidecars run under them.
@@ -535,6 +536,7 @@ phase_host() {
   step "AppArmor lets processes of one container signal each other (containerd#14485)" apparmor_profile_current install_apparmor_profile
   step "BuildKit's AppArmor and seccomp profiles (sdlc-buildkit) are installed" buildkit_profiles_current install_buildkit_profiles
   step "k3s $K3S_VERSION installed and running" k3s_installed install_k3s
+  # shellcheck disable=SC2088 # a description, not a path
   step "~/.kube/config points at k3s" kubeconfig_works write_kubeconfig
   step "node is Ready" node_ready wait_node_ready
   step "/etc/hosts block matches platform/hosts.txt" hosts_current write_hosts
@@ -1150,6 +1152,7 @@ argo_objects() {
 foreign_owned() {
   local objects ns
   objects=$(argo_objects) || return 1
+  # shellcheck disable=SC2013 # namespaces are single words
   for ns in $(cut -d' ' -f1 <<<"$objects" | sort -u); do
     awk -v ns="$ns" '$1 == ns { print $2 }' <<<"$objects" |
       xargs -r kubectl get --ignore-not-found --show-managed-fields -o json -n "${ns/#-/default}" |

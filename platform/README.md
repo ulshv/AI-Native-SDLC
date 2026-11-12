@@ -243,10 +243,19 @@ privileged and no host path is mounted. A NetworkPolicy lets the pods reach DNS,
 `ci_runners` and `ci_unprivileged` check both.
 
 **Platform images.** [`.gitea/workflows/images.yaml`](../.gitea/workflows/images.yaml) runs on
-every push to `main`: the orchestrator's tests first, against a Postgres in the runner; then each
-of `orchestrator/` and `agent-runner/` that has a `Dockerfile` is built and pushed as `gitea.sdlc.internal/platform/<directory>:<commit>`. Argo CD deploys the
-orchestrator with the tag of the commit it syncs, so a push to `main` reaches the cluster
-through CI and GitOps alone.
+every push to `main`. Three checks run first, and an image is built only when all pass:
+
+- `test`: the orchestrator's lint, types and tests, against a Postgres in the runner;
+- `scripts`: shellcheck on every script, with the repository's `.shellcheckrc`;
+- `manifests`: [`manifests.sh check`](manifests.sh) renders what Argo CD applies from this
+  repository (the Applications, every directory source, the orchestrator's chart, the project
+  files' ConfigMap) and checks it with kubeconform against Kubernetes' and the CRDs' schemas, and
+  the project files against their schema. The external charts are not rendered.
+
+Then each of `orchestrator/` and `agent-runner/` that has a `Dockerfile` is built and pushed as
+`gitea.sdlc.internal/platform/<directory>:<commit>`. Argo CD deploys the orchestrator with the
+tag of the commit it syncs, so a push to `main` reaches the cluster through CI and GitOps alone.
+Locally, `KUSTOMIZE="kubectl kustomize" platform/manifests.sh check` needs helm and kubeconform.
 
 **After a rebuild** there are no images yet: phase 4 pushes `main` before the runners exist,
 Gitea keeps that run queued, and `ci-platform` picks it up as soon as Argo CD has started it.

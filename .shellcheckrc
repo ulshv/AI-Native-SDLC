@@ -1,0 +1,6 @@
+# shellcheck for every script of this repository (CI's `scripts` job runs it).
+# Follow the files a script sources (seed-projects.sh sources bootstrap.sh).
+external-sources=true
+source-path=SCRIPTDIR
+# Single quotes hold jq programs and the scripts of `sh -c` on purpose: they expand where they run.
+disable=SC2016

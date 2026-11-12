@@ -358,8 +358,10 @@ register https_on_every_name
 check_https_on_every_name() {
   local name code location failed=0
   for name in $(service_names); do
-    code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "https://$name/") &&
-      ((code < 500)) || { echo "https://$name/ failed (HTTP $code)"; failed=1; }
+    if ! code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "https://$name/") || ((code >= 500)); then
+      echo "https://$name/ failed (HTTP $code)"
+      failed=1
+    fi
     read -r code location < <(curl -sS --max-time 10 -o /dev/null -w '%{http_code} %{redirect_url}' "http://$name/")
     [[ $code == 30[178] && $location == "https://$name/"* ]] ||
       { echo "http://$name/ does not redirect to HTTPS (HTTP $code, Location $location)"; failed=1; }
@@ -640,6 +642,7 @@ main() {
       echo ok
     else
       echo FAIL
+      # shellcheck disable=SC2001 # each line indented, which an expansion cannot anchor
       [[ -z $out ]] || sed 's/^/  /' <<<"$out"
       exit 1
     fi
