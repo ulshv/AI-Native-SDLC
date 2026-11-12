@@ -16,14 +16,13 @@ import logging
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from .logs import bound
 from .metrics import RUNS_ACTIVE, failed_call
-from .model import run_name  # noqa: F401 - a run's name is the work item's
 from .queue import Queue
 
 if TYPE_CHECKING:
@@ -50,7 +49,7 @@ class Finished:
     name: str
     thread_id: str
     succeeded: bool
-    result: dict[str, Any] = field(default_factory=dict)
+    result: dict[str, Any] = field(default_factory=dict[str, Any])
     uid: str = ""
 
 
@@ -346,10 +345,12 @@ class KubernetesCluster:
                 terminated = status.state.terminated if status.state else None
                 if terminated and terminated.message:
                     message = terminated.message
+        result: dict[str, Any] = {}
         try:
-            result = json.loads(message) if message else {}
+            parsed: object = json.loads(message) if message else {}
+            result = cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
         except json.JSONDecodeError:
-            result = {}
+            pass
         if not result:
             reason = next((c.message or c.reason for c in conditions(job) if c.type == "Failed"), "")
             result = {"result": "failed", "reason": f"the run ended without a result: {reason or 'no message'}"}
@@ -373,17 +374,22 @@ class KubernetesCluster:
 
         w = watch.Watch()
         # The API server ends the watch after WATCH_SECONDS; the client gives up a little later.
-        for item in w.stream(
-            self.batch.list_namespaced_job,
-            self.namespace,
-            label_selector=self.selector,
-            timeout_seconds=WATCH_SECONDS,
-            _request_timeout=WATCH_SECONDS + 30,
-        ):
+        events = cast(
+            Iterator[object],
+            w.stream(
+                self.batch.list_namespaced_job,
+                self.namespace,
+                label_selector=self.selector,
+                timeout_seconds=WATCH_SECONDS,
+                _request_timeout=WATCH_SECONDS + 30,
+            ),
+        )
+        for event in events:
             if stop.is_set():
                 w.stop()
                 return
-            job = item["object"]
+            item = cast(dict[str, Any], event)  # the client's watch is untyped: {"type", "object"}
+            job = cast(V1Job, item["object"])
             if item["type"] in ("ADDED", "MODIFIED") and finished(job):
                 yield self._finished(job)
 

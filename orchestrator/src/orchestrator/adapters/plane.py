@@ -5,6 +5,10 @@ can be renamed, its UUIDs cannot. The agent is recognised by its Plane user id, 
 in a comment's HTML carries too.
 """
 
+# The payloads are raw JSON (dict[str, Any]) until task 7.23 parses them into typed models; until
+# then, what is read from them is not tracked as unknown.
+# pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false
+
 from __future__ import annotations
 
 import html

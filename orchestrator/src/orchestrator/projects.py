@@ -72,7 +72,7 @@ class Projects:
         schema_file = directory / "project.schema.json"
         schema = json.loads(schema_file.read_text()) if schema_file.exists() else None
         files = sorted(directory.glob("*/project.yaml")) or sorted(directory.glob("*.yaml"))
-        projects = []
+        projects: list[Project] = []
         for path in files:
             doc = yaml.safe_load(path.read_text())
             if schema:

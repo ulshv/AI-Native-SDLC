@@ -27,7 +27,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "mypy==2.4.1",
+    "pyright[nodejs]==1.1.414",
     "pytest==9.2.0",
     "ruff==0.17.4",
     "types-jsonschema==4.26.0.20261006",
@@ -52,12 +52,14 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "W", "B", "I", "SIM", "UP", "RUF"]
 
-[tool.mypy]
-strict = true
-python_version = "3.13"
-plugins = ["pydantic.mypy"]
-
-[[tool.mypy.overrides]]
-# The Kubernetes client's config loaders and watch have no type information; its API is typed.
-module = ["orchestrator.executor"]
-disallow_untyped_calls = false
+[tool.pyright]
+# The same checker as Pylance in the editor, so what it marks CI fails on.
+include = ["src"]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+# Partly typed libraries (LangGraph without stubs, the Kubernetes client's config and watch): their
+# typing is theirs to fix; our own code's unknown variables and arguments stay errors.
+reportMissingTypeStubs = "none"
+reportUnknownMemberType = "none"
+venvPath = "."
+venv = ".venv"

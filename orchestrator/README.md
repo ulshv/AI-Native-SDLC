@@ -69,7 +69,7 @@ Lint, format and types, which CI runs before the tests:
 ```bash
 uv run --python 3.13 ruff check src tests
 uv run --python 3.13 ruff format --check src tests   # `ruff format src tests` fixes it
-uv run --python 3.13 mypy src                        # strict
+uv run --python 3.13 pyright                         # strict, the same checker as Pylance
 ```
 
 CI (`.gitea/workflows/images.yaml`) runs all of it, and the tests against a Postgres in the

@@ -91,7 +91,7 @@ class Settings(MigrateSettings):
 def load[S: MigrateSettings](kind: type[S]) -> S:
     """The settings, or a ConfigError naming every setting that is missing or malformed."""
     try:
-        return kind()
+        return kind()  # pyright: ignore[reportCallIssue] - pydantic-settings fills it from env and file
     except ValidationError as error:
         problems = [f"{'.'.join(map(str, e['loc'])).upper() or '(settings)'}: {e['msg']}" for e in error.errors()]
         raise ConfigError("; ".join(problems)) from None

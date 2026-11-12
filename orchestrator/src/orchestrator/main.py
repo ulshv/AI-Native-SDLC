@@ -10,7 +10,7 @@ import argparse
 import logging
 import sys
 import threading
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import ExitStack, asynccontextmanager
 
 import uvicorn
@@ -92,7 +92,7 @@ def serve(settings: config.Settings, host: str, port: int) -> int:
         workers = Workers(queue, the_agent, settings.workers)
 
         @asynccontextmanager
-        async def running(app: FastAPI) -> AsyncIterator[None]:
+        async def running(app: FastAPI) -> AsyncGenerator[None]:
             """The workers and the run watcher live as long as the app. Stopping them is part of
             uvicorn's shutdown, which runs before it passes SIGTERM on and the process ends."""
             workers.start()

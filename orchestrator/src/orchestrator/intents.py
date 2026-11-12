@@ -6,10 +6,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from .policy import READABLE, Intent
 
@@ -21,25 +20,31 @@ log = logging.getLogger(__name__)
 MODEL_TIMEOUT, MODEL_RETRIES = 60.0, 2
 
 
-def chat_model(model: str, base_url: str, api_key: str, **kwargs: Any) -> BaseChatModel:
+def chat_model(model: str, base_url: str, api_key: str) -> BaseChatModel:
     """The client for a model, by its prefix: DeepSeek's own client keeps its reasoning blocks,
     which the OpenAI client drops and which multi-turn calls with tools need. Both talk to the
     configured OpenAI-compatible base URL."""
-    common = {
-        "model": model,
-        "api_key": api_key,
-        "temperature": 0,
-        "timeout": MODEL_TIMEOUT,
-        "max_retries": MODEL_RETRIES,
-        **kwargs,
-    }
     if model.startswith("deepseek/"):
         from langchain_deepseek import ChatDeepSeek
 
-        return ChatDeepSeek(api_base=base_url, **common)
+        return ChatDeepSeek(
+            model=model,
+            base_url=base_url,
+            api_key=SecretStr(api_key),
+            temperature=0,
+            timeout=MODEL_TIMEOUT,
+            max_retries=MODEL_RETRIES,
+        )
     from langchain_openai import ChatOpenAI
 
-    return ChatOpenAI(base_url=base_url, **common)
+    return ChatOpenAI(
+        model=model,
+        base_url=base_url,
+        api_key=SecretStr(api_key),
+        temperature=0,
+        timeout=MODEL_TIMEOUT,
+        max_retries=MODEL_RETRIES,
+    )
 
 
 class ModelReading(BaseModel):

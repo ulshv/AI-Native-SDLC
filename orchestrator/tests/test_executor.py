@@ -2,7 +2,8 @@
 
 import json
 
-from orchestrator.executor import Executor, Finished, Run, run_name
+from orchestrator.executor import Executor, Finished, Run
+from orchestrator.model import run_name
 from orchestrator.queue import PostgresQueue
 
 

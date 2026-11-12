@@ -30,5 +30,7 @@ class Event:
     actor: Actor | None = None
     text: str = ""  # a comment's or a review's words
     mentions_agent: bool = False
-    data: dict[str, Any] = field(default_factory=dict)  # by kind: state, review, merged, tag, tickets, result, ...
+    data: dict[str, Any] = field(
+        default_factory=dict[str, Any]
+    )  # by kind: state, review, merged, tag, tickets, result, ...
     delivery_id: str = ""

@@ -10,9 +10,9 @@ No interrupt(): every event runs to the end (D21).
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
@@ -42,7 +42,7 @@ def setup_checkpoints(database_url: str) -> None:
 
 
 @contextmanager
-def checkpointer(database_url: str, size: int) -> Iterator[PostgresSaver]:
+def checkpointer(database_url: str, size: int) -> Generator[PostgresSaver]:
     """A checkpointer on a pool of its own, in the shape PostgresSaver needs."""
     with ConnectionPool(
         database_url,
@@ -55,9 +55,9 @@ def checkpointer(database_url: str, size: int) -> Iterator[PostgresSaver]:
         yield PostgresSaver(pool)
 
 
-class State(TypedDict, total=False):
-    item: dict[str, Any]  # WorkItem as JSON
-    command: dict[str, Any]  # Command as JSON
+class State(TypedDict):
+    command: dict[str, Any]  # Command as JSON, every step's input
+    item: NotRequired[dict[str, Any]]  # WorkItem as JSON; none before the first step
 
 
 class Agent:
@@ -105,16 +105,16 @@ class Agent:
             log.exception("thread %s could not be told that a run's result was given up", thread_id)
 
     def _step(self, state: State, config: RunnableConfig) -> State:
-        thread_id = str(config["configurable"]["thread_id"])
+        thread_id = str((config.get("configurable") or {})["thread_id"])
         item = WorkItem.model_validate(state.get("item") or {})
         command = COMMANDS.validate_python(state["command"])
         if item.applied_before(command.delivery):
             log.info("delivery %s was applied to thread %s before", command.delivery, thread_id)
-            return {"item": item.model_dump(mode="json")}
+            return {"command": state["command"], "item": item.model_dump(mode="json")}
         if item.ticket is None and not isinstance(command, Intake):
             # The intake never went through (its delivery failed): there is no item to act on.
             log.info("thread %s has no work item yet: %s left alone", thread_id, command.kind)
-            return {"item": item.model_dump(mode="json")}
+            return {"command": state["command"], "item": item.model_dump(mode="json")}
         project = self.projects.by_name(item.project or command.project)
         if project is None:
             raise LookupError(
@@ -122,7 +122,7 @@ class Agent:
             )
         new = machine.advance(item, command, project, self.ports, thread_id)
         new.remember(command.delivery)
-        return {"item": new.model_dump(mode="json")}
+        return {"command": state["command"], "item": new.model_dump(mode="json")}
 
     def run(self, thread_id: str, command: Command) -> None:
         with bound(thread=thread_id):

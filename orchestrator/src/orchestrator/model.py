@@ -90,10 +90,10 @@ class WorkItem(BaseModel):
     runs: int = 0  # every run of the thread, so a run's name is never used twice
     running: AgentRun | None = None
     paused: Paused | None = None
-    answers: list[Answer] = Field(default_factory=list)
+    answers: list[Answer] = Field(default_factory=list[Answer])
     feedback: str = ""
     fix_reply: Where = Where.PR  # where the result of a fix is announced: where it was asked for
-    messages: list[Message] = Field(default_factory=list)
+    messages: list[Message] = Field(default_factory=list[Message])
     applied: list[str] = Field(default_factory=list)
 
     @property

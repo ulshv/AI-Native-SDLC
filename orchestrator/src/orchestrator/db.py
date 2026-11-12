@@ -18,6 +18,8 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
+from psycopg import Connection
+from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 from sqlalchemy import create_engine, inspect, pool
 from sqlalchemy.engine import make_url
@@ -28,7 +30,14 @@ MIGRATIONS = Path(__file__).parent / "migrations"
 
 
 def connect(database_url: str, size: int = 8) -> ConnectionPool:
-    pool = ConnectionPool(database_url, min_size=1, max_size=size, kwargs={"autocommit": True}, open=True)
+    pool = ConnectionPool(
+        database_url,
+        min_size=1,
+        max_size=size,
+        connection_class=Connection[TupleRow],
+        kwargs={"autocommit": True},
+        open=True,
+    )
     pool.wait()
     return pool
 

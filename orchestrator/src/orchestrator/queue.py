@@ -60,16 +60,20 @@ class Queue(Protocol):
         headers: dict[str, str] | None = None,
     ) -> bool:
         """Records an event; False when this delivery was recorded before."""
+        ...
 
     def process(self, handler: Handler) -> bool:
         """Runs the handler on the next event that may run; False when there is none."""
+        ...
 
     def rekey(self, old: str, new: str) -> None:
         """Moves the waiting events of a key to another one (an object that got a thread)."""
+        ...
 
     def release_unfinished(self) -> int:
         """Gives the events this process is still handling back, as if never taken, for another
         process to take at once instead of after their lease; returns how many."""
+        ...
 
 
 # The oldest waiting event whose key has no older unfinished event; a leased one is unfinished.

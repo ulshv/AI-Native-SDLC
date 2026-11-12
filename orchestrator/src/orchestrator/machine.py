@@ -176,6 +176,8 @@ class Step:
         self.item.paused = None
 
     def pause(self, run: AgentRun, questions: list[str], text: str) -> None:
+        if self.item.phase is None:
+            raise LookupError(f"{self.key} has no phase to come back to")
         self.item.paused = Paused(phase=self.item.phase, run=run, questions=questions)
         self.phase(Phase.NEEDS_INFO)
         self.say(text)
