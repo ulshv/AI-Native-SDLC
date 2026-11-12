@@ -372,6 +372,38 @@ bootstrap. Gitea never shows a webhook's secret again, so after `GITEA_WEBHOOK_S
 delete the webhook in Gitea and run the bootstrap again. The smoke check `orchestrator_running`
 checks the rollout, `/readyz` and the Gitea webhook.
 
+### Watching an item
+
+A ticket's status in Plane is its phase, and the agent says in the ticket and in its pull request
+what it does. Behind them, through `kubectl port-forward -n sdlc svc/orchestrator 8000:80`:
+
+```bash
+curl -s "localhost:8000/threads?link=ticket:example-webapp/EWA-2"   # the item's thread and links
+curl -s localhost:8000/threads/<thread>                             # phase, branch, change, PR
+curl -s localhost:8000/threads/<thread>/messages                    # people's requests, answers
+kubectl get jobs -n sdlc-agents -l sdlc/key=ewa-2                   # its runs, kept for an hour
+kubectl logs -n sdlc deploy/orchestrator | jq 'select(.thread == "<thread>")'
+```
+
+The logs are the running pod's: a restart starts them anew.
+
+### When a run fails
+
+- **The run failed** (OpenCode stopped, a check failed, it changed nothing): the ticket moves to
+  Needs info with the reason and the agent's last words. Any comment with `@agent` runs the same
+  mode again, and what it says goes to the agent. The run's own log stays an hour:
+  `kubectl logs -n sdlc-agents job/<key>-<mode>-<n>`; its result is the pod's termination
+  message (see Agent runs).
+- **The agent asked** (Needs info with numbered questions): answer them in one comment with
+  `@agent`.
+- **A step could not finish** after its attempts (Gitea refused the merge, Plane was down): the
+  ticket says "I could not finish a step" with the error. Fix what blocks it, for example the
+  pull request's conflict, then ask `@agent` again.
+- **Nothing happens** after a comment: the comment must mention `@agent` (Plane's mention, or the
+  literal `@agent` in Gitea), and its author must be one of the project's people. An event the
+  orchestrator gave up is in its database:
+  `kubectl exec -n databases platform-pg-1 -c postgres -- psql -d orchestrator -c "SELECT received_at, source, error FROM inbox WHERE error IS NOT NULL ORDER BY id DESC LIMIT 5"`.
+
 ## Changing the platform through git
 
 After the bootstrap, Argo CD owns every component, itself included. The root Application

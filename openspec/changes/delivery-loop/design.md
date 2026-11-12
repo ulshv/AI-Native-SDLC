@@ -355,6 +355,11 @@ need to know.
   ends such a run with `failed` and the agent's last words, and a person can have it run again. A provider key written into `secrets.env` with quotes broke OpenCode's config, whose
   parse error quoted the key into the pod's status: the entrypoint now redacts the key from
   everything it writes, and the bootstrap's preflight refuses quoted values.
+- **Run in group 8:** EWA-2 "Orders: filter by status" went from its assignment to the merge
+  into `development` in 8 min 46 s: propose 2 min 38 s, apply 2 min 31 s, archive 6 s, the rest
+  the people's turns; every status and comment as the specs say, the archive commit last before
+  the merge. A vague ticket ("We need an export.") got a spec built on guesses, not questions; asked
+  to ask instead, the agent put three questions, and the answers reached the next run.
 - **Result:** the entrypoint writes one JSON to `/dev/termination-log` (`spec_ready`,
   `code_ready`, `archived`, `questions`, `failed`, plus the pushed commit). The watcher reads it from the
   pod status, so no log parsing and no extra storage.
