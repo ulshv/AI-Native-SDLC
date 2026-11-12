@@ -12,7 +12,8 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+
+from .events import Event, Kind, PullRequest, TrackerItem
 
 
 class Phase(StrEnum):
@@ -114,15 +115,17 @@ class Policy[H]:
         return Decision(rule)
 
 
-# Explicit signals need no model (design decision 5): an event kind, the field it is read from,
-# and what its values stand for.
-SIGNALS: dict[str, tuple[str, dict[str, Intent]]] = {
-    "status": ("state", {"Approved": Intent.APPROVE, "Closed": Intent.REJECT}),
-    "review": ("review", {"approved": Intent.APPROVE, "request_changes": Intent.REQUEST_CHANGES}),
-}
+# Explicit signals need no model (design decision 5): a status a person set, a review's verdict.
+STATUSES = {"Approved": Intent.APPROVE, "Closed": Intent.REJECT}
+VERDICTS = {"approved": Intent.APPROVE, "request_changes": Intent.REQUEST_CHANGES}
 
 
-def signal(kind: str, data: dict[str, Any]) -> Intent | None:
-    """The intent an explicit signal stands for: a status a person set, or a review's verdict."""
-    field, meanings = SIGNALS.get(kind, ("", {}))
-    return meanings.get(data.get(field, ""))
+def signal(event: Event) -> Intent | None:
+    """The intent an explicit signal stands for, or None for an event that is none."""
+    match event.kind, event.about:
+        case Kind.STATUS, TrackerItem(state=state):
+            return STATUSES.get(state)
+        case Kind.REVIEW, PullRequest(review=review):
+            return VERDICTS.get(review)
+        case _:
+            return None

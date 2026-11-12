@@ -5,21 +5,19 @@ can be renamed, its UUIDs cannot. The agent is recognised by its Plane user id, 
 in a comment's HTML carries too.
 """
 
-# The payloads are raw JSON (dict[str, Any]) until task 7.23 parses them into typed models; until
-# then, what is read from them is not tracked as unknown.
-# pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false
-
 from __future__ import annotations
 
 import html
 import re
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 import httpx
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from ..events import Actor, Event
+from ..events import Actor, Event, Kind, Source, TrackerItem
 from ..http import Api, marker_html
 from ..links import Link
 
@@ -28,86 +26,153 @@ MENTION = re.compile(r'<mention-component[^>]*entity_identifier="([0-9a-f-]+)"[^
 TAG = re.compile(r"<[^>]+>")
 
 
+# --- What the loop reads of Plane's payloads (spike 1.3); the rest is ignored ------------------
+
+
+class Someone(BaseModel):
+    id: str = ""
+
+
+class State(BaseModel):
+    name: str = ""
+
+
+class Activity(BaseModel):
+    field: str | None = None
+    new_value: str | list[str] | None = None
+    old_value: str | list[str] | None = None
+    actor: Someone = Field(default_factory=Someone)
+
+
+class Issue(BaseModel):
+    id: str = ""
+    project: str = ""
+    sequence_id: int | None = None
+    name: str = ""
+    description_stripped: str | None = None
+    description_html: str | None = None
+    state: State | str | None = None
+    assignees: list[Someone | str] = Field(default_factory=list[Someone | str])
+
+    def assigned(self) -> list[str]:
+        return [a.id if isinstance(a, Someone) else a for a in self.assignees]
+
+
+class Comment(BaseModel):
+    id: str = ""
+    project: str = ""
+    issue: str = ""
+    actor: str = ""
+    comment_html: str = ""
+
+
+class Payload(BaseModel):
+    event: str = ""
+    action: str = ""
+    workspace_slug: str = ""
+    data: dict[str, Any] = Field(default_factory=dict[str, Any])
+    activity: Activity = Field(default_factory=Activity)
+
+    @field_validator("data", "activity", mode="before")
+    @classmethod
+    def null_is_empty(cls, value: object) -> object:
+        """What an event does not have may come as null."""
+        return {} if value is None else value
+
+
+def payload(headers: Mapping[str, str], body: dict[str, Any]) -> Payload | None:
+    try:
+        parsed = Payload.model_validate(body)
+    except ValidationError:
+        return None
+    return parsed.model_copy(update={"event": header(headers, "X-Plane-Event") or parsed.event})
+
+
 def link_of(headers: Mapping[str, str], body: dict[str, Any]) -> Link | None:
     """The work item an event is about, for routing before anything else is read."""
-    data = body.get("data") or {}
-    event = header(headers, "X-Plane-Event") or body.get("event")
-    if event == "issue" and data.get("project") and data.get("id"):
-        return Link(KIND, f"{data['project']}/{data['id']}")
-    if event == "issue_comment" and data.get("project") and data.get("issue"):
-        return Link(KIND, f"{data['project']}/{data['issue']}")
-    return None
+    parsed = payload(headers, body)
+    if parsed is None or parsed.event not in LINKS:
+        return None
+    try:
+        project, item = LINKS[parsed.event](parsed.data)
+    except ValidationError:
+        return None
+    return Link(KIND, f"{project}/{item}") if project and item else None
+
+
+def issue_of(data: dict[str, Any]) -> tuple[str, str]:
+    issue = Issue.model_validate(data)
+    return issue.project, issue.id
+
+
+def commented_issue_of(data: dict[str, Any]) -> tuple[str, str]:
+    comment = Comment.model_validate(data)
+    return comment.project, comment.issue
+
+
+# The work item of each kind of webhook: its project and its id.
+LINKS: dict[str, Callable[[dict[str, Any]], tuple[str, str]]] = {"issue": issue_of, "issue_comment": commented_issue_of}
 
 
 def to_event(headers: Mapping[str, str], body: dict[str, Any], agent_id: str) -> Event | None:
     """The event, or None when it is nothing for the loop: the agent's own, or without a request."""
-    data = body.get("data") or {}
-    activity = body.get("activity") or {}
-    link = link_of(headers, body)
-    delivery = header(headers, "X-Plane-Delivery") or ""
-    if link is None:
+    parsed, link = payload(headers, body), link_of(headers, body)
+    if parsed is None or link is None:
         return None
-    event = header(headers, "X-Plane-Event") or body.get("event")
+    read = READERS.get(parsed.event)
+    return read(parsed, link, agent_id, header(headers, "X-Plane-Delivery") or "") if read else None
 
-    if event == "issue":
-        actor = activity.get("actor") or {}
-        if actor.get("id") == agent_id:
-            return None
-        # Only the id: a display name is the user's to change. The handler finds the person by id.
-        who = Actor("plane", "", actor.get("id", ""))
-        common = {
-            "workspace": body.get("workspace_slug"),
-            "sequence_id": data.get("sequence_id"),
-            "project_id": data.get("project"),
-            "work_item_id": data.get("id"),
-            "title": data.get("name", ""),
-            "description": data.get("description_stripped") or strip(data.get("description_html") or ""),
-        }
-        field = activity.get("field")
-        assignees = [a.get("id") if isinstance(a, dict) else a for a in data.get("assignees") or []]
-        newly_assigned = (body.get("action") == "created" and agent_id in assignees) or (
-            field == "assignees"
-            and agent_id in (activity.get("new_value") or [])
-            and agent_id not in (activity.get("old_value") or [])
-        )
-        if newly_assigned:
-            return Event("plane", "assigned", link, who, data=common, delivery_id=delivery)
-        if field == "state":
-            state = data.get("state") or {}
-            return Event(
-                "plane",
-                "status",
-                link,
-                who,
-                data={**common, "state": state.get("name", "") if isinstance(state, dict) else ""},
-                delivery_id=delivery,
-            )
+
+def issue_event(p: Payload, link: Link, agent_id: str, delivery: str) -> Event | None:
+    """A work item's change: assigned to @agent, or a status a person set. The agent's own are
+    dropped."""
+    if p.activity.actor.id == agent_id:
         return None
-
-    if event == "issue_comment" and body.get("action") == "created":
-        if data.get("actor") == agent_id:
-            return None
-        markup = data.get("comment_html") or ""
-        mentioned = [m.group(1) for m in MENTION.finditer(markup)]
-        if agent_id not in mentioned:
-            return None
-        text = strip(MENTION.sub(lambda m: "@agent" if m.group(1) == agent_id else "@someone", markup))
-        return Event(
-            "plane",
-            "comment",
-            link,
-            Actor("plane", "", data.get("actor", "")),
-            text=text,
-            mentions_agent=True,
-            data={
-                "workspace": body.get("workspace_slug"),
-                "comment_id": data.get("id"),
-                "work_item_id": data.get("issue"),
-                "project_id": data.get("project"),
-            },
-            delivery_id=delivery,
-        )
+    issue = Issue.model_validate(p.data)
+    # Only the id: a display name is the user's to change. The handler finds the person by id.
+    who = Actor(Source.PLANE, "", p.activity.actor.id)
+    item = TrackerItem(
+        workspace=p.workspace_slug,
+        project_id=issue.project,
+        work_item_id=issue.id,
+        sequence_id=issue.sequence_id,
+        title=issue.name,
+        description=issue.description_stripped or strip(issue.description_html or ""),
+    )
+    if assigned_now(p, issue, agent_id):
+        return Event(Source.PLANE, Kind.ASSIGNED, link, item, who, delivery_id=delivery)
+    if p.activity.field == "state":
+        state = issue.state.name if isinstance(issue.state, State) else ""
+        return Event(Source.PLANE, Kind.STATUS, link, replace(item, state=state), who, delivery_id=delivery)
     return None
+
+
+def assigned_now(p: Payload, issue: Issue, agent_id: str) -> bool:
+    """Created with @agent among its assignees, or @agent added to them."""
+    if p.action == "created":
+        return agent_id in issue.assigned()
+    added, before = p.activity.new_value or [], p.activity.old_value or []
+    return p.activity.field == "assignees" and agent_id in added and agent_id not in before
+
+
+def comment_event(p: Payload, link: Link, agent_id: str, delivery: str) -> Event | None:
+    """A new comment that mentions @agent, not by the agent."""
+    comment = Comment.model_validate(p.data)
+    if p.action != "created" or comment.actor == agent_id:
+        return None
+    mentioned = [m.group(1) for m in MENTION.finditer(comment.comment_html)]
+    if agent_id not in mentioned:
+        return None
+    text = strip(MENTION.sub(lambda m: "@agent" if m.group(1) == agent_id else "@someone", comment.comment_html))
+    item = TrackerItem(workspace=p.workspace_slug, project_id=comment.project, work_item_id=comment.issue)
+    who = Actor(Source.PLANE, "", comment.actor)
+    return Event(Source.PLANE, Kind.COMMENT, link, item, who, text=text, mentions_agent=True, delivery_id=delivery)
+
+
+READERS: dict[str, Callable[[Payload, Link, str, str], Event | None]] = {
+    "issue": issue_event,
+    "issue_comment": comment_event,
+}
 
 
 def strip(markup: str) -> str:
@@ -205,7 +270,10 @@ class PlaneTracker:
 PER_PAGE, MAX_PAGES = 100, 100  # a page of Plane's lists, and how many are read at most
 
 
-def results(page: Any) -> list[dict[str, Any]]:
-    """The items of a page of Plane's API, paginated or not."""
-    items = page.get("results", []) if isinstance(page, dict) else page
-    return list(items or [])
+class Page(BaseModel):
+    results: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
+
+
+def results(page: object) -> list[dict[str, Any]]:
+    """The items of a page of Plane's API, paginated (results) or a plain list."""
+    return Page.model_validate(page if isinstance(page, dict) else {"results": page or []}).results

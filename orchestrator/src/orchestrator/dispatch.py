@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from . import intents
 from .adapters import gitea, plane
-from .events import Event
+from .events import Event, Kind, PullRequest, Source, TrackerItem
 from .links import Link, Links
 from .model import (
     COMMANDS,
@@ -37,8 +37,8 @@ from .queue import Delivery, Queue, Requeue
 
 log = logging.getLogger(__name__)
 
-IGNORED = {"release"}  # releases come with group 10
-VIA = {"plane": Where.TICKET, "gitea": Where.PR}  # where a request was made, and its answer goes
+IGNORED = {Kind.RELEASE}  # releases come with group 10
+VIA = {Source.PLANE: Where.TICKET, Source.GITEA: Where.PR}  # where a request was made, and its answer goes
 # A reading may make an explicit signal more precise, never turn it around: an approving review
 # that asks to merge is a merge request, a review requesting changes stays one.
 REFINES = {Intent.APPROVE: {Intent.MERGE}}
@@ -48,7 +48,7 @@ def read_intent(chat: BaseChatModel, threshold: float, event: Event, item: WorkI
     """An explicit signal needs no model; a mention is read by one; nothing else is a request. No
     model reads a stranger's comment (the policy refuses it whatever it says), nor one in Needs
     info, where the next mention is the answer."""
-    explicit = signal(event.kind, event.data)
+    explicit = signal(event)
     if not (event.mentions_agent and event.text):
         return explicit
     if not known:
@@ -60,6 +60,13 @@ def read_intent(chat: BaseChatModel, threshold: float, event: Event, item: WorkI
     if explicit:
         return reading.intent if clear and reading.intent in REFINES.get(explicit, set()) else explicit
     return reading.intent if clear else Intent.UNCLEAR
+
+
+def tracker_item(event: Event) -> TrackerItem:
+    """The work item an event from the tracker is about; an assignment always names its number."""
+    if not isinstance(event.about, TrackerItem) or (event.kind is Kind.ASSIGNED and event.about.sequence_id is None):
+        raise ValueError(f"a {event.kind} event without the work item it is about")
+    return event.about
 
 
 def result_of(payload: dict[str, Any]) -> RunResult:
@@ -98,11 +105,11 @@ class Dispatcher:
             "plane": lambda d: plane.to_event(d.headers, d.payload, tracker.agent_id()),
             "gitea": lambda d: gitea.to_event(d.headers, d.payload),
         }
-        self.commands: dict[str, Callable[[str, Event, Project, WorkItem], Command | None]] = {
-            "assigned": self._intake,
-            "pr_merged": lambda delivery, event, project, item: PrChanged(delivery=delivery, merged=True),
-            "pr_closed": lambda delivery, event, project, item: PrChanged(delivery=delivery, merged=False),
-            "status": self._status,
+        self.commands: dict[Kind, Callable[[str, Event, Project, WorkItem], Command | None]] = {
+            Kind.ASSIGNED: self._intake,
+            Kind.PR_MERGED: lambda delivery, event, project, item: PrChanged(delivery=delivery, merged=True),
+            Kind.PR_CLOSED: lambda delivery, event, project, item: PrChanged(delivery=delivery, merged=False),
+            Kind.STATUS: self._status,
         }
 
     def __call__(self, delivery: Delivery) -> None:
@@ -152,34 +159,33 @@ class Dispatcher:
     def _thread_of(self, event: Event, project: Project) -> str | None:
         """The event's thread; a ticket assigned to @agent gets one, linked to the work item and
         to its key (again on a retry, should the first try have stopped in between)."""
-        if event.link is None:
-            return None
         thread_id = self.links.thread_of(event.link)
-        if event.kind != "assigned":
+        if event.kind is not Kind.ASSIGNED:
             return thread_id
         thread_id = thread_id or str(uuid.uuid4())
         self.links.link(thread_id, event.link)
-        self.links.link(thread_id, Link("ticket", f"{project.name}/{project.identifier}-{event.data['sequence_id']}"))
+        key = f"{project.identifier}-{tracker_item(event).sequence_id}"
+        self.links.link(thread_id, Link("ticket", f"{project.name}/{key}"))
         return thread_id
 
     def _intake(self, delivery: str, event: Event, project: Project, item: WorkItem) -> Intake:
-        data = event.data
+        ticket = tracker_item(event)
         return Intake(
             delivery=delivery,
             project=project.name,
-            sequence_id=data["sequence_id"],
-            title=data.get("title", ""),
-            description=data.get("description", ""),
-            workspace=data.get("workspace", ""),
-            project_id=data.get("project_id", ""),
-            work_item_id=data.get("work_item_id", ""),
+            sequence_id=ticket.sequence_id or 0,
+            title=ticket.title,
+            description=ticket.description,
+            workspace=ticket.workspace,
+            project_id=ticket.project_id,
+            work_item_id=ticket.work_item_id,
         )
 
     def _status(self, delivery: str, event: Event, project: Project, item: WorkItem) -> Command | None:
         """A status that stands for a request (Approved, Closed) is one; any other is set back."""
-        if signal(event.kind, event.data):
+        if signal(event):
             return self._request(delivery, event, project, item)
-        return StatusSet(delivery=delivery, project=project.name, status=event.data.get("state", ""))
+        return StatusSet(delivery=delivery, project=project.name, status=tracker_item(event).state)
 
     def _request(self, delivery: str, event: Event, project: Project, item: WorkItem) -> Request | None:
         person = self._person(project, event)
@@ -187,8 +193,9 @@ class Dispatcher:
         if intent is None:
             return None
         feedback: list[str] = []
-        if event.kind == "review" and intent is Intent.REQUEST_CHANGES and event.actor:
-            feedback = self.code_host.review_comments(project.repo, event.data["number"], event.actor.username)
+        pr = event.about.number if isinstance(event.about, PullRequest) else None
+        if event.kind is Kind.REVIEW and intent is Intent.REQUEST_CHANGES and event.actor and pr:
+            feedback = self.code_host.review_comments(project.repo, pr, event.actor.username)
         return Request(
             delivery=delivery,
             project=project.name,
@@ -197,13 +204,13 @@ class Dispatcher:
             author=person.name if person else (event.actor.username if event.actor else "") or "someone",
             roles=person.roles if person else None,
             via=VIA[event.source],
-            pr=event.data.get("number") if VIA[event.source] == Where.PR else None,
+            pr=pr,
             feedback=feedback,
-            status_signal=event.kind == "status",
+            status_signal=event.kind is Kind.STATUS,
         )
 
     def _person(self, project: Project, event: Event) -> Person | None:
         if event.actor is None:
             return None
-        username = event.actor.username if event.actor.tool == "gitea" else self.tracker.username(event.actor.id)
+        username = event.actor.username if event.actor.tool is Source.GITEA else self.tracker.username(event.actor.id)
         return project.person(event.actor.tool, username)

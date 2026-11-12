@@ -16,7 +16,7 @@ from typing import Any
 import jsonschema
 import yaml
 
-from .events import Event
+from .events import Event, PullRequest, Release, TrackerItem
 
 log = logging.getLogger(__name__)
 ROLES = ("product_owner", "engineer")
@@ -112,13 +112,14 @@ class Projects:
         """The connected project an event belongs to; None for a tracker project or a repository
         that has no project file, whose events the loop leaves alone. identifier_of(workspace,
         project_id) names a tracker project (the tracker's webhooks carry only its id)."""
-        if event.source == "gitea":
-            return self.by_repo(event.data.get("repo", ""))
-        if event.source == "plane":
-            workspace = event.data.get("workspace") or ""
-            identifier = identifier_of(workspace, event.data.get("project_id") or "") if workspace else None
-            return self.by_tracker(workspace, identifier) if identifier else None
-        return None
+        match event.about:
+            case PullRequest(repo=repo) | Release(repo=repo):
+                return self.by_repo(repo)
+            case TrackerItem(workspace=workspace, project_id=project_id) if workspace:
+                identifier = identifier_of(workspace, project_id)
+                return self.by_tracker(workspace, identifier) if identifier else None
+            case _:
+                return None
 
 
 class LiveProjects(Projects):

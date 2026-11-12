@@ -1,11 +1,14 @@
 """Project files and people (task 7.4), the model client, intents and the policy (task 7.5)."""
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from orchestrator import intents, llm
+from orchestrator.events import Event, Kind, PullRequest, Source, TrackerItem
+from orchestrator.links import Link
 from orchestrator.machine import POLICY
 from orchestrator.policy import OPEN, Intent, Phase
 from orchestrator.projects import LiveProjects, Projects
@@ -92,22 +95,26 @@ def test_refusals_say_why():
     )
 
 
+ITEM = TrackerItem("sdlc", "p-1", "i-1")
+PR = PullRequest("sdlc/example-webapp", 3)
+
+
 @pytest.mark.parametrize(
-    "kind, data, intent",
+    "kind, about, intent",
     [
-        ("status", {"state": "Approved"}, "approve"),
-        ("status", {"state": "Closed"}, "reject"),
-        ("status", {"state": "Drafting"}, None),
-        ("review", {"review": "approved"}, "approve"),
-        ("review", {"review": "request_changes"}, "request_changes"),
-        ("review", {"review": "comment"}, None),
-        ("comment", {}, None),
+        (Kind.STATUS, replace(ITEM, state="Approved"), "approve"),
+        (Kind.STATUS, replace(ITEM, state="Closed"), "reject"),
+        (Kind.STATUS, replace(ITEM, state="Drafting"), None),
+        (Kind.REVIEW, replace(PR, review="approved"), "approve"),
+        (Kind.REVIEW, replace(PR, review="request_changes"), "request_changes"),
+        (Kind.REVIEW, replace(PR, review="comment"), None),
+        (Kind.COMMENT, PR, None),
     ],
 )
-def test_explicit_signals_need_no_model(kind, data, intent):
+def test_explicit_signals_need_no_model(kind, about, intent):
     from orchestrator.policy import signal
 
-    assert signal(kind, data) == intent
+    assert signal(Event(Source.GITEA, kind, Link("x", "y"), about)) == intent
 
 
 class Shapeless:

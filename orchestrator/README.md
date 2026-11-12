@@ -31,7 +31,7 @@ src/orchestrator/
   adapters/      Plane and Gitea: payload -> Event, and the clients for the ports
   http.py        the clients' HTTP: timeouts, bounded retries (tenacity), errors naming their target
   ports.py       the Tracker and CodeHost ports
-  events.py      the normalized event
+  events.py      the normalized event: its source, kind and what it is about (work item, PR, release)
   projects.py    platform/projects/*/project.yaml: projects, people and roles
   executor.py    agent runs as Jobs, at most max_active_runs at a time, and the watcher
 tests/           pytest, against a real Postgres; fixtures/ holds scrubbed webhook payloads
