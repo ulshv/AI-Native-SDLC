@@ -423,7 +423,8 @@ reconciles the cluster from `main` in Gitea, Argo CD itself included. Secret val
 `~/.config/ai-native-sdlc/secrets.env` and never enter git.
 
 `origin` becomes Gitea. GitHub keeps a public copy of `main` that is pushed by hand, through a
-pre-push hook that refuses every other branch and any commit containing a secret value.
+pre-push hook that refuses every other branch but an `epic/*` one and any commit containing a
+secret value.
 
 Logins, what the bootstrap changes on the host and how to undo it:
 [platform/README.md](platform/README.md).

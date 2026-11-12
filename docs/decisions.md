@@ -152,7 +152,9 @@ the candidate if agent Jobs need short-lived, audited credentials.
 reviews and branch protection belong on the self-hosted git server.
 **Decision.** The bootstrap moves `origin` to Gitea and keeps the old remote as `github`.
 `main` reaches GitHub only by a manual `git push github main`, through a pre-push hook that
-refuses every other ref and any commit containing a value from `secrets.env`. Gitea's built-in
+refuses every other ref and any commit containing a value from `secrets.env`. The one
+exception is an `epic/*` branch, pushed by hand under the same check when an outside
+contributor needs it before it lands in `main`. Gitea's built-in
 push mirror is not used, because it mirrors every ref. A Gitea Actions workflow was rejected:
 it needs a runner and a GitHub credential in Gitea, and it could scan only by pattern, without
 access to the secret values.

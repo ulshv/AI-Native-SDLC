@@ -442,7 +442,9 @@ publishing, remove the `github` remote.
 **The pre-push hook** ([`hooks/pre-push`](hooks/pre-push), enabled by the bootstrap through
 `core.hooksPath`) checks every push to a `github.com` remote and refuses it when:
 
-- it pushes anything but `main`: another branch, a tag, or the deletion of `main`;
+- it pushes anything but `main` or an `epic/*` branch: another branch, a tag, or the
+  deletion of `main`. An epic branch goes there by hand (`git push github epic/<name>`) when an
+  outside contributor needs it before it lands in `main`; delete it there once merged;
 - a pushed commit contains a value from `secrets.env`, a password or the admin email alike.
   It names the file, never the value;
 - gitleaks, when installed, finds a well-known secret format in the pushed commits. Without

@@ -3,7 +3,8 @@
 # The bootstrap points core.hooksPath here. See "Public mirror" in platform/README.md.
 # git calls it with <remote name> <remote url>, and one line per ref on stdin:
 #   <local ref> <local sha> <remote ref> <remote sha>
-# Only main may go there; its new commits go through platform/secrets-leak-check.sh.
+# Only main and epic/* branches may go there, an epic branch for an outside contributor who
+# needs it before it lands in main. Their new commits go through platform/secrets-leak-check.sh.
 set -euo pipefail
 
 remote_url=$2
@@ -18,8 +19,14 @@ refuse() {
 }
 
 while read -r _ local_sha remote_ref remote_sha; do
-  [[ $remote_ref == refs/heads/main ]] || refuse "only main may go to $remote_url, not $remote_ref"
-  [[ $local_sha != "$ZERO" ]] || refuse "deleting main on $remote_url is not allowed"
+  case $remote_ref in
+    refs/heads/main)
+      [[ $local_sha != "$ZERO" ]] || refuse "deleting main on $remote_url is not allowed" ;;
+    refs/heads/epic/*)
+      [[ $local_sha != "$ZERO" ]] || continue ;; # deleting an epic branch publishes nothing
+    *)
+      refuse "only main and epic/* branches may go to $remote_url, not $remote_ref" ;;
+  esac
 
   # The commits new to the remote; all of them when the remote's head is unknown here.
   range=$local_sha
