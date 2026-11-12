@@ -105,7 +105,7 @@ Tasks 7.12–7.27 bring the orchestrator and the platform's CI to the engineerin
 
 - [x] 8.1 Run the loop on a real ticket in `EWA`: assign to `@agent`, answer a question, approve with a comment, get the code in the same PR, ask "@agent ok, merge it into dev" and see the archive commit land before the merge. Verify every status and comment in Plane and the PR state in Gitea match the specs, and record the lead time
 - [x] 8.2 Restart the orchestrator while an item waits in Spec review, and redeliver a webhook from Gitea's UI. Verify the item continues as before and the redelivery changes nothing
-- [ ] 8.3 Ask to merge as a person without the engineer role, and ask to merge an item in Spec review. Verify both get a refusal and nothing changes
+- [x] 8.3 Ask to merge as a person without the engineer role, and ask to merge an item in Spec review. Verify both get a refusal and nothing changes
 - [x] 8.4 Update `platform/README.md` with how to watch an item and what to do when a run fails, and verify against the run from 8.1
 
 ## 9. Environments
