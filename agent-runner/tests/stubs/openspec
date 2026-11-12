@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# The OpenSpec CLI for agent-runner's tests: validate passes, archive moves the change as the real
+# one does.
+set -euo pipefail
+case $1 in
+  validate) exit 0 ;;
+  archive) mkdir -p openspec/changes/archive && mv "openspec/changes/$2" "openspec/changes/archive/2026-01-01-$2" ;;
+  *) echo "openspec stub: $*" >&2 && exit 2 ;;
+esac

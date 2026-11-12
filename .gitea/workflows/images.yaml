@@ -50,7 +50,9 @@ jobs:
           echo "30075b14624a62021198319f22e08f1651a97d4026a8c84dab6abcbfaba0d81c  /tmp/uv.tgz" | sha256sum -c -
           tar -xzf /tmp/uv.tgz -C /usr/local/bin --strip-components=1
       - name: shellcheck
-        run: uvx --from shellcheck-py==0.11.0.1 shellcheck platform/*.sh platform/hooks/* agent-runner/entrypoint.sh
+        run: |
+          uvx --from shellcheck-py==0.11.0.1 shellcheck platform/*.sh platform/hooks/* \
+            agent-runner/entrypoint.sh agent-runner/tests/run.sh agent-runner/tests/stubs/*
   # What Argo CD applies from this repository, rendered and checked by platform/manifests.sh.
   manifests:
     runs-on: platform
@@ -97,6 +99,11 @@ jobs:
         run: |
           for dir in orchestrator agent-runner; do
             if [ ! -f "$dir/Dockerfile" ]; then echo "$dir: no Dockerfile yet, skipped"; continue; fi
+            # A Dockerfile's test stage runs the image's tests first; nothing is pushed if they fail.
+            if grep -q '^FROM .* AS test$' "$dir/Dockerfile"; then
+              buildctl --addr unix:///run/buildkit/buildkitd.sock build --frontend dockerfile.v0 \
+                --local context="$dir" --local dockerfile="$dir" --opt target=test
+            fi
             buildctl --addr unix:///run/buildkit/buildkitd.sock build --frontend dockerfile.v0 \
               --local context="$dir" --local dockerfile="$dir" \
               --opt build-arg:COMMIT=${{ github.sha }} \

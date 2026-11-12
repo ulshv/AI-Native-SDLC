@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# OpenCode for agent-runner's tests: does what STUB says in the clone it runs in, and prints a
+# JSON event log as `opencode run --format json` does.
+set -euo pipefail
+case ${STUB:?} in
+  propose) mkdir -p "openspec/changes/$STUB_CHANGE" && echo "# $STUB_CHANGE" >"openspec/changes/$STUB_CHANGE/proposal.md" ;;
+  code) echo "work" >>app.txt && mkdir -p .gitea && echo "token: stolen" >.gitea/ci.yaml ;;
+  questions) mkdir -p .agent && cp "$STUB_QUESTIONS" .agent/result.json ;;
+  nothing) ;;
+  crash) echo "opencode: the provider refused the key" >&2 && exit 3 ;;
+esac
+printf '%s\n' '{"type":"step_finish"}' '{"type":"text","part":{"text":"done as asked"}}'
