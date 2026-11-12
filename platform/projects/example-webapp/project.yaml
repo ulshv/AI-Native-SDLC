@@ -31,9 +31,14 @@ checks:
 # People and their roles in the loop (design decision 5): product_owner, engineer. Engineers may
 # merge into development (with agent) and into main; product owners and engineers approve on
 # main. Usernames only, never e-mail addresses: this repository is public. Plane's `admin` and
-# Gitea's `gitea_admin` are the instance admins the bootstrap creates.
+# Gitea's `gitea_admin` are the instance admins the bootstrap creates; the other people's accounts
+# are made by an admin (Plane's setup Job and seed-projects.sh only connect existing accounts).
 people:
   - name: sergey
     roles: [product_owner, engineer]
     plane: admin
     gitea: gitea_admin
+  - name: manager
+    roles: [product_owner]
+    plane: manager
+    gitea: manager
