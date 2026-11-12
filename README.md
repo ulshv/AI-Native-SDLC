@@ -413,7 +413,7 @@ listening there, before bootstrapping.
 
 ```bash
 platform/bootstrap.sh   # build or rebuild the platform: ~11 min from scratch, safe to re-run
-platform/smoke.sh       # 15 end-to-end checks
+platform/smoke.sh       # 23 end-to-end checks
 ```
 
 Then the services are at <https://gitea.sdlc.internal>, <https://argocd.sdlc.internal> and

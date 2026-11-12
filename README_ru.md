@@ -408,7 +408,7 @@ sudo snap install helm --classic
 
 ```bash
 platform/bootstrap.sh   # собрать или пересобрать платформу: ~11 мин с нуля, можно перезапускать
-platform/smoke.sh       # 15 сквозных проверок
+platform/smoke.sh       # 23 сквозных проверки
 ```
 
 После этого сервисы доступны на <https://gitea.sdlc.internal>, <https://argocd.sdlc.internal>

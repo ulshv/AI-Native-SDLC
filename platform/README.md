@@ -461,8 +461,6 @@ remove it from history, for example with `git rebase -i` for a recent commit or
 `git filter-repo --replace-text` for an old one, force-push the rewritten `main` to Gitea, and
 push to GitHub again.
 
-`platform/smoke.sh mirror_only_main` checks that GitHub holds `main` and nothing else.
-
 ## Plane
 
 Plane CE, the issue tracker, runs at <https://plane.sdlc.internal> on the platform's Postgres
