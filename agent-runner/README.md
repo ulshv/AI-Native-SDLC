@@ -28,7 +28,7 @@ The task (`/task/task.json`, a ConfigMap the orchestrator writes):
 ```json
 {"mode": "propose", "repo": "sdlc/example-webapp", "base": "development",
  "branch": "feat/EWA-12_orders-filter", "change": "ewa-12-orders-filter",
- "model": "llm/deepseek/deepseek-v4-flash-0731",
+ "model": "llm/deepseek/deepseek-v4.1-flash-1017",
  "ticket": {"key": "EWA-12", "title": "...", "text": "..."},
  "answers": [{"question": "...", "answer": "..."}], "feedback": "...", "unarchive": false,
  "checks": ["npm ci", "npm test"]}

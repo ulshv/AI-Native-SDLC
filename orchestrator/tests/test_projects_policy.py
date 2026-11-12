@@ -154,7 +154,7 @@ def test_an_unsure_reading_or_none_is_not_acted_on():
 @pytest.mark.skipif(not os.environ.get("LLM_API_KEY"), reason="a live call needs LLM_API_KEY")
 def test_live_a_plain_approval_reads_as_approve():
     chat = llm.chat_model(
-        os.environ.get("INTENT_MODEL", "deepseek/deepseek-v4-flash-0731"),
+        os.environ.get("INTENT_MODEL", "deepseek/deepseek-v4.1-flash-1017"),
         os.environ.get("LLM_BASE_URL", "https://routerai.ru/api/v1"),
         os.environ["LLM_API_KEY"],
         intents.TEMPERATURE,

@@ -127,8 +127,8 @@ the file.
 | Setting | Default | |
 |---|---|---|
 | `llm_base_url` | `https://routerai.ru/api/v1` | any OpenAI-compatible API |
-| `intent_model` | `deepseek/deepseek-v4-flash-0731` | reads requests, at temperature 0; `deepseek/*` gets ChatDeepSeek, others ChatOpenAI |
-| `agent_model` | `llm/deepseek/deepseek-v4-flash-0731` | for agent runs; one of `platform/apps/agents/opencode-config.yaml` |
+| `intent_model` | `deepseek/deepseek-v4.1-flash-1017` | reads requests, at temperature 0; `deepseek/*` gets ChatDeepSeek, others ChatOpenAI |
+| `agent_model` | `llm/deepseek/deepseek-v4.1-flash-1017` | for agent runs; one of `platform/apps/agents/opencode-config.yaml` |
 | `intent_threshold` | `0.7` | below it, the agent asks what was meant |
 | `workers` | `2` | threads taking events |
 | `max_attempts` | `5` | an event that failed this often is given up (closed with its error) |

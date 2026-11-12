@@ -5,7 +5,7 @@
 #
 #   {"mode": "propose" | "apply" | "fix" | "archive",
 #    "repo": "sdlc/example-webapp", "base": "development", "branch": "feat/EWA-12_slug",
-#    "change": "ewa-12-slug", "model": "llm/deepseek/deepseek-v4-flash-0731",
+#    "change": "ewa-12-slug", "model": "llm/deepseek/deepseek-v4.1-flash-1017",
 #    "ticket": {"key": "EWA-12", "title": "...", "text": "..."},
 #    "answers": [{"question": "...", "answer": "..."}],   (optional)
 #    "feedback": "...",                                    (optional, for propose and fix)

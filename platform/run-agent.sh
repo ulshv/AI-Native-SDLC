@@ -10,7 +10,7 @@
 #     --branch BRANCH    instead of feat/<key>_<slug>, such as archive/<key>
 #     --feedback TEXT    review feedback, for propose and fix
 #     --answers FILE     a JSON list of {"question", "answer"}
-#     --model MODEL      default llm/deepseek/deepseek-v4-flash-0731 (listed in apps/agents)
+#     --model MODEL      default llm/deepseek/deepseek-v4.1-flash-1017 (listed in apps/agents)
 #     --image-tag TAG    default: the commit origin/main points at (built by images.yaml)
 #     --entrypoint FILE  run this local agent-runner/entrypoint.sh instead of the image's, to try
 #                        a change to it without a new image
@@ -24,7 +24,7 @@ usage() { sed -n '4,18s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; }
 PROJECT=$1 MODE=$2 KEY=$3
 shift 3
 TITLE="" TEXT="" SLUG="" BRANCH="" FEEDBACK="" ANSWERS="[]" ENTRYPOINT=""
-MODEL=llm/deepseek/deepseek-v4-flash-0731
+MODEL=llm/deepseek/deepseek-v4.1-flash-1017
 TAG=$(git rev-parse origin/main)
 while (($#)); do
   case $1 in

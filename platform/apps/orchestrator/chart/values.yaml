@@ -7,8 +7,8 @@ image:
 # models listed in platform/apps/agents/opencode-config.yaml.
 config:
   llm_base_url: https://routerai.ru/api/v1
-  intent_model: deepseek/deepseek-v4-flash-0731
-  agent_model: llm/deepseek/deepseek-v4-flash-0731
+  intent_model: deepseek/deepseek-v4.1-flash-1017
+  agent_model: llm/deepseek/deepseek-v4.1-flash-1017
   intent_threshold: 0.7
   workers: 2
   max_attempts: 5

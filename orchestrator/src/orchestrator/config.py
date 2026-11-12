@@ -61,8 +61,8 @@ class Settings(MigrateSettings):
     llm_api_key: SecretStr
     # The model provider (any OpenAI-compatible API) and the models for reading intents and for runs.
     llm_base_url: str = "https://routerai.ru/api/v1"
-    intent_model: str = "deepseek/deepseek-v4-flash-0731"
-    agent_model: str = "llm/deepseek/deepseek-v4-flash-0731"
+    intent_model: str = "deepseek/deepseek-v4.1-flash-1017"
+    agent_model: str = "llm/deepseek/deepseek-v4.1-flash-1017"
     intent_threshold: Fraction = 0.7
     workers: Count = 2
     max_attempts: Count = 5

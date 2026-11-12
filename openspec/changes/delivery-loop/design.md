@@ -360,6 +360,13 @@ need to know.
   the people's turns; every status and comment as the specs say, the archive commit last before
   the merge. A vague ticket ("We need an export.") got a spec built on guesses, not questions; asked
   to ask instead, the agent put three questions, and the answers reached the next run.
+- **The model, compared after group 8** on the same tickets of `example-webapp`: DeepSeek V4
+  Flash, Qwen3.8 Omni Flash and DeepSeek V4.1 Flash all wrote working code (every check green)
+  and read every intent right. V4.1 Flash wrote the spec fastest (70 s against about 3 min), its
+  code had the most tests, and it alone asked, as the target project's `AGENTS.md` wants, when a
+  ticket said too little ("We need an export."); the others built the spec on guesses. Its apply
+  takes about 4 min, 1.5 min more than V4 Flash. Both the agent runs and the reading of intents
+  use it now.
 - **Result:** the entrypoint writes one JSON to `/dev/termination-log` (`spec_ready`,
   `code_ready`, `archived`, `questions`, `failed`, plus the pushed commit). The watcher reads it from the
   pod status, so no log parsing and no extra storage.
