@@ -190,14 +190,21 @@ class Step:
             phase=item.phase or "",
             pull_request=self.ports.code_host.pr_url(self.repo, item.pr) if item.pr else "",
             running=item.running.mode if item.running else "",
+            archived=item.archived,
             waiting_for=item.paused.questions if item.paused else (),
-            may_ask=[
-                rule.verb
-                for rule in POLICY.open_to(item.phase, r.roles or frozenset())
-                if rule.intent not in TALK and (rule.while_running or not item.running)
-            ],
+            may_ask=[rule.verb for rule in POLICY.open_to(item.phase, r.roles or frozenset()) if self.offers(rule)],
             conversation=item.messages[:-1],  # the request itself is the comment
             unclear=unclear,
+        )
+
+    def offers(self, rule: Rule[Handler]) -> bool:
+        """Whether a reply suggests asking for what the rule allows: not talk, nothing that would
+        wait for the run going on, and no archive of a change archived already."""
+        item = self.item
+        return (
+            rule.intent not in TALK
+            and (rule.while_running or not item.running)
+            and not (rule.intent is Intent.ARCHIVE and item.archived)
         )
 
     def pause(self, run: AgentRun, questions: list[str], text: str) -> None:

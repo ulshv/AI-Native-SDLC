@@ -35,6 +35,7 @@ class Facts:
     phase: str = ""
     pull_request: str = ""  # its address, when the item has one
     running: str = ""  # the mode of the agent run going on
+    archived: bool = False  # the change is archived into the specs
     waiting_for: Sequence[str] = ()  # the questions the agent waits to have answered
     may_ask: Sequence[str] = ()  # what this person may ask @agent for now, in the policy's words
     conversation: Sequence[Message] = field(default_factory=tuple[Message, ...])
@@ -58,6 +59,7 @@ Facts about the work item (nothing else is known to you):
 - phase: {phase}
 - pull request: {pull_request}
 - agent run going on: {running}
+- change archived into the specs: {archived}
 - questions the agent waits to have answered: {waiting_for}
 - what {author} may ask you for now: {may_ask}
 
@@ -92,6 +94,7 @@ def prompt(facts: Facts) -> str:
         phase=facts.phase or "not in the loop",
         pull_request=facts.pull_request or "none yet",
         running=facts.running or "none",
+        archived="yes" if facts.archived else "no",
         waiting_for=_listed(facts.waiting_for),
         author=facts.author,
         may_ask=_listed(facts.may_ask),

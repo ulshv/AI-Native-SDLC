@@ -224,6 +224,10 @@ def test_from_assignment_to_a_merge_into_development(world):
     chat["@agent looks good, go ahead"] = ("archive", 0.9)
     world.hook("plane", "comment_mention_agent")
     assert world.svc.tracker.comments[-1][1] == "The change of EWA-1 is archived already."
+    chat["@agent looks good, go ahead"] = ("ask", 0.9)
+    world.hook("plane", "comment_mention_agent")
+    facts = world.svc.reply.facts[-1]
+    assert facts.archived and facts.may_ask == ["prepare a release"], "no archive of an archived change"
 
 
 def test_questions_stop_the_work_and_an_answer_resumes_it(world):
