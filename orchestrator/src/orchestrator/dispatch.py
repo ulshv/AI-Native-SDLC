@@ -46,17 +46,17 @@ REFINES = {Intent.APPROVE: {Intent.MERGE}}
 
 def read_intent(chat: BaseChatModel, threshold: float, event: Event, item: WorkItem, known: bool) -> Intent | None:
     """An explicit signal needs no model; a mention is read by one; nothing else is a request. No
-    model reads a stranger's comment (the policy refuses it whatever it says), nor one in Needs
-    info, where the next mention is the answer."""
+    model reads a stranger's comment (the policy refuses it whatever it says). In Needs info the
+    next mention is the answer, unless it is clearly a question."""
     explicit = signal(event)
     if not (event.mentions_agent and event.text):
         return explicit
     if not known:
         return explicit or Intent.UNCLEAR
-    if not explicit and item.phase == Phase.NEEDS_INFO:
-        return Intent.ANSWER
     reading = intents.read(chat, event.text, item.phase or "", item.last_said())
     clear = intents.clear(reading, threshold)
+    if not explicit and item.phase == Phase.NEEDS_INFO:
+        return Intent.ASK if clear and reading.intent is Intent.ASK else Intent.ANSWER
     if explicit:
         return reading.intent if clear and reading.intent in REFINES.get(explicit, set()) else explicit
     return reading.intent if clear else Intent.UNCLEAR

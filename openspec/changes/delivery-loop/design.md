@@ -233,7 +233,18 @@ worker: take the oldest unprocessed row for a thread not being handled (FOR UPDA
 - **Intent:** one model call through the configured OpenAI-compatible provider (the author uses
   RouterAI) with a JSON schema answer `{intent, confidence}`. Input: the comment, the item's phase
   and the agent's last message. Below confidence 0.7, or for `none`, the agent asks what is meant.
-  The model and threshold are configuration.
+  The model and threshold are configuration. Reading is classification, so it runs at
+  temperature 0: the same comment reads the same way every time.
+- **Answers in the agent's own words (task 7.29):** a question that asks for no action ("what is
+  the status?", "what is left before the merge?") is the intent `ask`, and the agent answers it;
+  a comment read as no request gets a reply that says so and what fits. A second model call,
+  with the same model at temperature 0.3, writes either reply from facts the code hands it: the
+  item's phase, ticket, pull request and run, the questions it waits on, the last messages, and
+  what this person may ask for now, which the policy's table gives. The reply only informs: the
+  prompt forbids promising an action, and nothing happens because of a reply. Before, both got
+  one fixed sentence, which answered no question and said nothing about the phase. In Needs
+  info, a mention that is clearly a question is answered; anything else is still the answer the
+  agent waits for.
 - **The model client is chosen by the model's prefix:** `deepseek/*` gets LangChain's
   `ChatDeepSeek`, anything else `ChatOpenAI`, both pointed at the configured base URL. The API is
   the same, but `ChatOpenAI` drops DeepSeek's reasoning blocks, which breaks multi-turn calls with
@@ -257,6 +268,7 @@ worker: take the oldest unprocessed row for a thread not being handled (FOR UPDA
 | `merge` | Code review | engineer |
 | `archive` | On dev, change not archived | engineer |
 | `prepare_release` | any (project-level) | product owner, engineer |
+| `ask`, or no clear request | any | any project member, even while a run goes on |
 
 - **People** are listed in each project file with their Plane and Gitea usernames and roles.
   Usernames only, no emails, because this repository is public. Unknown accounts get a polite

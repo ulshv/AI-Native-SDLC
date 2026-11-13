@@ -42,6 +42,7 @@ from .model import (
 from .policy import ENGINEERS, MEMBERS, OPEN, PEOPLE, Intent, Phase, Policy, Rule
 from .ports import CodeHost, RunStarter, Tracker
 from .projects import Project
+from .replies import Facts, Reply
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ class Ports:
     links: Links
     executor: RunStarter | None
     agent_model: str
+    reply: Reply  # the agent's answers in its own words (replies.py)
 
 
 @dataclass
@@ -174,6 +176,29 @@ class Step:
             self.ports.executor.cancel(self.item.running.name(self.key))
         self.item.running = None
         self.item.paused = None
+
+    def facts(self, r: Request, unclear: bool) -> Facts:
+        """What a reply to this request may build on: the item as the code knows it, and what the
+        policy lets this person ask for now."""
+        item, ticket = self.item, self.item.ticket
+        return Facts(
+            comment=r.text,
+            author=r.author,
+            project=self.project.name,
+            key=item.key,
+            title=ticket.title if ticket else "",
+            phase=item.phase or "",
+            pull_request=self.ports.code_host.pr_url(self.repo, item.pr) if item.pr else "",
+            running=item.running.mode if item.running else "",
+            waiting_for=item.paused.questions if item.paused else (),
+            may_ask=[
+                rule.verb
+                for rule in POLICY.open_to(item.phase, r.roles or frozenset())
+                if rule.intent not in TALK and (rule.while_running or not item.running)
+            ],
+            conversation=item.messages[:-1],  # the request itself is the comment
+            unclear=unclear,
+        )
 
     def pause(self, run: AgentRun, questions: list[str], text: str) -> None:
         if self.item.phase is None:
@@ -296,6 +321,19 @@ def release_later(s: Step, r: Request) -> None:
     s.say("Releases come with the next part of the loop.", r.via)
 
 
+def answer(s: Step, r: Request) -> None:
+    """A question: the agent answers it from what it knows, and nothing else happens."""
+    s.say(s.ports.reply(s.facts(r, unclear=False)), r.via)
+
+
+def clarify(s: Step, r: Request) -> None:
+    """A comment read as no request: the agent says so, and what this person may ask for now."""
+    s.say(s.ports.reply(s.facts(r, unclear=True)), r.via)
+
+
+TALK = {Intent.ASK, Intent.UNCLEAR}  # requests answered in words only
+
+
 Handler = Callable[[Step, Request], None]
 
 POLICY: Policy[Handler] = Policy(
@@ -321,6 +359,8 @@ POLICY: Policy[Handler] = Policy(
         Rule(Intent.ANSWER, "take an answer", frozenset({Phase.NEEDS_INFO}), MEMBERS, resume),
         Rule(Intent.ARCHIVE, "archive the change", frozenset({Phase.ON_DEV}), ENGINEERS, archive_in_own_pr),
         Rule(Intent.PREPARE_RELEASE, "prepare a release", None, PEOPLE, release_later, while_running=True),
+        Rule(Intent.ASK, "answer a question", None, MEMBERS, answer, while_running=True),
+        Rule(Intent.UNCLEAR, "read it", None, MEMBERS, clarify, while_running=True),
     ]
 )
 

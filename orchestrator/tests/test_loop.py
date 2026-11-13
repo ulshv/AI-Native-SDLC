@@ -106,6 +106,17 @@ class FakeChat:
         return intents.ModelReading(intent=name, confidence=confidence)
 
 
+class FakeReply:
+    """Writes the agent's answers, as the model would, and keeps the facts it was given."""
+
+    def __init__(self):
+        self.facts = []
+
+    def __call__(self, facts):
+        self.facts.append(facts)
+        return f"{'unclear' if facts.unclear else 'answer'}: {facts.key} is in {facts.phase}"
+
+
 @pytest.fixture
 def world(pool, database_url):
     with agent.checkpointer(database_url, 4) as saver:
@@ -117,6 +128,7 @@ def world(pool, database_url):
             code_host=FakeCodeHost(),
             executor=FakeExecutor(),
             chat=FakeChat(),
+            reply=FakeReply(),
             agent_model="llm/deepseek/deepseek-v4-flash-0731",
             threshold=0.7,
         )
@@ -218,7 +230,11 @@ def test_questions_stop_the_work_and_an_answer_resumes_it(world):
     assign(world)
     world.finish({"result": "questions", "questions": ["Should the filter survive a reload?"]})
     assert world.item.phase == "Needs info" and "survive a reload" in world.svc.tracker.comments[-1][1]
-    world.svc.chat.answers["@agent looks good, go ahead"] = ("answer", 0.9)
+    world.svc.chat.answers["@agent looks good, go ahead"] = ("ask", 0.9)
+    world.hook("plane", "comment_mention_agent")
+    assert world.item.phase == "Needs info" and world.runs == ["ewa-1-propose-1"], "a question is no answer"
+    assert world.svc.reply.facts[-1].waiting_for == ["Should the filter survive a reload?"]
+    world.svc.chat.answers["@agent looks good, go ahead"] = ("approve", 0.9)
     world.hook("plane", "comment_mention_agent")
     assert world.item.phase == "Drafting" and world.runs[-1] == "ewa-1-propose-2"
     answers = world.svc.executor.runs["ewa-1-propose-2"].task["answers"]
@@ -256,7 +272,25 @@ def test_an_unclear_comment_gets_a_question_and_changes_nothing(world):
     world.finish({"result": "spec_ready"})
     world.svc.chat.answers["@agent looks good, go ahead"] = ("approve", 0.4)
     world.hook("plane", "comment_mention_agent")
-    assert world.item.phase == "Spec review" and "not sure what you are asking" in world.svc.tracker.comments[-1][1]
+    assert world.item.phase == "Spec review" and world.runs == ["ewa-1-propose-1"]
+    assert world.svc.tracker.comments[-1][1] == "unclear: EWA-1 is in Spec review"
+    facts = world.svc.reply.facts[-1]
+    assert facts.unclear and "approve it" in facts.may_ask and "merge it" not in facts.may_ask
+
+
+def test_a_question_gets_an_answer_from_the_facts_and_changes_nothing(world):
+    assign(world)
+    world.svc.chat.answers["@agent looks good, go ahead"] = ("ask", 0.9)
+    world.hook("plane", "comment_mention_agent")
+    assert world.svc.tracker.comments[-1][1] == "answer: EWA-1 is in Drafting", "asked while the run goes on"
+    world.finish({"result": "spec_ready"})
+    world.hook("plane", "comment_mention_agent")
+    assert world.item.phase == "Spec review" and world.runs == ["ewa-1-propose-1"]
+    facts = world.svc.reply.facts[-1]
+    assert facts.comment == "@agent looks good, go ahead" and not facts.unclear
+    assert facts.pull_request == "https://gitea.sdlc.internal/sdlc/example-webapp/pulls/3"
+    assert {"approve it", "take changes to it", "reject it"} <= set(facts.may_ask)
+    assert "answer a question" not in facts.may_ask and facts.conversation[-1].author == "agent"
 
 
 def test_a_status_set_to_closed_rejects_the_item(world):
@@ -354,9 +388,9 @@ def test_a_failed_run_waits_in_needs_info_and_the_next_mention_retries_it(world)
     assign(world)
     world.finish({"result": "failed", "reason": "the run changed nothing it may commit"})
     assert world.item.phase == "Needs info" and "Reply with @agent to run it again" in world.svc.tracker.comments[-1][1]
-    world.svc.chat.answers["@agent looks good, go ahead"] = ("approve", 0.9)  # never asked
+    world.svc.chat.answers["@agent looks good, go ahead"] = ("approve", 0.9)  # no question: the answer
     world.hook("plane", "comment_mention_agent")
-    assert world.item.phase == "Drafting" and world.runs[-1] == "ewa-1-propose-2" and world.svc.chat.calls == 0
+    assert world.item.phase == "Drafting" and world.runs[-1] == "ewa-1-propose-2" and world.svc.chat.calls == 1
 
 
 def test_changes_after_the_archive_take_it_back_and_a_review_verdict_wins_over_its_text(world):

@@ -196,3 +196,73 @@ def test_live_projects_follow_their_files_and_keep_the_last_good_ones(tmp_path):
     file.write_text("name: broken\n")
     now[0] += live.CHECK_EVERY
     assert projects.by_repo("sdlc/example-webapp").base == "dev"
+
+
+def test_a_person_may_ask_for_what_the_rules_of_the_phase_and_their_roles_allow():
+    verbs = {rule.verb for rule in POLICY.open_to(Phase.CODE_REVIEW, frozenset({"product_owner"}))}
+    assert {"take changes to it", "reject it", "answer a question"} <= verbs and "merge it" not in verbs
+    assert "merge it" in {rule.verb for rule in POLICY.open_to(Phase.CODE_REVIEW, frozenset({"engineer"}))}
+
+
+class Writer:
+    """A chat model that writes a fixed text and keeps the prompt."""
+
+    def __init__(self, text):
+        self.text, self.prompts = text, []
+
+    def invoke(self, prompt):
+        from langchain_core.messages import AIMessage
+
+        self.prompts.append(prompt)
+        return AIMessage(content=self.text)
+
+
+def test_a_reply_is_written_from_the_facts_and_never_empty():
+    from orchestrator import replies
+    from orchestrator.model import Message
+
+    facts = replies.Facts(
+        comment="@agent what is the status?",
+        author="sergey",
+        project="example-webapp",
+        key="EWA-2",
+        phase="Code review",
+        pull_request="https://gitea.sdlc.internal/sdlc/example-webapp/pulls/7",
+        may_ask=["merge it", "reject it"],
+        conversation=[Message(author="agent", text="The code is ready for review.")],
+    )
+    model = Writer("EWA-2 is in Code review.")
+    assert replies.writer(model, "fallback")(facts) == "EWA-2 is in Code review."
+    prompt = model.prompts[0]
+    expected = ("phase: Code review", "pulls/7", "merge it; reject it", "agent: The code is ready")
+    assert all(s in prompt for s in expected)
+    assert replies.writer(Writer("  "), "fallback")(facts) == "fallback"
+    assert len(replies.writer(Writer("x" * 5000), "fallback")(facts)) == replies.MAX_LENGTH
+
+
+@pytest.mark.skipif(not os.environ.get("LLM_API_KEY"), reason="a live call needs LLM_API_KEY")
+def test_live_a_question_reads_as_ask_and_gets_an_answer_from_the_facts():
+    from orchestrator import replies
+
+    def model(temperature):
+        return llm.chat_model(
+            os.environ.get("INTENT_MODEL", "deepseek/deepseek-v4.1-flash-1017"),
+            os.environ.get("LLM_BASE_URL", "https://routerai.ru/api/v1"),
+            os.environ["LLM_API_KEY"],
+            temperature,
+        )
+
+    reading = intents.read(model(intents.TEMPERATURE), "@agent what is the status of this ticket?", "On dev", "")
+    assert reading.intent is Intent.ASK and reading.confidence >= 0.7
+    facts = replies.Facts(
+        comment="@agent what is the status of this ticket?",
+        author="sergey",
+        project="example-webapp",
+        key="EWA-2",
+        title="Filter orders by status",
+        phase="On dev",
+        pull_request="https://gitea.sdlc.internal/sdlc/example-webapp/pulls/7",
+        may_ask=["prepare a release"],
+    )
+    text = replies.writer(model(replies.TEMPERATURE), "fallback")(facts)
+    assert "On dev" in text or "development" in text, text

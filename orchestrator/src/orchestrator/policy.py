@@ -50,6 +50,7 @@ class Intent(StrEnum):
     MERGE = "merge"
     ARCHIVE = "archive"
     PREPARE_RELEASE = "prepare_release"
+    ASK = "ask"  # a question that asks for no action
     NONE = "none"
     UNCLEAR = "unclear"
 
@@ -113,6 +114,10 @@ class Policy[H]:
             needed = ROLE_WORDS.get(in_phase[0].roles, "someone else")
             return Decision(reason=f"Only {needed} of {project} can {in_phase[0].verb} in {phase}.")
         return Decision(rule)
+
+    def open_to(self, phase: Phase | None, roles: frozenset[str]) -> list[Rule[H]]:
+        """The rules a person with these roles may ask for now, in the table's order."""
+        return [rule for rules in self.rules.values() for rule in rules if rule.covers(phase) and rule.admits(roles)]
 
 
 # Explicit signals need no model (design decision 5): a status a person set, a review's verdict.

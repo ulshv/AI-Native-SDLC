@@ -29,8 +29,9 @@ in its pull requests. Comments without the mention SHALL NOT trigger anything.
 
 ### Requirement: Plain words become an intent
 A comment that mentions `@agent` SHALL be read as one intent: `approve`, `request_changes`,
-`reject`, `answer`, `merge`, `archive`, `prepare_release`, or none. A comment the agent cannot read
-confidently SHALL get a clarifying reply instead of an action.
+`reject`, `answer`, `merge`, `archive`, `prepare_release`, `ask` (a question that asks for no
+action), or none. A comment the agent cannot read confidently SHALL get a clarifying reply
+instead of an action.
 
 #### Scenario: Approval in plain words
 - **WHEN** a product owner writes "@agent looks good, go ahead" on an item in Spec review
@@ -38,7 +39,15 @@ confidently SHALL get a clarifying reply instead of an action.
 
 #### Scenario: Unclear comment
 - **WHEN** a comment mentions `@agent` but its intent is ambiguous, such as "@agent hmm, maybe"
-- **THEN** the agent replies with a question about what is meant and changes nothing else
+- **THEN** the agent replies with a question about what is meant, naming what that person may ask for in the item's phase, and changes nothing else
+
+#### Scenario: Question about the item
+- **WHEN** a person of the project writes "@agent what is the status of this ticket?" on an item On dev
+- **THEN** the agent answers from the item's phase, pull request and what may be asked next, and changes nothing
+
+#### Scenario: Question while the agent waits for answers
+- **WHEN** an item is in Needs info and a person writes "@agent why are you waiting?"
+- **THEN** the agent answers with the questions it waits on, and the item stays in Needs info
 
 ### Requirement: Explicit signals need no interpretation
 Explicit signals SHALL count as intents without a model reading them: setting a ticket's status

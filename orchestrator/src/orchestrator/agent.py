@@ -31,6 +31,7 @@ from .model import COMMANDS, Command, Intake, StepFailed, WorkItem
 from .ports import CodeHost, RunStarter, Tracker
 from .projects import Projects
 from .queue import Delivery, Queue
+from .replies import Reply
 
 log = logging.getLogger(__name__)
 
@@ -72,13 +73,14 @@ class Agent:
         code_host: CodeHost,
         executor: RunStarter | None,
         chat: BaseChatModel,
+        reply: Reply,
         agent_model: str,
         threshold: float,
         checkpointer: BaseCheckpointSaver[Any],
         max_attempts: int = 5,
     ) -> None:
         self.projects, self.max_attempts = projects, max_attempts
-        self.ports = machine.Ports(tracker, code_host, links, executor, agent_model)
+        self.ports = machine.Ports(tracker, code_host, links, executor, agent_model, reply)
         self.dispatcher = Dispatcher(projects, links, queue, tracker, code_host, chat, threshold, self)
         graph = StateGraph(State)
         graph.add_node("step", self._step)

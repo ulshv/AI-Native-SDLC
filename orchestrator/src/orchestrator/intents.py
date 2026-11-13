@@ -39,7 +39,11 @@ Name the one thing the comment asks @agent to do:
 - merge: merge the pull request into development ("merge it", "ship it to dev")
 - archive: create a pull request that archives the change's spec ("create archive PR")
 - prepare_release: prepare a release of what is merged ("let's release", "prepare a release")
+- ask: a question that asks for no action: about the ticket, its status, the spec or the code,
+  the loop, or what to do next ("what is the status?", "what is left?", "why did the run fail?")
 - none: anything else, or unclear
+
+A comment that asks for an action and also asks something is the action.
 
 The work item is in the phase "{phase}".
 @agent's last message there: {last}
