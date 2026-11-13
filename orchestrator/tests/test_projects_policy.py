@@ -31,7 +31,7 @@ def test_the_repositorys_project_files_load_and_pass_the_schema(projects):
 
 def test_a_person_has_the_same_roles_in_every_tool(projects):
     ewa = projects.by_repo("sdlc/example-webapp")
-    in_plane, in_gitea = ewa.person("plane", "admin"), ewa.person("gitea", "gitea_admin")
+    in_plane, in_gitea = ewa.person("plane", "sergey"), ewa.person("gitea", "sergey")
     assert in_plane is in_gitea and in_plane.roles == {"product_owner", "engineer"}
 
 

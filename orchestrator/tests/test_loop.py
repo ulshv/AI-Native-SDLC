@@ -29,7 +29,7 @@ class FakeTracker:
         return AGENT
 
     def username(self, user_id):
-        return {PERSON: "admin"}.get(user_id, "")
+        return {PERSON: "sergey"}.get(user_id, "")
 
     def identifier(self, workspace, project_id):
         return "EWA" if project_id == "72de36e4-09bb-4182-9176-097a5a93da7a" else None
@@ -203,7 +203,7 @@ def test_from_assignment_to_a_merge_into_development(world):
     assert world.item.phase == "Code review"
 
     chat["@agent ok, merge it into dev"] = ("merge", 0.9)
-    world.hook("gitea", "review_approved", sender__login="gitea_admin")
+    world.hook("gitea", "review_approved", sender__login="sergey")
     assert world.runs[-1] == "ewa-1-archive-3" and not world.svc.code_host.merged, "archive first, then merge"
 
     world.finish({"result": "archived", "commit": "c3"})
@@ -232,7 +232,7 @@ def test_changes_requested_on_the_code_take_the_reviews_inline_comments(world):
     world.hook("plane", "comment_mention_agent")
     world.finish({"result": "code_ready"})
     world.svc.chat.answers["@agent please keep the filter after reload"] = ("request_changes", 0.9)
-    world.hook("gitea", "review_request_changes", sender__login="gitea_admin")
+    world.hook("gitea", "review_request_changes", sender__login="sergey")
     assert world.item.phase == "Implementing" and world.runs[-1] == "ewa-1-fix-3"
     feedback = world.svc.executor.runs["ewa-1-fix-3"].task["feedback"]
     assert "keep the filter after reload" in feedback and "src/orders.ts:4" in feedback
@@ -246,7 +246,7 @@ def test_a_person_without_the_role_and_a_wrong_phase_are_refused(world):
     world.hook("gitea", "review_approved", sender__login="stranger")
     assert world.svc.code_host.comments[-1][2] == "I only take requests from the people of example-webapp."
     assert world.svc.chat.calls == 0, "no model reads a stranger's comment"
-    world.hook("gitea", "review_approved", sender__login="gitea_admin")
+    world.hook("gitea", "review_approved", sender__login="sergey")
     assert world.svc.code_host.comments[-1][2] == "EWA-1 is in Spec review, so I cannot merge it now."
     assert world.item.phase == "Spec review" and not world.svc.code_host.merged
 
@@ -272,7 +272,7 @@ def test_a_person_merging_before_the_archive_gets_a_note_and_an_archive_pr_on_re
     world.svc.chat.answers["@agent looks good, go ahead"] = ("approve", 0.95)
     world.hook("plane", "comment_mention_agent")
     world.finish({"result": "code_ready"})
-    world.hook("gitea", "pr_merged", sender__login="gitea_admin")
+    world.hook("gitea", "pr_merged", sender__login="sergey")
     assert world.item.phase == "On dev"
     assert (
         "were not archived" in world.svc.tracker.comments[-1][1] and "#3 on EWA-1" in world.svc.tracker.comments[-1][1]
@@ -284,7 +284,7 @@ def test_a_person_merging_before_the_archive_gets_a_note_and_an_archive_pr_on_re
     world.finish({"result": "archived"})
     assert ("archive/EWA-1", "development") in world.svc.code_host.prs.values()
     assert "archive pull request is open" in world.svc.tracker.comments[-1][1]
-    world.hook("gitea", "comment_mention_agent", issue__number=4, sender__login="gitea_admin")  # on the archive PR
+    world.hook("gitea", "comment_mention_agent", issue__number=4, sender__login="sergey")  # on the archive PR
     assert world.svc.code_host.comments[-1][1:] == (4, "The change of EWA-1 is archived already.")
 
 
@@ -338,7 +338,7 @@ def to_code_review(world):
 def test_one_run_at_a_time_and_a_late_result_counts_no_more(world):
     to_code_review(world)
     world.svc.chat.answers["@agent ok, merge it into dev"] = ("merge", 0.9)
-    world.hook("gitea", "review_approved", sender__login="gitea_admin")
+    world.hook("gitea", "review_approved", sender__login="sergey")
     world.svc.chat.answers["@agent looks good, go ahead"] = ("merge", 0.9)
     world.hook("plane", "comment_mention_agent")
     assert world.runs[-1] == "ewa-1-archive-3" and "still on the archive run" in world.svc.tracker.comments[-1][1]
@@ -361,17 +361,17 @@ def test_a_failed_run_waits_in_needs_info_and_the_next_mention_retries_it(world)
 
 def test_changes_after_the_archive_take_it_back_and_a_review_verdict_wins_over_its_text(world):
     to_code_review(world)
-    world.hook("gitea", "review_approved", sender__login="gitea_admin")
+    world.hook("gitea", "review_approved", sender__login="sergey")
     world.finish({"result": "archived"})
     assert world.item.archived
     world.svc.chat.answers["@agent please keep the filter after reload"] = ("approve", 0.9)
-    world.hook("gitea", "review_request_changes", sender__login="gitea_admin")
+    world.hook("gitea", "review_request_changes", sender__login="sergey")
     assert world.runs[-1] == "ewa-1-fix-4" and world.svc.executor.runs["ewa-1-fix-4"].task["unarchive"]
     world.finish({"result": "failed", "reason": "the run changed nothing it may commit"})
     world.hook("plane", "comment_mention_agent")  # the retry takes the archive commit back too
     assert world.runs[-1] == "ewa-1-fix-5" and world.svc.executor.runs["ewa-1-fix-5"].task["unarchive"]
     world.finish({"result": "code_ready"})
-    world.hook("gitea", "review_approved", sender__login="gitea_admin")
+    world.hook("gitea", "review_approved", sender__login="sergey")
     assert world.runs[-1] == "ewa-1-archive-6", "archived again after the fix"
 
 
@@ -411,7 +411,7 @@ def test_a_status_set_by_hand_follows_the_work_again(world):
 def test_a_run_result_that_fails_its_last_attempt_stops_the_wait_for_the_run(world):
     to_code_review(world)
     world.svc.chat.answers["@agent ok, merge it into dev"] = ("merge", 0.9)
-    world.hook("gitea", "review_approved", sender__login="gitea_admin")
+    world.hook("gitea", "review_approved", sender__login="sergey")
     thread = world.svc.links.thread_of(Link.parse(ITEM))
 
     def refused(repo, number):
