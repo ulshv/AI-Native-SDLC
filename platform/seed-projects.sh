@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Connects every target project in platform/projects/ to the platform's Gitea (design decision 9).
 #   platform/seed-projects.sh            create missing repositories from their local clones, and
-#                                        converge access and branch protection; safe to re-run
+#                                        converge the people's access and branch protection; safe
+#                                        to re-run
 #   platform/seed-projects.sh --dry-run  print the plan and change nothing
 #
 # Run it after platform/bootstrap.sh. It needs no sudo, only Gitea's API. A repository that
@@ -32,6 +33,13 @@ gitea_users() {
   shift
   yq -o json -I0 '[.people[] | select(.gitea)]' <"$file" |
     jq -c --args '[.[] | select(any(.roles[]; IN($ARGS.positional[]))) | .gitea]' "$@"
+}
+
+# people_rows: one line per person of $FILE with a Gitea username: name, username and the access
+# their roles need to the repository (an engineer pushes branches, a product owner approves).
+people_rows() {
+  yq -o json -I0 '.people' <"$FILE" | jq -r '.[] | select(.gitea) |
+    [.name, .gitea, (if any(.roles[]; . == "engineer") then "write" else "read" end)] | @tsv'
 }
 
 # --- Checks before any change ------------------------------------------------------------------
@@ -90,6 +98,42 @@ grant_agents_write() {
   for user in agent agent-runner; do
     gitea_api PUT "/repos/$REPO/collaborators/$user" '{"permission": "write"}' >/dev/null
   done
+}
+
+# The people's accounts exist: platform/accounts.sh makes them (design decision 10). Access and
+# branch protection name them, so a missing one stops the seeding here.
+people_have_accounts() {
+  local name user permission
+  while IFS=$'\t' read -r name user permission; do
+    gitea_user_exists "$user" || return 1
+  done < <(people_rows)
+}
+
+missing_accounts() {
+  local name user permission
+  while IFS=$'\t' read -r name user permission; do
+    gitea_user_exists "$user" || echo "  FAIL  no Gitea user $user for $name: create it with platform/accounts.sh" >&2
+  done < <(people_rows)
+  return 1
+}
+
+# Access by role, at least: a site admin has more already, and nothing here takes access away.
+access_rank() { case $1 in read) echo 1 ;; write) echo 2 ;; admin | owner) echo 3 ;; *) echo 0 ;; esac; }
+access_of() { gitea_api GET "/repos/$REPO/collaborators/$1/permission" 2>/dev/null | jq -r .permission; }
+
+people_have_access() {
+  local name user permission
+  while IFS=$'\t' read -r name user permission; do
+    (($(access_rank "$(access_of "$user")") >= $(access_rank "$permission"))) || return 1
+  done < <(people_rows)
+}
+
+grant_people_access() {
+  local name user permission
+  while IFS=$'\t' read -r name user permission; do
+    (($(access_rank "$(access_of "$user")") >= $(access_rank "$permission"))) ||
+      gitea_api PUT "/repos/$REPO/collaborators/$user" "$(jq -nc --arg p "$permission" '{permission: $p}')" >/dev/null
+  done < <(people_rows)
 }
 
 # Branch protection (design decision 8). Nobody pushes to either branch directly. development
@@ -153,6 +197,8 @@ seed_project() {
   step "repository $REPO exists (created from the clone when missing)" project_repo_exists create_project_repo
   step "its default branch is $BASE" default_branch_current set_default_branch_to_base
   step "agent and agent-runner may write to it" agents_can_write grant_agents_write
+  step "its people have Gitea accounts (platform/accounts.sh)" people_have_accounts missing_accounts
+  step "its engineers may write to it, its product owners read" people_have_access grant_people_access
   step "$BASE and $RELEASE are protected (design decision 8)" protections_current set_protections
   step "the clone's origin is set (Gitea when it had none)" clone_origin_set set_clone_origin
 }
@@ -161,8 +207,8 @@ seed_main() {
   case ${1-} in
     "") ;;
     --dry-run) DRY_RUN=true ;;
-    -h | --help) sed -n '2,8s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; return 0 ;;
-    *) sed -n '2,8s/^# \{0,1\}//p' "${BASH_SOURCE[0]}" >&2; return 2 ;;
+    -h | --help) sed -n '2,9s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; return 0 ;;
+    *) sed -n '2,9s/^# \{0,1\}//p' "${BASH_SOURCE[0]}" >&2; return 2 ;;
   esac
   log "== checks"
   clones_ready || { echo "error: nothing was changed" >&2; return 1; }

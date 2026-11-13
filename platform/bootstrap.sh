@@ -739,6 +739,19 @@ create_gitea_user() {
     must_change_password: false, visibility: "private"}')" >/dev/null
 }
 
+# The chart sets a placeholder when it creates the admin (apps/gitea/values.yaml); the real
+# address stays out of git. Gitea's edit takes source_id and login_name, a local account's 0 and
+# its username.
+gitea_admin_email_current() {
+  [[ -n ${GITEA_URL-} ]] &&
+    [[ $(gitea_api GET /users/gitea_admin | jq -r .email) == "$(secret_value GITEA_ADMIN_EMAIL)" ]]
+}
+
+set_gitea_admin_email() {
+  gitea_api PATCH /admin/users/gitea_admin "$(jq -nc --arg email "$(secret_value GITEA_ADMIN_EMAIL)" \
+    '{email: $email, source_id: 0, login_name: "gitea_admin"}')" >/dev/null
+}
+
 service_accounts_exist() {
   local user
   for user in "${SERVICE_ACCOUNTS[@]}"; do gitea_user_exists "$user" || return 1; done
@@ -1056,6 +1069,7 @@ phase_repository() {
   step "Gitea orgs ${ORGS[*]} exist" orgs_exist create_orgs
   step "private repo $GITEA_REPO exists (moved from $OLD_GITEA_REPO when there)" repo_exists create_repo
   step "push token in the secrets directory works" push_token_works create_push_token
+  step "gitea_admin's e-mail address is GITEA_ADMIN_EMAIL" gitea_admin_email_current set_gitea_admin_email
   step "service accounts ${SERVICE_ACCOUNTS[*]} exist" service_accounts_exist create_service_accounts
   step "teams: reader reads sdlc and platform, ci pushes to sdlc, ci-platform to platform" teams_current ensure_teams
   step "Argo CD reads every platform/ and sdlc/ repository with reader's token" argocd_creds_work create_argocd_creds

@@ -1,0 +1,11 @@
+# The people's accounts in Plane and Gitea: copy to ~/.config/ai-native-sdlc/accounts.yaml and run
+# platform/accounts.sh (design decision 10). Not in git: it holds real e-mail addresses. The fields
+# are Keycloak's, so the SSO step imports the file as it is (docs/identity-and-access.md). Roles
+# are not here but in each project file's `people`, which names these accounts by username.
+users:
+  - username: dev               # the same in Plane and Gitea; lowercase letters, digits, . _ -
+    email: dev@example.com      # optional, <username>@sdlc.internal by default; Plane's sign-in
+    firstName: Dev              # optional, with lastName the name; the username without them
+    lastName: Eloper            # optional
+  - username: manager
+    enabled: false              # optional: false locks the account in both tools, true unlocks it

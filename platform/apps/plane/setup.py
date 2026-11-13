@@ -148,7 +148,7 @@ def plane_user(person):
         return None
     user = User.objects.filter(username=username, is_active=True).first()
     if user is None:
-        log(f"no Plane user {username} for {person.get('name')}: skipped, create the user and sync again")
+        log(f"no Plane user {username} for {person.get('name')}: skipped, create it with platform/accounts.sh")
     return user
 
 

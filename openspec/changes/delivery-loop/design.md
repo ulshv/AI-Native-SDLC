@@ -50,7 +50,8 @@ and in `docs/decisions.md` D17–D23; this document is how to build it.
   (decision 4).
 - Dead-lettering events that keep failing. At a few dozen events a day, a failed one is visible in
   the log and in its thread; retries stop being enough only with more traffic.
-- Tracing (Langfuse), Mattermost, gating previews on CI, stale-approval checks, SSO.
+- Tracing (Langfuse), Mattermost, gating previews on CI, stale-approval checks, SSO (Keycloak, a
+  proposal of its own, starting from `docs/identity-and-access.md`).
 - Removing the `/etc/hosts` block from `platform-core`. The wildcard resolver comes on top of it.
 
 ## Decisions
@@ -436,6 +437,24 @@ merge allowlist, and the people with their usernames and roles. The orchestrator
 files with the git files generator (decision 11). Adding a project means adding a directory and
 its local clone.
 
+**People's accounts are the platform's, their roles the project's (task 7.28).** An account is
+an identity: a username, a name, an e-mail address, a password. It lives in
+`~/.config/ai-native-sdlc/accounts.yaml`, next to `secrets.env` and backed up with it, because
+the repository is public and holds no addresses; `platform/accounts.sh` makes Plane and Gitea
+match it, with one username in both tools. Its fields are Keycloak's, so the SSO step takes the
+file as it is. A role is authorization: whose request the agent follows, whose approval counts,
+who merges. Until SSO it stays in the project file's `people`, in git, reviewed and with history,
+where the orchestrator gets it through GitOps. Plane CE sends no mail here and has no page to set
+a password, so the script gives a new account a random first password and shows it once, the
+same in both tools, and `--reset` gives a new one. Plane users need its Django shell, as in
+decision 14. A user created, enabled or disabled changes the projects' members and
+`people.json`, which Plane's setup Job makes after a sync, so the script has Argo CD sync Plane
+once more. The instance admins only administer (and operate the platform until SSO): the author
+works in the loop as `sergey`, so a person's requests and approvals are never an admin's. The
+Gitea chart gives its admin a placeholder address; the bootstrap sets `GITEA_ADMIN_EMAIL`, out of
+git. Finer roles, platform roles and one sign-in wait for SSO with Keycloak, a proposal of its
+own; `docs/identity-and-access.md` holds what it starts from.
+
 The directory leaves room for more per project without new conventions: for example
 `values-dev.yaml`, `values-prod.yaml` or `values-preview.yaml` that the ApplicationSets pass to the
 product's chart as a second source with `ignoreMissingValueFiles`, so the platform can override
@@ -587,7 +606,8 @@ orchestrator moves every listed ticket to Released and comments the version.
 
 - `secrets.manifest` gains `LLM_API_KEY` (external, required: the model provider's key, RouterAI's
   for the author), `PG_ORCHESTRATOR_PASSWORD`,
-  `PLANE_WEBHOOK_SECRET` and `GITEA_WEBHOOK_SECRET` (generated).
+  `PLANE_WEBHOOK_SECRET` and `GITEA_WEBHOOK_SECRET` (generated), and later `GITEA_ADMIN_EMAIL`
+  (external: the Gitea admin's address, out of git; decision 10).
 - Tokens that only make sense for one cluster (Gitea `agent`, `agent-runner`, `registry-pull`,
   the Argo CD credential template, the two runner registrations, Plane's `agent` API key) are created
   by the bootstrap or the Plane setup Job and stored only in cluster Secrets, as in `platform-core`.

@@ -43,6 +43,8 @@ gitea:
   # keepUpdated applies a rotated password on the next start.
   admin:
     existingSecret: gitea-admin
+    # Only when the admin is created; the bootstrap then sets GITEA_ADMIN_EMAIL from secrets.env,
+    # which stays out of this public repository.
     email: gitea-admin@sdlc.internal
     passwordMode: keepUpdated
 

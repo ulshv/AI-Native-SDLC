@@ -530,7 +530,8 @@ EOF
 }
 
 # Every target project is seeded and its settings hold (platform/seed-projects.sh): its repository
-# exists, agent and agent-runner may write to it, and branch protection matches design decision 8.
+# exists, agent and agent-runner may write to it, its people have accounts and access by role,
+# and branch protection matches design decision 8.
 # A dry run of the seeding reports anything that would change. Spike 1.4 showed Gitea enforcing
 # exactly these settings, so the check compares them instead of merging for real.
 register target_projects_seeded
@@ -618,6 +619,16 @@ check_orchestrator_running() {
     { echo "the orchestrator runs $tag, which is no commit on main"; return 1; }
   with_service sdlc orchestrator 80 orchestrator_healthy || return 1
   with_gitea org_webhook_to_orchestrator
+}
+
+# The people's accounts in Plane and Gitea match accounts.yaml (platform/accounts.sh): a dry run
+# has nothing to do. Without the file there are no accounts to check.
+register accounts_current
+check_accounts_current() {
+  local out
+  [[ -f $(dirname "$SECRETS_FILE")/accounts.yaml ]] || return 0
+  out=$(platform/accounts.sh --dry-run 2>&1) || { echo "$out"; return 1; }
+  ! grep -qE '^\s+(todo|FAIL)' <<<"$out" || { grep -E '^\s+(todo|FAIL)' <<<"$out"; return 1; }
 }
 
 register secrets_example_current

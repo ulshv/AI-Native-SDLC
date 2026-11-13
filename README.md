@@ -439,7 +439,7 @@ Each step is one OpenSpec change: spec first, then implementation.
 - [ ] **3. Triage**: logs (Loki) and traces (Langfuse) in the spec agent's context
 - [ ] **4. More channels**: Mattermost threads and buttons
 - [ ] **5. Auto-tickets**: anomalies open tickets on their own
-- [ ] **6. SSO**: Keycloak
+- [ ] **6. SSO**: Keycloak, one sign-in and finer roles (starting point: [identity and access](docs/identity-and-access.md))
 
 The order changes as we learn. It was reshuffled once already: the full loop on a simple app
 came first, because that is what the main metric measures. Once step 1 works, changes to the

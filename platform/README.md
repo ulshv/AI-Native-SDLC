@@ -10,6 +10,7 @@ repository root:
 
 ```bash
 platform/bootstrap.sh       # build or rebuild the platform; safe to re-run
+platform/accounts.sh        # the people's accounts from accounts.yaml (see People); safe to re-run
 platform/seed-projects.sh   # connect the target projects (see Target projects); safe to re-run
 platform/smoke.sh           # check that it works
 ```
@@ -49,7 +50,8 @@ Everything secret lives in `~/.config/ai-native-sdlc/`, outside the working tree
 that runs in the repository (agents included) can read it, and nothing can be committed:
 
 - `secrets.env`: one `NAME=value` per line, no quotes;
-- `ca.key`, `ca.crt`: the local root CA behind every `*.sdlc.internal` certificate.
+- `ca.key`, `ca.crt`: the local root CA behind every `*.sdlc.internal` certificate;
+- `accounts.yaml`: the people's accounts in Plane and Gitea (see People under Target projects).
 
 [`secrets.manifest`](secrets.manifest) is the contract: which secrets exist and where each
 goes in the cluster. [`secrets.env.example`](secrets.env.example) lists the names with a
@@ -59,7 +61,7 @@ description of each.
 bootstrap creates when they are missing, so you never type them. A `password` (22 characters,
 128 bits) is only hashed or compared; a `key` (44 characters, 256 bits) is turned into an
 encryption or signing key by the app. `external` values come from somewhere else, and you
-put them into `secrets.env` yourself: `PLANE_ADMIN_EMAIL` and `LLM_API_KEY`. Values persist
+put them into `secrets.env` yourself: `PLANE_ADMIN_EMAIL`, `GITEA_ADMIN_EMAIL` and `LLM_API_KEY`. Values persist
 across rebuilds, so services keep the same credentials.
 
 **The model provider's key** (`LLM_API_KEY`) goes to the orchestrator (`sdlc/orchestrator-env`)
@@ -278,7 +280,8 @@ every project to Gitea; it needs no sudo and is safe to re-run:
 - creates a missing repository from its clone, with every branch and tag; an existing one keeps
   its contents, so after a rebuild the clone is what comes back;
 - sets the default branch to the base branch (`development`), so pull requests go there;
-- gives `agent` and `agent-runner` write access;
+- gives `agent` and `agent-runner` write access, and the project's people access by role; a
+  person without a Gitea user stops it, named (see People);
 - protects both long-lived branches: nobody pushes to them directly; `development` takes merges
   from the engineers and `agent`, without a required review (the orchestrator's policy is the
   gate there); `main` takes merges only from the engineers, after an approval by one of the
@@ -301,14 +304,34 @@ The clone's place is `repository.clone` in the project file (`~/Projects/sdlc/ex
 
 ### People
 
-A project's people are the `people` of its file: a name, the roles (`product_owner`,
-`engineer`), and the person's usernames in Plane and in Gitea. The file is the only place roles
-are kept. The orchestrator checks every request against it, and Plane's setup Job and
-`seed-projects.sh` derive the rest:
+The platform has three kinds of accounts:
+
+| Accounts | For | Made by |
+|---|---|---|
+| the instance admins: `admin` in Plane, `gitea_admin` in Gitea, `admin` in Argo CD | administering the tools; until SSO, also operating the platform | the bootstrap and the charts, from `PLANE_ADMIN_*` and `GITEA_ADMIN_*` in `secrets.env`; Argo CD's from its own `argocd-initial-admin-secret` |
+| the services: `agent`, `agent-runner`, `reader`, `ci`, `ci-platform` | the orchestrator, agent runs, Argo CD and k3s reading, CI | the bootstrap and Plane's setup Job; their tokens live only in cluster Secrets |
+| people: `sergey`, `manager`, `dev` | working in the loop: tickets, reviews, merges | [`accounts.sh`](accounts.sh), from `~/.config/ai-native-sdlc/accounts.yaml` |
+
+A person has an account, kept by the platform, and roles, kept by each project in git:
+
+- **the account**, in `~/.config/ai-native-sdlc/accounts.yaml` (the format:
+  [`accounts.yaml.example`](accounts.yaml.example)): `username`, `email`, `firstName`,
+  `lastName`, `enabled`, Keycloak's field names, so that SSO takes the file as it is. It is not
+  in git, because the repository is public. `accounts.sh` makes Plane and Gitea match it, with
+  the same username in both;
+- **a project's roles**, in the `people` of its project file: a name, the roles
+  (`product_owner`, `engineer`), and the person's usernames in Plane and Gitea. The orchestrator
+  checks every request against it.
+
+Accounts and roles are meant to move to Keycloak, with finer roles; what that takes is in
+[`docs/identity-and-access.md`](../docs/identity-and-access.md).
+
+From the project file the rest is derived:
 
 | Derived | By | Where |
 |---|---|---|
 | membership of the Plane workspace and project | Plane's setup Job, after every sync of Plane | Plane |
+| access to the repository: Write for an engineer, Read for a product owner, who needs it to approve | `seed-projects.sh` | Gitea |
 | who merges into `development` and `main`, whose approval counts | `seed-projects.sh` | the branch protections in Gitea |
 | `people.json`: Plane username → Plane user id, for `agent` and every person with a Plane account | Plane's setup Job | the Secret `sdlc/plane-agent`, mounted into the orchestrator at `/plane/people.json` |
 
@@ -320,47 +343,31 @@ project files and `people.json` again when they change, with no restart. To see 
 
 **Adding a person:**
 
-1. their accounts, which nothing creates yet (the platform's own accounts aside):
-   - Gitea: as `gitea_admin`, Site Administration → User Accounts → Create User Account; then,
-     in the repository's Settings → Collaborators, Write for an engineer, Read for a product
-     owner, who needs it to approve;
-   - Plane: it has no page that creates a user with a chosen username, which the project file
-     needs, so an admin makes one in Plane's shell. It prints the first password once; the
-     person changes it in Profile settings → Security:
+1. add their account to `accounts.yaml` and run `platform/accounts.sh`. It creates them in both
+   tools and shows their first password once; hand it over. They sign in to Plane with the
+   e-mail address and to Gitea with the username, which asks for a new password at once; in
+   Plane, Profile settings → Security changes it;
+2. add them to `people` in the project file with their roles, and push. Argo CD syncs Plane,
+   and its setup Job makes them a member and adds them to `people.json`. A few minutes after
+   the push the orchestrator knows them;
+3. run `platform/seed-projects.sh`: their access to the repository and the branch protections.
 
-     ```bash
-     kubectl exec -i -n plane deploy/plane-api-wl -- python -W ignore manage.py shell --no-imports <<'PY'
-     import secrets
-     from plane.db.models import User
-     name = "manager"  # the Plane username for the project file
-     password = secrets.token_urlsafe(16)
-     user = User.objects.create(username=name, email=f"{name}@sdlc.internal", display_name=name,
-                                first_name=name, is_active=True, is_email_verified=True,
-                                is_password_autoset=False)
-     user.set_password(password)
-     user.save()
-     print(name, password)
-     PY
-     ```
+**Changing:** roles in the project file (push, then `seed-projects.sh`); a name or an e-mail
+address in `accounts.yaml` (`accounts.sh`); a forgotten password with
+`platform/accounts.sh --reset <username>`, which shows a new one. `accounts.sh --dry-run` shows
+what it would change, and the smoke check `accounts_current` that nothing is left to.
 
-2. add them to `people` in the project file and push. Argo CD syncs Plane, and its setup Job
-   makes them a member and adds them to `people.json`. A few minutes after the push the
-   orchestrator knows them;
-3. run `platform/seed-projects.sh` for the branch protections.
-
-If the accounts came after the push, the setup Job skipped the person and named them in its log
-(`kubectl logs -n plane job/plane-setup`). Run it again by syncing `plane` in Argo CD (the
-application's Sync button).
-
-**Removing a person:** delete them from the file, push, and run `seed-projects.sh`. The
-orchestrator stops taking their requests once it reads the file again. Their Plane membership and
-their accounts stay until an admin removes them.
+**Removing a person:** delete them from the project file, push, and run `seed-projects.sh`:
+the orchestrator stops taking their requests once it reads the file again. To lock them out of
+Plane and Gitea, set `enabled: false` in `accounts.yaml` and run `accounts.sh`. Their repository
+access and Plane membership stay until an admin removes them.
 
 ## Where to change what
 
 | To change | Edit | Takes effect |
 |---|---|---|
 | a project, its people and roles, its checks | `projects/<name>/project.yaml` | push; the Gitea side after `seed-projects.sh` (Target projects) |
+| a person's account: name, e-mail address, locked or not | `~/.config/ai-native-sdlc/accounts.yaml` | `platform/accounts.sh` (People) |
 | the orchestrator's models, workers, limits | `config` in [`apps/orchestrator/chart/values.yaml`](apps/orchestrator/chart/values.yaml), the settings in [`orchestrator/README.md`](../orchestrator/README.md#configuration) | push; Argo CD rolls the pod over |
 | the models agent runs may use | [`apps/agents/opencode-config.yaml`](apps/agents/opencode-config.yaml) | push; the next run |
 | a platform component | `apps/<component>/values.yaml` or its manifests | push (Changing the platform through git) |
@@ -527,6 +534,9 @@ reports itself Synced again: its last phase deletes the Helm release record agai
 | Argo CD | <https://argocd.sdlc.internal> | `admin`, password: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' \| base64 -d` |
 | Plane | <https://plane.sdlc.internal> | `PLANE_ADMIN_EMAIL`, password `PLANE_ADMIN_PASSWORD` from `secrets.env` |
 
+These are the admins. In the loop, work under your own account from `accounts.yaml` (see People
+under Target projects): the orchestrator takes no request from an admin.
+
 The same names work from inside pods: CoreDNS answers every `*.sdlc.internal` name with
 Traefik's Service. Pods do not trust the local CA yet, so a client in a pod has to be given
 `ca.crt` explicitly.
@@ -605,8 +615,8 @@ username.
   next to Backlog, where new tickets land. Plane's other default statuses are removed once,
   when the project is created; statuses people add later stay;
 - `agent` and the project file's people as members. A person is named by Plane username, which
-  must stay the same across rebuilds: the admin's is kept at `admin`, and anyone else needs one
-  set on purpose. A person without a Plane account is skipped and named in the Job's log. Their
+  must stay the same across rebuilds: the admin's is kept at `admin`. A person without a Plane
+  user (`platform/accounts.sh` makes it) is skipped and named in the Job's log; the others'
   Plane ids go to `people.json` in `sdlc/plane-agent` (see People under Target projects);
 - one webhook per workspace to `http://orchestrator.sdlc.svc/hooks/plane` for work items and
   comments, signed with `PLANE_WEBHOOK_SECRET`.

@@ -30,15 +30,19 @@ checks:
 
 # People and their roles in the loop (design decision 5): product_owner, engineer. Engineers may
 # merge into development (with agent) and into main; product owners and engineers approve on
-# main. Usernames only, never e-mail addresses: this repository is public. Plane's `admin` and
-# Gitea's `gitea_admin` are the instance admins the bootstrap creates; the other people's accounts
-# are made by an admin (Plane's setup Job and seed-projects.sh only connect existing accounts).
+# main. Usernames only, never e-mail addresses: this repository is public. The accounts are made
+# by platform/accounts.sh from ~/.config/ai-native-sdlc/accounts.yaml, with the same username in
+# both tools; the instance admins (`admin`, `gitea_admin`) administer, they take no part here.
 people:
   - name: sergey
     roles: [product_owner, engineer]
-    plane: admin
-    gitea: gitea_admin
+    plane: sergey
+    gitea: sergey
   - name: manager
     roles: [product_owner]
     plane: manager
     gitea: manager
+  - name: dev
+    roles: [engineer]
+    plane: dev
+    gitea: dev
