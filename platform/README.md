@@ -511,6 +511,10 @@ labels. Kubernetes drops a field that is deleted from git only when no one else 
 it; without this step, a value deleted from `values.yaml` would stay in the cluster while
 Argo CD showed Synced.
 
+**Known issues**, with their symptoms and the way out, are in
+[`docs/argocd-issues.md`](../docs/argocd-issues.md): a commit whose image never builds, for one,
+holds back the orchestrator's next ones.
+
 **Recovering a broken Argo CD.** A bad change to `apps/argocd/values.yaml` can break the
 controller that would revert it. Reinstall it from the last good commit with Helm, outside
 GitOps:

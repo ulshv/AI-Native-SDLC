@@ -162,7 +162,9 @@ only `DATABASE_URL`:
 2. Argo CD syncs `platform/apps/orchestrator/` with `image.tag=$ARGOCD_APP_REVISION`, the same
    commit. Its PreSync Job runs `orchestrator migrate` with the new image, and then the
    Deployment rolls over. The old pod keeps serving until the new one is ready. If the build
-   failed, the new pod waits for an image that never comes, and the old one keeps running.
+   failed, the migrate Job waits for an image that never comes, and the old pod keeps running;
+   the next commit then waits too, until that sync gives up or is ended
+   ([`docs/argocd-issues.md`](../docs/argocd-issues.md)).
 3. Two pods at once are safe: events are leased, and the run limit is a lock in Postgres.
 
 `platform/smoke.sh orchestrator_running` checks the rollout, `/readyz` and Gitea's
