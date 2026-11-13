@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator import intents, llm
+from orchestrator import intents, live, llm
 from orchestrator.events import Event, Kind, PullRequest, Source, TrackerItem
 from orchestrator.links import Link
 from orchestrator.machine import POLICY
@@ -191,8 +191,8 @@ def test_live_projects_follow_their_files_and_keep_the_last_good_ones(tmp_path):
     assert projects.by_repo("sdlc/example-webapp").base == "development"
     file.write_text(file.read_text().replace("base: development", "base: dev"))
     assert projects.by_repo("sdlc/example-webapp").base == "development", "not looked at again yet"
-    now[0] += LiveProjects.CHECK_EVERY
+    now[0] += live.CHECK_EVERY
     assert projects.by_repo("sdlc/example-webapp").base == "dev"
     file.write_text("name: broken\n")
-    now[0] += LiveProjects.CHECK_EVERY
+    now[0] += live.CHECK_EVERY
     assert projects.by_repo("sdlc/example-webapp").base == "dev"

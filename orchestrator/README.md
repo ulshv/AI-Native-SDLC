@@ -33,6 +33,7 @@ src/orchestrator/
   ports.py       the Tracker and CodeHost ports
   events.py      the normalized event: its source, kind and what it is about (work item, PR, release)
   projects.py    platform/projects/*/project.yaml: projects, people and roles
+  live.py        values read from mounted files again when they change: projects, Plane ids
   executor.py    agent runs as Jobs, at most max_active_runs at a time, and the watcher
 tests/           pytest, against a real Postgres; fixtures/ holds scrubbed webhook payloads
 ```
@@ -145,7 +146,8 @@ only `DATABASE_URL`:
 | `DATABASE_URL` | the Secret `sdlc/orchestrator-env` |
 | `LLM_API_KEY` | `sdlc/orchestrator-env` (from `secrets.env`) |
 | `PLANE_WEBHOOK_SECRET`, `GITEA_WEBHOOK_SECRET` | `sdlc/orchestrator-env`; a webhook without a valid signature gets 401 |
-| `PLANE_API_KEY`, `PLANE_PEOPLE` | `sdlc/plane-agent`, from Plane's setup Job |
+| `PLANE_API_KEY` | `sdlc/plane-agent`, from Plane's setup Job |
+| `PLANE_PEOPLE_FILE` | not set; the default `/plane/people.json` is `people.json` of `sdlc/plane-agent`, mounted. Plane's setup Job writes it (see People in [`platform/README.md`](../platform/README.md#people)); a change is read again without a restart |
 | `GITEA_TOKEN` | `sdlc/gitea-agent`, from the bootstrap |
 | `PROJECTS_DIR` | the ConfigMap `target-projects`; a changed file is read again without a restart |
 | `ORCHESTRATOR_COMMIT` | the image tag; the agent image is `platform/agent-runner` of the same commit |

@@ -12,14 +12,16 @@ import re
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 
 from ..events import Actor, Event, Kind, Source, TrackerItem
 from ..http import Api, marker_html
 from ..links import Link
+from ..live import Live
 
 KIND = "plane_work_item"
 MENTION = re.compile(r'<mention-component[^>]*entity_identifier="([0-9a-f-]+)"[^>]*>\s*</mention-component>')
@@ -187,6 +189,20 @@ def header(headers: Mapping[str, str], name: str) -> str | None:
 # --- The Tracker port on Plane's public API -------------------------------------------------------
 
 
+def people_of(path: Path, clock: Callable[[], float] = time.monotonic) -> Live[dict[str, str]]:
+    """The people's Plane ids (username -> id) from people.json of the Secret sdlc/plane-agent, which
+    Plane's setup Job writes and the pod mounts: a person it adds is known without a restart. No
+    file, no people: the agent is then found by its key."""
+
+    def read() -> dict[str, str]:
+        return PEOPLE.validate_json(path.read_bytes()) if path.exists() else {}
+
+    return Live("the people's Plane ids", lambda: [path] if path.exists() else [], read, clock)
+
+
+PEOPLE: TypeAdapter[dict[str, str]] = TypeAdapter(dict[str, str])
+
+
 class PlaneTracker:
     """The agent's side of Plane, with its own API key (Secret sdlc/plane-agent). Plane's public API
     names members by display name only, so people are matched by the ids the setup Job stores."""
@@ -195,14 +211,14 @@ class PlaneTracker:
         self,
         base_url: str,
         api_key: str,
-        people: dict[str, str],
+        people: Callable[[], Mapping[str, str]],
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ):
         self.api = Api(
             base_url.rstrip("/") + "/api/v1", {"X-API-Key": api_key}, transport=transport, sleep=sleep, target="plane"
         )
-        self.people = people
+        self.people = people  # username -> Plane user id, as they are now (people_of)
         self._projects: dict[tuple[str, str], str] = {}
         self._states: dict[str, dict[str, str]] = {}
 
@@ -220,10 +236,10 @@ class PlaneTracker:
         return items
 
     def agent_id(self) -> str:
-        return self.people.get("agent") or str(self.api.json("GET", "/users/me/")["id"])
+        return self.people().get("agent") or str(self.api.json("GET", "/users/me/")["id"])
 
     def username(self, user_id: str) -> str:
-        return next((name for name, uid in self.people.items() if uid == user_id), "")
+        return next((name for name, uid in self.people().items() if uid == user_id), "")
 
     def _load_projects(self, workspace: str) -> None:
         for project in self.every(f"/workspaces/{workspace}/projects/"):

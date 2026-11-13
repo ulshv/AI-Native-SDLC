@@ -60,12 +60,6 @@ def test_an_empty_variable_counts_as_not_set(env):
     assert config.load(config.Settings).workers == 3  # the file's
 
 
-def test_a_variable_that_is_not_its_json_is_named(env):
-    env.setenv("PLANE_PEOPLE", "{not json")
-    with pytest.raises(config.ConfigError, match="plane_people"):
-        config.load(config.Settings)
-
-
 def test_a_broken_file_is_named(env, tmp_path):
     (tmp_path / "config.yaml").write_text("workers: [3\n")
     with pytest.raises(config.ConfigError, match=r"config\.yaml"):

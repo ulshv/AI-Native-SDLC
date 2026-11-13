@@ -20,7 +20,7 @@ from psycopg_pool import ConnectionPool
 
 from . import agent, config, db, intents, llm, logs
 from .adapters.gitea import GiteaCodeHost
-from .adapters.plane import PlaneTracker
+from .adapters.plane import PlaneTracker, people_of
 from .api import create_app
 from .executor import Executor, KubernetesCluster
 from .links import Links
@@ -76,7 +76,11 @@ def serve(settings: config.Settings, host: str, port: int) -> int:
             projects=LiveProjects(settings.projects_dir),
             links=links,
             queue=queue,
-            tracker=PlaneTracker(settings.plane_url, settings.plane_api_key.get_secret_value(), settings.plane_people),
+            tracker=PlaneTracker(
+                settings.plane_url,
+                settings.plane_api_key.get_secret_value(),
+                people_of(settings.plane_people_file).get,
+            ),
             code_host=GiteaCodeHost(
                 settings.gitea_url, settings.gitea_token.get_secret_value(), settings.gitea_public_url
             ),

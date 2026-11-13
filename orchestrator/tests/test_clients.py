@@ -57,7 +57,7 @@ def plane(fake):
     return PlaneTracker(
         "http://plane",
         "key",
-        {"agent": "u-agent", "admin": "u-admin"},
+        lambda: {"agent": "u-agent", "admin": "u-admin"},
         transport=httpx.MockTransport(fake),
         sleep=lambda s: None,
     )
@@ -282,3 +282,19 @@ def test_lookups_see_past_the_first_page():
     plane_fake.comments = [f"<p>c{n}</p>" for n in range(150)] + ["<p>done</p><!-- agent:evt-1 -->"]
     plane(plane_fake).comment("sdlc", "p-1", "i-1", "done", marker="evt-1")
     assert len(plane_fake.comments) == 151, "the marker on the second page counts"
+
+
+def test_a_person_plane_s_setup_job_adds_is_known_without_a_restart(tmp_path):
+    from orchestrator import live
+    from orchestrator.adapters.plane import people_of
+
+    file, now = tmp_path / "people.json", [0.0]
+    people = people_of(file, clock=lambda: now[0])
+    tracker = PlaneTracker("http://plane", "key", people.get, transport=httpx.MockTransport(FakePlane()))
+    assert people.get() == {}, "no file yet: no people"
+    file.write_text('{"agent": "u-agent", "manager": "u-manager"}')
+    now[0] += live.CHECK_EVERY
+    assert tracker.username("u-manager") == "manager" and tracker.agent_id() == "u-agent"
+    file.write_text("{broken")
+    now[0] += live.CHECK_EVERY
+    assert tracker.username("u-manager") == "manager", "a file that does not read leaves the people as they were"

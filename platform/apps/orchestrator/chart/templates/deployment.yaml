@@ -47,11 +47,9 @@ spec:
               valueFrom: {secretKeyRef: {name: orchestrator-env, key: PLANE_WEBHOOK_SECRET}}
             - name: GITEA_WEBHOOK_SECRET
               valueFrom: {secretKeyRef: {name: orchestrator-env, key: GITEA_WEBHOOK_SECRET}}
-            # From Plane's setup Job: the agent's key and the people's Plane ids.
+            # From Plane's setup Job: the agent's key (the people's Plane ids are a mounted file).
             - name: PLANE_API_KEY
               valueFrom: {secretKeyRef: {name: plane-agent, key: api-key}}
-            - name: PLANE_PEOPLE
-              valueFrom: {secretKeyRef: {name: plane-agent, key: people.json}}
             # From the bootstrap: agent's Gitea token.
             - name: GITEA_TOKEN
               valueFrom: {secretKeyRef: {name: gitea-agent, key: token}}
@@ -72,11 +70,18 @@ spec:
           volumeMounts:
             - {name: config, mountPath: /config}
             - {name: projects, mountPath: /projects}
+            # The people's Plane ids, mounted whole (no subPath) so the kubelet updates the file
+            # when Plane's setup Job adds a person; the orchestrator reads it again.
+            - {name: plane-people, mountPath: /plane, readOnly: true}
             - {name: tmp, mountPath: /tmp}
       volumes:
         - name: config
           configMap: {name: orchestrator-config}
         - name: projects
           configMap: {name: target-projects}
+        - name: plane-people
+          secret:
+            secretName: plane-agent
+            items: [{key: people.json, path: people.json}]
         - name: tmp
           emptyDir: {}

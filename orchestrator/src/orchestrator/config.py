@@ -14,7 +14,6 @@ from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
-    SettingsError,
     YamlConfigSettingsSource,
 )
 
@@ -74,7 +73,7 @@ class Settings(MigrateSettings):
     agent_image: str = ""
     plane_url: str = "http://plane-api.plane.svc:8000"
     plane_api_key: SecretStr
-    plane_people: dict[str, str] = {}  # username -> Plane user id, from the Secret sdlc/plane-agent
+    plane_people_file: Path = Path("/plane/people.json")  # username -> Plane user id (plane.people_of)
     gitea_url: str = "http://gitea-http.gitea.svc:3000"
     gitea_public_url: str = "https://gitea.sdlc.internal"  # for the addresses people open
     gitea_token: SecretStr
@@ -95,7 +94,5 @@ def load[S: MigrateSettings](kind: type[S]) -> S:
     except ValidationError as error:
         problems = [f"{'.'.join(map(str, e['loc'])).upper() or '(settings)'}: {e['msg']}" for e in error.errors()]
         raise ConfigError("; ".join(problems)) from None
-    except SettingsError as error:  # a variable that is not the JSON its setting needs
-        raise ConfigError(str(error)) from None
     except yaml.YAMLError as error:
         raise ConfigError(f"{os.environ.get('ORCHESTRATOR_CONFIG', '/config/config.yaml')}: {error}") from None

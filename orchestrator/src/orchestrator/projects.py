@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,6 +16,7 @@ import jsonschema
 import yaml
 
 from .events import Event, PullRequest, Release, TrackerItem
+from .live import Live
 
 log = logging.getLogger(__name__)
 ROLES = ("product_owner", "engineer")
@@ -123,49 +123,24 @@ class Projects:
 
 
 class LiveProjects(Projects):
-    """Projects that follow their directory: in the cluster, the mounted ConfigMap target-projects,
-    which the kubelet updates in place when a project file changes in git. The files are looked
-    at every CHECK_EVERY seconds at most; a file that does not load leaves the projects as they
-    were."""
-
-    CHECK_EVERY = 5.0
+    """Projects that follow their directory (live.Live): in the cluster, the mounted ConfigMap
+    target-projects, which the kubelet updates when a project file changes in git."""
 
     def __init__(self, directory: Path, clock: Callable[[], float] = time.monotonic):
-        super().__init__(Projects.read(directory))
-        self.directory, self.clock = Path(directory), clock
-        self._lock = threading.Lock()
-        self._seen, self._checked = self._signature(), clock()
-        log.info("projects: %s", ", ".join(p.name for p in self._projects) or "none")
+        directory = Path(directory)
+        self._live = Live("the project files", lambda: project_files(directory), lambda: self._read(directory), clock)
+        super().__init__(self._live.get())
 
-    def _signature(self) -> tuple[tuple[str, int, int], ...]:
-        paths = sorted(
-            {
-                *self.directory.glob("*/project.yaml"),
-                *self.directory.glob("*.yaml"),
-                *self.directory.glob("project.schema.json"),
-            }
-        )
-        return tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in paths)
+    @staticmethod
+    def _read(directory: Path) -> list[Project]:
+        projects = Projects.read(directory)
+        log.info("projects: %s", ", ".join(p.name for p in projects) or "none")
+        return projects
 
     @property
     def all(self) -> list[Project]:
-        with self._lock:
-            if self.clock() - self._checked >= self.CHECK_EVERY:
-                self._checked = self.clock()
-                self._reload_if_changed()
-            return self._projects
+        return self._live.get()
 
-    def _reload_if_changed(self) -> None:
-        try:
-            seen = self._signature()
-        except OSError:  # the kubelet swaps the files as they are listed: look again next time
-            log.info("the project files in %s change as they are read", self.directory)
-            return
-        if seen == self._seen:
-            return
-        self._seen = seen
-        try:
-            self._projects = Projects.read(self.directory)
-            log.info("projects reloaded: %s", ", ".join(p.name for p in self._projects) or "none")
-        except Exception:
-            log.exception("the project files in %s do not load; the projects stay as they were", self.directory)
+
+def project_files(directory: Path) -> list[Path]:
+    return list({*directory.glob("*/project.yaml"), *directory.glob("*.yaml"), *directory.glob("project.schema.json")})
