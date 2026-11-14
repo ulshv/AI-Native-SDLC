@@ -49,6 +49,10 @@ instead of an action.
 - **WHEN** an item is in Needs info and a person writes "@agent why are you waiting?"
 - **THEN** the agent answers with the questions it waits on, and the item stays in Needs info
 
+#### Scenario: Rejection while the agent waits for answers
+- **WHEN** an item is in Needs info and a person allowed to reject writes "@agent reject it"
+- **THEN** the item is closed and no agent run starts, rather than the comment being taken as the answer
+
 ### Requirement: Explicit signals need no interpretation
 Explicit signals SHALL count as intents without a model reading them: setting a ticket's status
 to Approved in Spec review means `approve`, setting it to Closed means `reject`, and an approving

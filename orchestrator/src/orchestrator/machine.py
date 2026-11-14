@@ -222,8 +222,18 @@ class Step:
         self.say(text)
 
 
+SLUG_LENGTH = 40
+
+
 def slug(title: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40].strip("-") or "change"
+    """The title's words for a branch and a change name, cut after a whole word: a cut word reads
+    as a typo, which the agent's model then corrects in the change's name, and the run finds no
+    change under the name it was given."""
+    words = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    if len(words) > SLUG_LENGTH:
+        cut = words[: SLUG_LENGTH + 1]
+        words = cut.rsplit("-", 1)[0] if "-" in cut else cut[:SLUG_LENGTH]
+    return words or "change"
 
 
 # --- a ticket assigned to @agent -----------------------------------------------------------------

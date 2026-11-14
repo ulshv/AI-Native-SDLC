@@ -43,12 +43,15 @@ VIA = {Source.PLANE: Where.TICKET, Source.GITEA: Where.PR}  # where a request wa
 # A reading may make an explicit signal more precise, never turn it around: an approving review
 # that asks to merge is a merge request, a review requesting changes stays one.
 REFINES = {Intent.APPROVE: {Intent.MERGE}}
+# In Needs info a mention answers the agent's questions, unless it clearly asks something back or
+# drops the item.
+NOT_AN_ANSWER = {Intent.ASK, Intent.REJECT}
 
 
 def read_intent(chat: BaseChatModel, threshold: float, event: Event, item: WorkItem, known: bool) -> Intent | None:
     """An explicit signal needs no model; a mention is read by one; nothing else is a request. No
     model reads a stranger's comment (the policy refuses it whatever it says). In Needs info the
-    next mention is the answer, unless it is clearly a question."""
+    next mention is the answer, unless it is clearly a question or a rejection."""
     explicit = signal(event)
     if not (event.mentions_agent and event.text):
         return explicit
@@ -57,7 +60,7 @@ def read_intent(chat: BaseChatModel, threshold: float, event: Event, item: WorkI
     reading = intents.read(chat, event.text, item.phase or "", item.last_said())
     clear = intents.clear(reading, threshold)
     if not explicit and item.phase == Phase.NEEDS_INFO:
-        return Intent.ASK if clear and reading.intent is Intent.ASK else Intent.ANSWER
+        return reading.intent if clear and reading.intent in NOT_AN_ANSWER else Intent.ANSWER
     if explicit:
         return reading.intent if clear and reading.intent in REFINES.get(explicit, set()) else explicit
     return reading.intent if clear else Intent.UNCLEAR

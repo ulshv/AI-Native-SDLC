@@ -481,6 +481,22 @@ def test_closing_an_item_that_waits_for_answers_drops_the_questions(world):
     assert world.item.phase == "Closed" and world.item.paused is None and world.item.summary()["questions"] == []
 
 
+def test_a_rejection_in_needs_info_closes_the_item_instead_of_answering(world):
+    assign(world)
+    world.finish({"result": "failed", "reason": "the run wrote no change"})
+    world.svc.chat.answers["@agent looks good, go ahead"] = ("reject", 0.9)
+    world.hook("plane", "comment_mention_agent")
+    assert world.item.phase == "Closed" and world.runs == ["ewa-1-propose-1"], "no run again"
+
+
+def test_a_long_title_is_cut_after_a_whole_word():
+    from orchestrator.machine import slug
+
+    assert slug("Add a title attribute to the footer commit") == "add-a-title-attribute-to-the-footer"
+    assert slug("Orders: filter by status!") == "orders-filter-by-status"
+    assert slug("x" * 50) == "x" * 40 and slug("???") == "change"
+
+
 def test_a_status_set_by_hand_follows_the_work_again(world):
     assign(world)
     world.hook("plane", "issue_state_approved", data__state__name="Code review")  # dragged on the board
