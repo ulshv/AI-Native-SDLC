@@ -27,6 +27,12 @@ SYSTEM_CA=/usr/local/share/ca-certificates/$TRUST_NAME.crt
 NSSDB=sql:$HOME/.pki/nssdb
 FIREFOX_POLICIES=/etc/firefox/policies/policies.json
 FIREFOX_CA=/etc/firefox/policies/$TRUST_NAME-ca.crt
+# The wildcard resolver (design decision 13): dnsmasq on 127.0.0.2 answers every name under
+# sdlc.internal, and systemd-resolved sends only that domain to it.
+DNS_UNIT=ai-native-sdlc-dns.service
+DNS_UNIT_FILE=/etc/systemd/system/$DNS_UNIT
+DNS_DELEGATE=/etc/systemd/dns-delegate.d/sdlc.dns-delegate
+DNS_ADDRESS=127.0.0.2
 # k3s's default --cluster-cidr: every pod IP is in it.
 POD_CIDR=10.42.0.0/16
 POD_ROUTE_PRIORITY=100
@@ -130,7 +136,7 @@ sudo_available() {
 
 # Checks every prerequisite and changes nothing. Reports all problems at once.
 phase_preflight() {
-  local problems=() tool port holder name
+  local problems=() tool port holder name systemd
   [[ $EUID -ne 0 ]] || problems+=("running as root: run as your own user, the script calls sudo itself")
   for tool in "${TOOLS[@]}"; do
     command -v "$tool" >/dev/null || problems+=("missing tool: $tool")
@@ -139,6 +145,10 @@ phase_preflight() {
     problems+=("wrong yq: need mikefarah/yq v4, not the apt package")
   fi
   sudo_available || problems+=("sudo is not available for $USER")
+  [[ -x /usr/sbin/dnsmasq ]] || problems+=("missing /usr/sbin/dnsmasq: sudo apt install dnsmasq-base")
+  systemd=$(systemctl --version 2>/dev/null | awk 'NR == 1 { print $2 }')
+  systemd=${systemd%%[!0-9]*}
+  ((${systemd:-0} >= 258)) || problems+=("systemd older than 258: systemd-resolved has no DNS delegates")
   for port in "${PORTS[@]}"; do
     holder=$(port_holder "$port")
     [[ -z $holder ]] || problems+=("port $port is in use by $holder")
@@ -406,6 +416,74 @@ write_hosts() {
   rm -f "$tmp"
 }
 
+# Our own unit of dnsmasq-base's binary: the dnsmasq package's service would take port 53.
+# Every name at any depth under sdlc.internal is 127.0.0.1, where Traefik listens; it answers
+# nothing else, and needs neither the cluster nor the network. --local makes the other record
+# types there (AAAA, HTTPS, which browsers ask for too) an empty answer: without it dnsmasq
+# looks for an upstream it does not have and answers REFUSED.
+dns_unit() {
+  printf '%s\n' \
+    "# Managed by ai-native-sdlc platform/bootstrap.sh: *.sdlc.internal -> 127.0.0.1 for the DNS" \
+    "# delegate $DNS_DELEGATE." \
+    "[Unit]" \
+    "Description=ai-native-sdlc: every name under sdlc.internal is 127.0.0.1" \
+    "" \
+    "[Service]" \
+    "ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/dev/null --no-resolv --no-hosts --listen-address=$DNS_ADDRESS --bind-interfaces --port=53 --local=/sdlc.internal/ --address=/sdlc.internal/127.0.0.1 --user=dnsmasq --group=nogroup --pid-file= --log-facility=-" \
+    "Restart=on-failure" \
+    "ProtectSystem=strict" \
+    "ProtectHome=yes" \
+    "PrivateTmp=yes" \
+    "" \
+    "[Install]" \
+    "WantedBy=multi-user.target"
+}
+
+# The tilde makes sdlc.internal a routing domain only. Without it the domain is also a search
+# domain, and every failed lookup, offline or a typo, comes back as 127.0.0.1 (spike 1.2).
+dns_delegate() {
+  printf '%s\n' \
+    "# Managed by ai-native-sdlc platform/bootstrap.sh: only sdlc.internal goes to $DNS_UNIT." \
+    "[Delegate]" \
+    "DNS=$DNS_ADDRESS" \
+    "Domains=~sdlc.internal"
+}
+
+# A name nobody wrote anywhere resolves, and its AAAA record is an empty answer, not an error.
+# resolvectl exits 1 on an empty answer too, hence its message, not its status.
+wildcard_names_answer() {
+  local name=probe-$RANDOM.check.sdlc.internal
+  [[ $(getent ahostsv4 "$name" | awk 'NR == 1 { print $1 }') == 127.0.0.1 &&
+    $(resolvectl query -t AAAA "$name" 2>&1) == *"does not have any RR of the requested type"* ]]
+}
+
+wildcard_dns_works() {
+  cmp -s <(dns_unit) "$DNS_UNIT_FILE" && cmp -s <(dns_delegate) "$DNS_DELEGATE" &&
+    systemctl is-enabled --quiet "$DNS_UNIT" && systemctl is-active --quiet "$DNS_UNIT" &&
+    wildcard_names_answer
+}
+
+# Restarting resolved drops its cache and cuts the host's DNS for a moment, so only a changed
+# delegate does it: resolved reads its delegates at start.
+install_wildcard_dns() {
+  local i
+  dns_unit | sudo tee "$DNS_UNIT_FILE" >/dev/null
+  sudo systemctl daemon-reload
+  sudo systemctl enable "$DNS_UNIT"
+  sudo systemctl restart "$DNS_UNIT"
+  if ! cmp -s <(dns_delegate) "$DNS_DELEGATE"; then
+    sudo mkdir -p "$(dirname "$DNS_DELEGATE")"
+    dns_delegate | sudo tee "$DNS_DELEGATE" >/dev/null
+    sudo systemctl restart systemd-resolved
+  fi
+  for i in $(seq 10); do
+    wildcard_dns_works && return 0
+    sleep 1
+  done
+  echo "error: names under sdlc.internal do not resolve; see journalctl -u $DNS_UNIT" >&2
+  return 1
+}
+
 fingerprint() { openssl x509 -noout -fingerprint -sha256 2>/dev/null; }
 
 system_trusts_ca() { cmp -s "$CA_CRT" "$SYSTEM_CA" && [[ -e /etc/ssl/certs/$TRUST_NAME.pem ]]; }
@@ -529,7 +607,8 @@ wildcard_signed_by_current_ca() {
 # Deleting the Secret makes cert-manager issue a new certificate from the current CA.
 reissue_wildcard() { kubectl delete secret -n traefik wildcard-sdlc-internal-tls; }
 
-# Installs k3s, the /etc/hosts block and host CA trust, and applies Kubernetes Secrets.
+# Installs k3s, the /etc/hosts block, the wildcard resolver and host CA trust, and applies
+# Kubernetes Secrets.
 phase_host() {
   step "node address $NODE_IP on $NODE_IFACE; traffic to pods bypasses VPN rules" node_network_in_place set_node_network
   step "k3s config: node address $NODE_IP, bundled Traefik off" k3s_config_current write_k3s_config
@@ -540,6 +619,7 @@ phase_host() {
   step "~/.kube/config points at k3s" kubeconfig_works write_kubeconfig
   step "node is Ready" node_ready wait_node_ready
   step "/etc/hosts block matches platform/hosts.txt" hosts_current write_hosts
+  step "every name under sdlc.internal resolves to 127.0.0.1 ($DNS_UNIT, $DNS_DELEGATE)" wildcard_dns_works install_wildcard_dns
   step "system trust store has the root CA" system_trusts_ca trust_ca_system
   step "Chrome (~/.pki/nssdb) trusts the root CA" nss_trusts_ca trust_ca_nss
   step "Firefox policy installs the root CA" firefox_trusts_ca trust_ca_firefox

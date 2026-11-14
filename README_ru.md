@@ -393,6 +393,10 @@ sudo apt install git openssl jq curl
 # certutil: добавляет локальный CA в хранилище сертификатов Chrome
 sudo apt install libnss3-tools
 
+# бинарник dnsmasq для имён под sdlc.internal; не пакет `dnsmasq`, его сервис занимает
+# порт 53. Нужен systemd 258+ (DNS-делегаты systemd-resolved)
+sudo apt install dnsmasq-base
+
 # yq v4 от Mike Farah (`yq` из apt — другая Python-утилита с другим синтаксисом)
 sudo snap install yq
 
@@ -408,7 +412,7 @@ sudo snap install helm --classic
 
 ```bash
 platform/bootstrap.sh   # собрать или пересобрать платформу: ~11 мин с нуля, можно перезапускать
-platform/smoke.sh       # 23 сквозных проверки
+platform/smoke.sh       # 25 сквозных проверок
 ```
 
 После этого сервисы доступны на <https://gitea.sdlc.internal>, <https://argocd.sdlc.internal>

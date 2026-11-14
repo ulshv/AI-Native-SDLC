@@ -351,6 +351,31 @@ check_names_resolve() {
   return $failed
 }
 
+first_ipv4() { getent ahostsv4 "$1" | awk 'NR == 1 { print $1 }'; }
+
+# The wildcard resolver: a name nobody wrote anywhere, at any depth under sdlc.internal,
+# resolves to 127.0.0.1 on the host, and its AAAA record is an empty answer rather than a server
+# error; sdlc.internal is not a search domain, so a failed lookup of another name does not come
+# back as 127.0.0.1.
+register host_wildcard_names
+check_host_wildcard_names() {
+  local name aaaa failed=0
+  for name in "smoke-$RANDOM.sdlc.internal" "a.b.smoke-$RANDOM.sdlc.internal"; do
+    [[ $(first_ipv4 "$name") == 127.0.0.1 ]] ||
+      { echo "$name does not resolve to 127.0.0.1 on the host"; failed=1; }
+    # resolvectl exits 1 on an empty answer too, hence its message, not its status.
+    aaaa=$(resolvectl query -t AAAA "$name" 2>&1)
+    [[ $aaaa == *"does not have any RR of the requested type"* ]] || { echo "the AAAA lookup fails: $aaaa"; failed=1; }
+  done
+  if awk '$1 == "search" { for (i = 2; i <= NF; i++) if ($i == "sdlc.internal") found = 1 } END { exit !found }' /etc/resolv.conf; then
+    echo "sdlc.internal is a search domain in /etc/resolv.conf; the delegate needs Domains=~sdlc.internal"
+    failed=1
+  fi
+  name=no-such-name-$RANDOM
+  [[ $(first_ipv4 "$name") != 127.0.0.1 ]] || { echo "$name, which does not exist, resolves to 127.0.0.1"; failed=1; }
+  return $failed
+}
+
 # Every service name answers over HTTPS with a certificate the host trusts (curl without -k),
 # and plain HTTP redirects to HTTPS. A name whose service is not deployed yet gets Traefik's
 # 404, which still proves the name, the route to Traefik and the certificate.

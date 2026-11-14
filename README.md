@@ -398,6 +398,10 @@ sudo apt install git openssl jq curl
 # certutil: adds the local CA to Chrome's certificate store
 sudo apt install libnss3-tools
 
+# dnsmasq's binary, for names under sdlc.internal; not the `dnsmasq` package, whose service
+# takes port 53. Needs systemd 258+ (DNS delegates of systemd-resolved)
+sudo apt install dnsmasq-base
+
 # yq v4 by Mike Farah (apt's `yq` is a different Python tool with another syntax)
 sudo snap install yq
 
@@ -413,7 +417,7 @@ listening there, before bootstrapping.
 
 ```bash
 platform/bootstrap.sh   # build or rebuild the platform: ~11 min from scratch, safe to re-run
-platform/smoke.sh       # 23 end-to-end checks
+platform/smoke.sh       # 25 end-to-end checks
 ```
 
 Then the services are at <https://gitea.sdlc.internal>, <https://argocd.sdlc.internal> and

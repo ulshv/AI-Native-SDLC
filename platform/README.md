@@ -97,6 +97,7 @@ Phase 2 changes the host, and each change is checked first and skipped when alre
 | BuildKit's own AppArmor and seccomp profiles for the CI pods (see [CI](#ci)) | `/etc/apparmor.d/sdlc-buildkit`, `/var/lib/kubelet/seccomp/profiles/sdlc-buildkit.json`, from [`apparmor/`](apparmor/sdlc-buildkit) and [`seccomp/`](seccomp/sdlc-buildkit.json) |
 | Cluster access for you | `~/.kube/config`; a config that was already there is kept as `~/.kube/config.before-ai-native-sdlc` |
 | Service names from [`hosts.txt`](hosts.txt) → `127.0.0.1` | a block between `# BEGIN ai-native-sdlc` and `# END ai-native-sdlc` in `/etc/hosts`; the original is kept as `/etc/hosts.before-ai-native-sdlc` |
+| Every name under `sdlc.internal`, at any depth (`dev.example-webapp.sdlc.internal`, a preview's `ewa-12.qa.example-webapp.sdlc.internal`) → `127.0.0.1`, with no list to keep: `dnsmasq` from `dnsmasq-base` listens on `127.0.0.2:53` only, and systemd-resolved sends it only that domain. `Domains=~sdlc.internal`, with the tilde, keeps the domain out of the search list, so a failed lookup of another name never turns into `127.0.0.1`. Nothing else goes there, and it works offline and with the cluster stopped | the unit `/etc/systemd/system/ai-native-sdlc-dns.service`, the DNS delegate `/etc/systemd/dns-delegate.d/sdlc.dns-delegate` (design decision 13 of `delivery-loop`) |
 | Root CA trusted by the system (curl, git, most tools) | `/usr/local/share/ca-certificates/ai-native-sdlc.crt` |
 | Root CA trusted by Chrome | `~/.pki/nssdb`, nickname `ai-native-sdlc` |
 | Root CA trusted by Firefox | the `Certificates.Install` policy in `/etc/firefox/policies/policies.json`, pointing at `/etc/firefox/policies/ai-native-sdlc-ca.crt` |
@@ -131,11 +132,16 @@ sudo rm -f /etc/systemd/system/k3s.service.d/ai-native-sdlc-routing.conf \
 sudo rm -f /etc/rancher/k3s/registries.yaml /var/lib/kubelet/seccomp/profiles/sdlc-buildkit.json \
   && sudo apparmor_parser -R /etc/apparmor.d/sdlc-buildkit && sudo rm -f /etc/apparmor.d/sdlc-buildkit
 
-# 5. the AppArmor profile; after the reboot containerd loads its own one again
+# 5. the wildcard resolver
+sudo systemctl disable --now ai-native-sdlc-dns.service \
+  && sudo rm -f /etc/systemd/system/ai-native-sdlc-dns.service /etc/systemd/dns-delegate.d/sdlc.dns-delegate \
+  && sudo systemctl daemon-reload && sudo systemctl restart systemd-resolved
+
+# 6. the AppArmor profile; after the reboot containerd loads its own one again
 sudo rm -f /etc/apparmor.d/cri-containerd.apparmor.d && sudo reboot
 ```
 
-The AppArmor profile is a workaround: remove it (step 5, and the file and its bootstrap step)
+The AppArmor profile is a workaround: remove it (step 6, and the file and its bootstrap step)
 once the pinned k3s ships a containerd with the fix from
 [containerd#14487](https://github.com/containerd/containerd/pull/14487). The smoke check
 `container_signals` tells whether it is still needed: it fails without the file on an
@@ -549,8 +555,12 @@ Traefik's Service. Pods do not trust the local CA yet, so a client in a pod has 
 `~/.pki/nssdb` and Firefox reads its policies only at startup. Until then they show a
 certificate warning.
 
-To add a name, append it to [`hosts.txt`](hosts.txt) and re-run `platform/bootstrap.sh`: the
-host's `/etc/hosts` gets it, pods resolve it already, and the wildcard certificate covers it.
+Any name under `sdlc.internal` resolves on the host through the wildcard resolver (see [Host
+changes and removal](#host-changes-and-removal)), and in pods through CoreDNS. The platform's
+own services are also in [`hosts.txt`](hosts.txt), which the bootstrap writes into
+`/etc/hosts` as a fallback should the resolver be off; a new service name goes there, and the
+wildcard certificate covers it. The environments' names need neither: each Ingress gets its own
+certificate.
 
 ## Public mirror
 
