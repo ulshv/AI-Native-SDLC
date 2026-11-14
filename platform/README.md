@@ -301,11 +301,13 @@ The clone's place is `repository.clone` in the project file (`~/Projects/sdlc/ex
 **Adding a project:**
 
 1. create its repository locally with `main` and `development`, an OpenSpec setup for OpenCode,
-   a `deploy/chart` and CI workflows (see `example-webapp`);
+   a `deploy/chart` and CI workflows (see `example-webapp`). The chart takes `host` and
+   `image.tag`, names its Service and Ingress after the release, and its image serves
+   `/version.json` with the commit it was built from (Environments);
 2. add `projects/<name>/project.yaml` and one line in
    [`projects/kustomization.yaml`](projects/kustomization.yaml);
-3. push this repository: Plane's setup Job creates the Plane project, and the orchestrator reads
-   the new file without a restart;
+3. push this repository: Plane's setup Job creates the Plane project, Argo CD its environments,
+   and the orchestrator reads the new file without a restart;
 4. run `platform/seed-projects.sh`.
 
 ### People
@@ -368,6 +370,43 @@ the orchestrator stops taking their requests once it reads the file again. To lo
 Plane and Gitea, set `enabled: false` in `accounts.yaml` and run `accounts.sh`. Their repository
 access and Plane membership stay until an admin removes them.
 
+### Environments
+
+Every project gets dev, prod and, with `previews: true` in its project file, a preview of each
+pull request labelled `preview`. Argo CD deploys the project's own `deploy/chart` from its
+repository, with the image CI built from the very commit it deploys (design decision 11 of
+`delivery-loop`); all of it is in [`apps/environments/`](apps/environments/):
+
+| Environment | Runs | Host (`example-webapp`) | Namespace |
+|---|---|---|---|
+| dev | the head of `repository.base` (`development`) | <https://dev.example-webapp.sdlc.internal> | `example-webapp-dev` |
+| prod | the head of `repository.release` (`main`) | <https://example-webapp.sdlc.internal> | `example-webapp-prod` |
+| preview | a labelled pull request's head, as the Helm release `<id>` (`ewa-12`, from the branch) | `https://<id>.qa.example-webapp.sdlc.internal` | `example-webapp-preview`, shared |
+
+- **How it gets there:** a merge, or a push to a pull request, reaches its environment in about
+  5 minutes: Argo CD looks at git every 3 minutes, and until CI has pushed the image the new pod
+  waits for it while the old one serves. A preview appears within a minute of the label (the
+  generator asks Gitea every 60 s) and goes, with its TLS Secret, once the pull request is merged
+  or closed. Every image serves `/version.json` with its commit, which tells what runs where.
+- **Previews in the loop:** when an implementation run is done, the orchestrator labels the pull
+  request, moves the ticket to Deploying to QA, and once the preview serves the pushed commit
+  posts its link and moves on to Code review; after 15 minutes without it, it moves on anyway
+  and says why, with CI's run of the commit.
+- **What a project's chart may do:** it is written by agents, so the platform makes the
+  namespaces, and each project's AppProject admits its own repository, its own namespaces and a
+  list of kinds (workloads, Services, ConfigMaps, Secrets, Ingresses, PVCs, HPAs, PDBs), nothing
+  cluster-wide and no NetworkPolicy. An Ingress may claim only its environment's host
+  (a ValidatingAdmissionPolicy reads it from the namespace's annotation). Pods reach each other
+  in the namespace, DNS and the internet, and nothing else private: neither the platform's
+  services nor the local network. Namespaces enforce the restricted Pod Security Standard and
+  hold at most 10 pods. Each environment gets its own certificate from the local CA.
+- **Smoke checks:** `environments_current` (dev and prod Synced and Healthy at their branch's
+  head, and serving it over HTTPS; run it a few minutes after a merge), `environment_ingress_hosts`
+  (a server-side dry run of an Ingress for `gitea.sdlc.internal` is refused) and
+  `previews_cleaned` (nothing in a preview namespace outlives its pull request).
+- **Watching:** `kubectl get applications -n argocd` lists `<project>-dev`, `<project>-prod`,
+  `<project>-<id>` and `project-<project>`; Argo CD's UI shows the same.
+
 ## Where to change what
 
 | To change | Edit | Takes effect |
@@ -378,6 +417,8 @@ access and Plane membership stay until an admin removes them.
 | the models agent runs may use | [`apps/agents/opencode-config.yaml`](apps/agents/opencode-config.yaml) | push; the next run |
 | a platform component | `apps/<component>/values.yaml` or its manifests | push (Changing the platform through git) |
 | a secret: the model key, webhook secrets, admin passwords | `~/.config/ai-native-sdlc/secrets.env` | `platform/bootstrap.sh`, then restart what uses it (Secrets) |
+| a project's environments: what runs, its host | the product's `deploy/chart`, `domain` and `previews` in its project file | merge into the branch, or push this repository (Environments) |
+| what a project's chart may deploy | [`apps/environments/project/`](apps/environments/project/), [`apps/environments/ingress-hosts.yaml`](apps/environments/ingress-hosts.yaml) | push |
 | a host name | [`hosts.txt`](hosts.txt) | `platform/bootstrap.sh` |
 
 Never by hand: the Secrets the platform writes for itself, such as `sdlc/plane-agent` (agent's

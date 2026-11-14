@@ -30,11 +30,14 @@ register no_secret_material_in_worktree
 check_no_secret_material_in_worktree() {
   [[ -s $SECRETS_FILE ]] || { echo "no $SECRETS_FILE"; return 1; }
   local hits
+  # Installed dependencies are others' code, whose docs show example keys, and never in git.
+  local skip=(--exclude-dir=.git --exclude-dir=.venv --exclude-dir=node_modules)
   hits=$(
     {
-      find . -path ./.git -prune -o \( -name secrets.env -o -name '*.key' -o -name .secrets \) -print
-      grep -rlE --exclude-dir=.git -e '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----' . || true
-      grep -rlF --exclude-dir=.git -f <(secret_values) . || true
+      find . \( -name .git -o -name .venv -o -name node_modules \) -prune -o \
+        \( -name secrets.env -o -name '*.key' -o -name .secrets \) -print
+      grep -rlE "${skip[@]}" -e '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----' . || true
+      grep -rlF "${skip[@]}" -f <(secret_values) . || true
     } 2>/dev/null | sort -u
   )
   [[ -z $hits ]] || { echo "secret material in the working tree:"; echo "$hits"; return 1; }
@@ -240,7 +243,9 @@ check_ci_unprivileged() {
 
 # Agent runs (namespace sdlc-agents) reach Gitea and the model provider, and nothing private: not
 # the database, Plane, the orchestrator, Traefik (and the web UIs behind it) or the Kubernetes API
-# (design decision 7). A pod there tries each with a TCP connect.
+# (design decision 7). A pod there tries each with a TCP connect, a few seconds after it starts:
+# kube-router, k3s's policy controller, lets a new pod's first second through (seen 2026-11-14),
+# which an agent run spends cloning from Gitea.
 register agents_network
 check_agents_network() {
   local provider
@@ -249,6 +254,7 @@ check_agents_network() {
   run_pod sdlc-agents smoke-agents-network \
     --image=docker.io/rancher/mirrored-library-busybox:1.37.0 --image-pull-policy=IfNotPresent -- \
     sh -c "fail=0
+      sleep 3  # k3s's kube-router applies a new pod's policies within about a second of its start
       for ok in gitea-http.gitea.svc:3000 $provider:443; do
         nc -z -w 5 \${ok%:*} \${ok#*:} || { echo \"cannot reach \$ok\"; fail=1; }
       done
@@ -648,6 +654,87 @@ check_orchestrator_running() {
     { echo "the orchestrator runs $tag, which is no commit on main"; return 1; }
   with_service sdlc orchestrator 80 orchestrator_healthy || return 1
   with_gitea org_webhook_to_orchestrator
+}
+
+# project_envs: "<project> <env> <branch> <host> <repository>" for every project's dev and prod
+# (design decision 11).
+project_envs() {
+  local file
+  for file in platform/projects/*/project.yaml; do
+    yq -r '[.name, "dev", .repository.base, "dev." + .domain, .repository.gitea] | join(" "),
+      [.name, "prod", .repository.release, .domain, .repository.gitea] | join(" ")' <"$file"
+  done
+}
+
+# Every project's dev and prod: the Application Synced and Healthy at the branch's head, and the
+# host serving that commit's image over HTTPS with a certificate the host trusts. Run it a few
+# minutes after a merge: Argo CD looks at git every 3 minutes, and CI builds the image first.
+register environments_current
+check_environments_current() { with_gitea environments_at_heads; }
+environments_at_heads() {
+  local name env branch host repo head app served failed=0
+  while read -r name env branch host repo; do
+    head=$(gitea_admin_get "/repos/$repo/branches/$branch" | jq -er .commit.id) ||
+      { echo "$repo has no branch $branch"; failed=1; continue; }
+    app=$(kubectl get application "$name-$env" -n argocd -o json 2>/dev/null |
+      jq -r '"\(.status.sync.status) \(.status.health.status) \(.status.sync.revision)"') || app=""
+    [[ $app == "Synced Healthy $head" ]] ||
+      { echo "$name-$env: ${app:-no Application} (want Synced Healthy at $branch ${head:0:7})"; failed=1; }
+    served=$(curl -fsS --max-time 10 "https://$host/version.json" | jq -er .commit) || served=nothing
+    [[ $served == "$head" ]] || { echo "https://$host serves ${served:0:7}, $branch is at ${head:0:7}"; failed=1; }
+  done < <(project_envs)
+  return $failed
+}
+
+# An Ingress in an environment's namespace may claim its own host only (ingress-hosts.yaml in
+# apps/environments): a server-side dry run, which changes nothing, is refused for gitea's host
+# and admitted for the environment's.
+register environment_ingress_hosts
+check_environment_ingress_hosts() {
+  local name env branch host repo out failed=0
+  while read -r name env branch host repo; do
+    [[ $env == dev ]] || continue
+    if out=$(probe_ingress "$name-dev" gitea.sdlc.internal 2>&1); then
+      echo "an Ingress for gitea.sdlc.internal is admitted in $name-dev"
+      failed=1
+    fi
+    out=$(probe_ingress "$name-dev" "$host" 2>&1) || { echo "the Ingress for $host is refused in $name-dev: $out"; failed=1; }
+  done < <(project_envs)
+  return $failed
+}
+probe_ingress() { # <namespace> <host>
+  kubectl apply --dry-run=server -f - <<EOF2
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: smoke-probe, namespace: $1}
+spec:
+  ingressClassName: traefik
+  tls: [{hosts: ["$2"]}]
+  rules:
+    - host: "$2"
+      http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: smoke-probe, port: {number: 80}}}}]}
+EOF2
+}
+
+# Nothing of a closed preview stays in <project>-preview: every release there (its Deployment,
+# Service, Ingress, TLS Secret) belongs to a preview Application that still exists.
+register previews_cleaned
+check_previews_cleaned() {
+  local file name ns id failed=0
+  for file in platform/projects/*/project.yaml; do
+    [[ $(yq -r .previews <"$file") == true ]] || continue
+    name=$(yq -r .name <"$file")
+    ns=$name-preview
+    kubectl get namespace "$ns" >/dev/null 2>&1 || { echo "$ns does not exist"; failed=1; continue; }
+    for id in $({
+      kubectl get deployments,services,ingresses -n "$ns" -o name | sed 's|.*/||'
+      kubectl get secrets -n "$ns" --field-selector type=kubernetes.io/tls -o name | sed 's|.*/||; s|-tls$||'
+    } | sort -u); do
+      kubectl get application "$name-$id" -n argocd >/dev/null 2>&1 ||
+        { echo "$ns holds $id, whose preview Application $name-$id is gone"; failed=1; }
+    done
+  done
+  return $failed
 }
 
 # The people's accounts in Plane and Gitea match accounts.yaml (platform/accounts.sh): a dry run
