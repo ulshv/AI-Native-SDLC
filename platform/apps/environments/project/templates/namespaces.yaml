@@ -1,0 +1,20 @@
+# One namespace per environment, made by the platform rather than by the product's chart. Pods in
+# it must meet the restricted Pod Security Standard, and only so many of them may run.
+{{- range .Values.environments }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $.Values.name }}-{{ . }}
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: pods
+  namespace: {{ $.Values.name }}-{{ . }}
+spec:
+  hard:
+    pods: {{ $.Values.maxPods | quote }}
+{{- end }}

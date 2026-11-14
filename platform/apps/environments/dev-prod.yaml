@@ -1,0 +1,60 @@
+# dev and prod of every target project (design decision 11): each file
+# platform/projects/*/project.yaml crossed with [dev -> its base branch, prod -> its release
+# branch]. An environment runs the project's deploy/chart at the branch's head, in
+# <project>-<env>, with the image CI built from that very commit. Until CI has pushed it, the
+# new pod waits for it and the old one keeps serving. The project's AppProject and namespaces
+# come from projects.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: dev-prod
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
+              revision: main
+              files:
+                - path: platform/projects/*/project.yaml
+          # branch names a key of the project's repository; prefix goes before its domain.
+          - list:
+              elements:
+                - {env: dev, branch: base, prefix: "dev."}
+                - {env: prod, branch: release, prefix: ""}
+  template:
+    metadata:
+      name: "{{ .name }}-{{ .env }}"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: "{{ .name }}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .name }}-{{ .env }}"
+      source:
+        repoURL: "http://gitea-http.gitea.svc:3000/{{ .repository.gitea }}.git"
+        targetRevision: "{{ index .repository .branch }}"
+        path: deploy/chart
+        helm:
+          releaseName: "{{ .name }}"
+          parameters:
+            - name: host
+              value: "{{ .prefix }}{{ .domain }}"
+            # Argo CD fills it in with the commit it syncs (D19).
+            - name: image.tag
+              value: $ARGOCD_APP_REVISION
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        # A new project's namespaces come from its project-<name> Application, which may sync
+        # after this one: the failed sync is tried again.
+        retry:
+          limit: 5
+          backoff: {duration: 30s, factor: 2, maxDuration: 5m}
+        syncOptions:
+          - ServerSideApply=true

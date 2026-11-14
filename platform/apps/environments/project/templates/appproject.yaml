@@ -1,0 +1,19 @@
+# What the project's own chart may deploy. The chart lives in the product's repository, which
+# agents write to, so it is not trusted as the platform's files are: it may come only from that
+# repository, go only into this project's environment namespaces, and hold nothing cluster-wide
+# (no ClusterRole, no CRD, no Namespace).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ required "name is required" .Values.name }}
+  namespace: argocd
+spec:
+  description: {{ .Values.name }}'s environments, from the chart in its own repository
+  sourceRepos:
+    - http://gitea-http.gitea.svc:3000/{{ required "repository is required" .Values.repository }}.git
+  destinations:
+  {{- range .Values.environments }}
+    - server: https://kubernetes.default.svc
+      namespace: {{ $.Values.name }}-{{ . }}
+  {{- end }}
+  clusterResourceWhitelist: []

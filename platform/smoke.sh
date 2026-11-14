@@ -270,11 +270,15 @@ gitea_main_head() {
     "$GITEA_URL/api/v1/repos/platform/ai-native-sdlc/branches/main" | jq -er .commit.id
 }
 
-# apps_synced_at <commit>: every Application is Synced and Healthy at that commit. A
-# multi-source Application lists the commit among its revisions.
+# apps_synced_at <commit>: every Application of the platform is Synced and Healthy at that
+# commit. A multi-source Application lists the commit among its revisions. The platform's are in
+# the AppProject default; the target projects' environments, in their own, run their own
+# repositories' commits.
+platform_apps() { kubectl get applications -n argocd -o json | jq '[.items[] | select(.spec.project == "default")]'; }
+
 apps_synced_at() {
-  kubectl get applications -n argocd -o json | jq -e --arg head "$1" '
-    (.items | length) > 0 and all(.items[];
+  platform_apps | jq -e --arg head "$1" '
+    length > 0 and all(.[];
       .status.sync.status == "Synced" and .status.health.status == "Healthy" and
       (.status.sync.revision == $head or ((.status.sync.revisions // []) | index($head)) != null))' >/dev/null
 }
@@ -288,8 +292,8 @@ check_gitops_synced_to_main() {
     apps_synced_at "$head" && return 0
     sleep 10
   done
-  echo "not every Application is Synced and Healthy at main ${head:0:7} after 5 minutes:"
-  kubectl get applications -n argocd
+  echo "not every Application of the platform is Synced and Healthy at main ${head:0:7} after 5 minutes:"
+  platform_apps | jq -r '.[] | "  \(.metadata.name)\t\(.status.sync.status)\t\(.status.health.status)"' | column -t
   return 1
 }
 

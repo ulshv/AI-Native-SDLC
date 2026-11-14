@@ -2,7 +2,8 @@
 # The manifests Argo CD applies from this repository, rendered and checked before they get there
 # (CI's `manifests` job runs `check`):
 #   platform/manifests.sh render   one YAML stream: the Applications, every manifest of a directory
-#                                  source, the orchestrator's chart and the project files' ConfigMap
+#                                  source, the orchestrator's and a target project's charts, and the
+#                                  project files' ConfigMap
 #   platform/manifests.sh check    the stream through kubeconform, strict, against Kubernetes'
 #                                  schemas and the CRDs' (Argo CD, cert-manager, CloudNativePG); and
 #                                  the project files against project.schema.json
@@ -35,6 +36,8 @@ render() {
   done
   printf -- '---\n'
   helm template orchestrator platform/apps/orchestrator/chart --namespace sdlc --set image.tag=check
+  printf -- '---\n'
+  helm template project platform/apps/environments/project --set name=check --set repository=sdlc/check
   printf -- '---\n'
   "${KUSTOMIZE[@]}" platform/projects
 }

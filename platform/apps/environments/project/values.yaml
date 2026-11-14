@@ -1,0 +1,6 @@
+# Set per project by the ApplicationSet in ../projects.yaml, from its project.yaml.
+name: ""        # the project's name
+repository: ""  # its Gitea repository, owner/name
+environments: [dev, prod]
+# Pods per environment namespace: a chart that asks for hundreds cannot fill the node.
+maxPods: 10

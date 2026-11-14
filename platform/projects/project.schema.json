@@ -16,9 +16,10 @@
   ],
   "properties": {
     "name": {
-      "description": "The project's name, also the directory's. It is the project's identity: the orchestrator's threads and ticket links name it, so renaming a project leaves its threads behind.",
+      "description": "The project's name, also the directory's. It is the project's identity: the orchestrator's threads and ticket links name it, so renaming a project leaves its threads behind. It also names the project's Argo CD AppProject, hence never default, the platform's own.",
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]*$"
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "not": {"const": "default"}
     },
     "tracker": {
       "description": "The Plane project the loop takes tickets from.",

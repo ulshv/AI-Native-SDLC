@@ -475,7 +475,8 @@ an environment without a commit in the product's repository.
 ### 11. Environments with ApplicationSets
 
 - **dev and prod:** one ApplicationSet, git files generator over `platform/projects/*/project.yaml`
-  crossed with a list `[dev → development, prod → main]`. Each Application deploys the project's
+  crossed with a list `[dev → development, prod → main]` (the branches are the project file's
+  `repository.base` and `repository.release`). Each Application deploys the project's
   `deploy/chart` at that branch, with `image.tag=$ARGOCD_APP_REVISION` (D19), into
   `<project>-<env>`.
 - **Previews:** one ApplicationSet with a matrix of the git files generator and the
@@ -489,6 +490,14 @@ an environment without a commit in the product's repository.
   PR, with the TLS Secrets that cert-manager made in it. Release names keep previews apart, and
   cert-manager's `enableCertificateOwnerRef` removes a preview's Secret with its Certificate.
 - **The ApplicationSet controller** ran with zero replicas in `platform-core`; it is now on.
+- **An AppProject per project.** The chart comes from the product's repository, which agents
+  write to, and a preview deploys a branch no person has reviewed. So the platform, not the
+  chart, makes each project's AppProject and namespaces (an ApplicationSet over the same project
+  files and a small chart of the platform's): the AppProject admits that repository only, the
+  project's own `<project>-<env>` namespaces only, and nothing cluster-scoped. Its namespaces
+  enforce the restricted Pod Security Standard and cap the number of pods. Not yet covered: an
+  Ingress of the chart may claim any host Traefik serves, and its pods may reach the platform's
+  services. All of it lives in `platform/apps/environments/`.
 - **The label and the QA stand:** when the apply run reports `code_ready`, the orchestrator adds
   `preview` to the PR and moves the item to Deploying to QA. It polls the preview's in-cluster
   service for `/version.json`, which every image of the product serves with the commit it was

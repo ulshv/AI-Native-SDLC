@@ -1,0 +1,5 @@
+apiVersion: v2
+name: project
+description: The platform's side of one target project's environments - its AppProject and namespaces.
+type: application
+version: 0.1.0

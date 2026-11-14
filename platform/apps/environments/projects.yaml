@@ -1,0 +1,43 @@
+# The platform's side of every target project (design decision 11): for each file
+# platform/projects/*/project.yaml, its AppProject and its environments' namespaces, from the
+# chart in ./project. Deleting a project's file deletes them, and its environments with them.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: projects
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
+        revision: main
+        files:
+          - path: platform/projects/*/project.yaml
+  template:
+    metadata:
+      name: "project-{{ .name }}"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: argocd
+      source:
+        repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
+        targetRevision: main
+        path: platform/apps/environments/project
+        helm:
+          parameters:
+            - name: name
+              value: "{{ .name }}"
+            - name: repository
+              value: "{{ .repository.gitea }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - ServerSideApply=true
