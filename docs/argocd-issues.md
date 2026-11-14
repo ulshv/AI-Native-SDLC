@@ -62,3 +62,22 @@ Only do it once the commit after the red one is green; otherwise the new operati
 
 The same holds for every Application that takes its image tag from `$ARGOCD_APP_REVISION` with
 a hook waiting for it; the orchestrator is the only one today.
+
+---
+
+## An environment runs ahead of its image
+
+**Seen** 2026-11-14 on the preview `ewa-7` (task 9.3), with the product's CI switched off on
+purpose: the Application stayed Synced and Degraded, its pod in `ImagePullBackOff`, for as long
+as the pull request was open.
+
+**Why.** dev, prod and previews take the image tag from the commit they deploy (D19), as the
+orchestrator does, and nothing waits for CI. Unlike the orchestrator's, the product's chart has
+no PreSync hook, so no sync is held back: the new ReplicaSet waits for its image while the old
+one keeps serving, and the pod starts as soon as CI pushes the image. A commit whose image never
+builds leaves the environment Degraded on the new ReplicaSet until a later commit replaces it.
+In Deploying to QA the orchestrator gives up waiting after 15 minutes and says why, with CI's
+run of the commit (`orchestrator/README.md`, Previews).
+
+**Lasting fix:** the same as above, CI moving the tag: an environment then only ever points at
+an image that exists.
