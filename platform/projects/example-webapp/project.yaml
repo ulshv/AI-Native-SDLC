@@ -18,8 +18,8 @@ repository:
 
 # Production; dev is dev.example-webapp.sdlc.internal, a preview ewa-12.qa.example-webapp.sdlc.internal.
 domain: example-webapp.sdlc.internal
-# Previews and the Deploying to QA phase come with group 9.
-previews: false
+# A preview of each pull request at <id>.qa.<domain>, such as ewa-12.qa.example-webapp.sdlc.internal.
+previews: true
 
 # What an implementation run must pass before it pushes (design decision 7).
 checks:

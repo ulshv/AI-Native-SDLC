@@ -19,12 +19,13 @@ src/orchestrator/
   policy.py      phases, rules (intent, phases, roles), explicit signals
   intents.py     reading a request with one model call
   replies.py     the agent's answers in its own words: to questions, and to what it could not read
+  previews.py    Deploying to QA: the wait for a pull request's preview to serve the pushed commit
   llm.py         the model provider's clients, chosen by the model's prefix
   logs.py        JSON logs through structlog, with the ids bound to a delivery, thread or run
   metrics.py     the Prometheus metrics at /metrics
   config.py      settings: config.yaml (ORCHESTRATOR_CONFIG) overlaid with the environment
   db.py          the pool, `migrate` (Alembic) and the schema revision check
-  migrations/    Alembic revisions of the tables (inbox, thread_link, pending_runs)
+  migrations/    Alembic revisions of the tables (inbox, thread_link, pending_runs, previews)
   queue.py       the leased event queue: one event per thread at a time, in arrival order
   worker.py      the workers that take events from the queue
   links.py       thread_link: a ticket, a pull request -> their thread
@@ -175,6 +176,10 @@ organization webhook. `plane_loop_project` checks Plane's webhook.
 
 - **Network:** a NetworkPolicy lets only Plane's and Gitea's namespaces reach the pod, and the
   webhooks need their signatures. `kubectl port-forward` comes from the node and still works.
+- **Previews:** in Deploying to QA, a thread waits in the table `previews` for
+  `http://<id>.<project>-preview.svc/version.json` to serve the commit the run pushed; the
+  watcher asks every 15 s, and after 15 minutes the code goes to review anyway, with CI's run of
+  the commit. The preview namespace's NetworkPolicy admits the orchestrator's pod for this.
 - **Probes:** `/livez` answers while the process does; `/readyz` while its database answers. A
   database outage takes the pod out of the Service and never gets it restarted.
 - **Logs:** one JSON line per record, with the `delivery`, `thread` and `run` it is about, so one

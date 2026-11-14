@@ -1,0 +1,65 @@
+# A preview of every pull request labelled preview in a target project with previews: true
+# (design decision 11): the project files crossed with each repository's labelled pull requests.
+# The preview id is the ticket's key from the branch, lower case (feat/EWA-12_x -> ewa-12;
+# pr-<number> for a branch without one). It is the Helm release in <project>-preview, so previews
+# share one namespace, and its host is <id>.qa.<domain>. It runs the pull request's head commit,
+# with that commit's image, and follows each push. Closing or merging the pull request, or taking
+# the label off, drops it from the generator, and Argo CD deletes the Application with everything
+# it made; cert-manager's enableCertificateOwnerRef takes the TLS Secret with the Certificate.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: previews
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: http://gitea-http.gitea.svc:3000/platform/ai-native-sdlc.git
+              revision: main
+              files:
+                - path: platform/projects/*/project.yaml
+            selector:
+              matchLabels: {previews: "true"}
+          # Uses the project file's repository, so it comes second.
+          - pullRequest:
+              gitea:
+                owner: '{{ index (splitList "/" .repository.gitea) 0 }}'
+                repo: '{{ index (splitList "/" .repository.gitea) 1 }}'
+                api: http://gitea-http.gitea.svc:3000
+                tokenRef: {secretName: gitea-previews, key: token}
+                labels: [preview]
+              requeueAfterSeconds: 60
+  template:
+    metadata:
+      name: '{{ .name }}-{{ regexFind "[A-Z][A-Z0-9]*-[0-9]+" .branch | lower | default (print "pr-" .number) }}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: "{{ .name }}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .name }}-preview"
+      source:
+        repoURL: "http://gitea-http.gitea.svc:3000/{{ .repository.gitea }}.git"
+        targetRevision: "{{ .head_sha }}"
+        path: deploy/chart
+        helm:
+          releaseName: '{{ regexFind "[A-Z][A-Z0-9]*-[0-9]+" .branch | lower | default (print "pr-" .number) }}'
+          parameters:
+            - name: host
+              value: '{{ regexFind "[A-Z][A-Z0-9]*-[0-9]+" .branch | lower | default (print "pr-" .number) }}.qa.{{ .domain }}'
+            - name: image.tag
+              value: "{{ .head_sha }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff: {duration: 30s, factor: 2, maxDuration: 5m}
+        syncOptions:
+          - ServerSideApply=true

@@ -495,9 +495,18 @@ an environment without a commit in the product's repository.
   chart, makes each project's AppProject and namespaces (an ApplicationSet over the same project
   files and a small chart of the platform's): the AppProject admits that repository only, the
   project's own `<project>-<env>` namespaces only, and nothing cluster-scoped. Its namespaces
-  enforce the restricted Pod Security Standard and cap the number of pods. Not yet covered: an
-  Ingress of the chart may claim any host Traefik serves, and its pods may reach the platform's
-  services. All of it lives in `platform/apps/environments/`.
+  enforce the restricted Pod Security Standard and cap the number of pods. All of it lives in
+  `platform/apps/environments/`.
+- **What a chart may not do (task 9.3).** Traefik serves every namespace, so an Ingress could
+  claim `gitea.sdlc.internal` or another project's host. A ValidatingAdmissionPolicy (built into
+  Kubernetes, no Kyverno) admits an Ingress in a project's namespace only for the host in the
+  namespace's `sdlc.internal/host` annotation, or under its `sdlc.internal/host-suffix`
+  (`qa.<domain>` for previews), with no default backend. The AppProject admits only a whitelist
+  of kinds (workloads, Services, ConfigMaps, Secrets, Ingresses, PVCs, HPAs, PDBs): a
+  NetworkPolicy of the chart's own would open what the platform's closes, and Traefik's
+  IngressRoutes, Gateway routes and cert-manager's resources would bypass the host check. Each
+  namespace's NetworkPolicy admits only Traefik (and, in previews, the orchestrator, for
+  `/version.json`) and lets pods reach DNS and the internet, nothing private.
 - **The label and the QA stand:** when the apply run reports `code_ready`, the orchestrator adds
   `preview` to the PR and moves the item to Deploying to QA. It polls the preview's in-cluster
   service for `/version.json`, which every image of the product serves with the commit it was

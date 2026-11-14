@@ -1,7 +1,8 @@
 """The orchestrator's entry point: settings, connections and clients for the agent (agent.py).
 
 orchestrator migrate   bring the schema to the newest revision (a Job before every rollout)
-orchestrator serve     the webhooks, the thread API, the workers and the agent runs' watcher
+orchestrator serve     the webhooks, the thread API, the workers, and the watchers of agent runs
+                       and previews
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from .api import create_app
 from .executor import Executor, KubernetesCluster
 from .links import Links
 from .policy import UNSURE
+from .previews import Previews
 from .projects import LiveProjects
 from .queue import PostgresQueue, Queue
 from .worker import Workers
@@ -73,6 +75,8 @@ def serve(settings: config.Settings, host: str, port: int) -> int:
         stop = threading.Event()
         queue, links = PostgresQueue(pool, settings.max_attempts), Links(pool)
         executor = executor_of(settings, pool, queue, stop)
+        previews = Previews(pool, queue)
+        threading.Thread(target=previews.run, args=(stop,), name="previews-watcher", daemon=True).start()
         the_agent = agent.Agent(
             projects=LiveProjects(settings.projects_dir),
             links=links,
@@ -86,6 +90,7 @@ def serve(settings: config.Settings, host: str, port: int) -> int:
                 settings.gitea_url, settings.gitea_token.get_secret_value(), settings.gitea_public_url
             ),
             executor=executor,
+            previews=previews,
             chat=llm.chat_model(
                 settings.intent_model,
                 settings.llm_base_url,

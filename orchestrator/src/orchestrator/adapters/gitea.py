@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from ..events import Actor, Event, Kind, PullRequest, Release, Source
 from ..http import Api, ApiError, marker_html
 from ..links import Link
+from ..ports import Build
 from .plane import header
 
 KIND = "gitea_pr"
@@ -229,6 +230,10 @@ def listing(answer: Any) -> list[dict[str, Any]]:
 # --- The CodeHost port on Gitea's API, as agent -------------------------------------------------
 
 
+# The status a build reports first when a commit has several runs: the worst.
+BUILD_ORDER = {"failure": 0, "cancelled": 0, "success": 2}
+
+
 class GiteaCodeHost:
     """The orchestrator's side of Gitea, with agent's token (Secret sdlc/gitea-agent). Gitea's
     branch protection decides what agent may merge (design decision 8)."""
@@ -315,6 +320,19 @@ class GiteaCodeHost:
     def close(self, repo: str, number: int) -> None:
         if self.api.json("GET", f"/repos/{repo}/pulls/{number}").get("state") != "closed":
             self.api.call("PATCH", f"/repos/{repo}/pulls/{number}", json={"state": "closed"})
+
+    def build(self, repo: str, commit: str) -> Build | None:
+        """The commit's workflow runs, the worst first: a failed one, then one still going, then
+        any; a run's status is its conclusion once it is completed."""
+        answer: dict[str, Any] = self.api.json("GET", f"/repos/{repo}/actions/runs", params={"head_sha": commit}) or {}
+        builds = [
+            Build(
+                status=str(r.get("conclusion") if r.get("status") == "completed" else r.get("status")),
+                url=str(r.get("html_url") or ""),
+            )
+            for r in listing(answer.get("workflow_runs"))
+        ]
+        return min(builds, key=lambda b: BUILD_ORDER.get(b.status, 1), default=None)
 
     def review_comments(self, repo: str, number: int, reviewer: str) -> list[str]:
         reviews = [

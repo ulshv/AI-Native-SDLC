@@ -1,20 +1,64 @@
-# One namespace per environment, made by the platform rather than by the product's chart. Pods in
-# it must meet the restricted Pod Security Standard, and only so many of them may run.
-{{- range .Values.environments }}
+# One namespace per environment, made by the platform rather than by the product's chart, which
+# may not touch it. Pods in it must meet the restricted Pod Security Standard, only so many of
+# them may run, and its annotation names the hosts its Ingresses may claim (ingress-hosts.yaml
+# checks them).
+{{- range include "project.environments" . | fromYamlArray }}
+{{- $ns := printf "%s-%s" $.Values.name .env }}
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: {{ $.Values.name }}-{{ . }}
+  name: {{ $ns }}
   labels:
     pod-security.kubernetes.io/enforce: restricted
+    sdlc.internal/project: {{ $.Values.name }}
+  annotations:
+    {{- if .host }}
+    sdlc.internal/host: {{ .host }}
+    {{- else }}
+    sdlc.internal/host-suffix: {{ .suffix }}
+    {{- end }}
 ---
 apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: pods
-  namespace: {{ $.Values.name }}-{{ . }}
+  namespace: {{ $ns }}
 spec:
   hard:
     pods: {{ $.Values.maxPods | quote }}
+---
+# Traefik reaches the pods, and in a preview the orchestrator too, for /version.json. The pods
+# reach each other in the namespace (an app and its database), the cluster's DNS and the
+# internet, and nothing else private: neither the platform's services, the node, nor the local
+# network.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: platform
+  namespace: {{ $ns }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: traefik}}
+        {{- if eq .env "preview" }}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: sdlc}}
+          podSelector: {matchLabels: {app.kubernetes.io/name: orchestrator}}
+        {{- end }}
+  egress:
+    - to:
+        - podSelector: {}
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
 {{- end }}

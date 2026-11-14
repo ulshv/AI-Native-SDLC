@@ -12,6 +12,8 @@ from conftest import FIXTURES
 from orchestrator import agent, intents
 from orchestrator.agent import Agent
 from orchestrator.links import Link, Links
+from orchestrator.ports import Build
+from orchestrator.previews import event
 from orchestrator.projects import Projects
 from orchestrator.queue import Delivery, PostgresQueue
 
@@ -45,6 +47,7 @@ class FakeTracker:
 class FakeCodeHost:
     def __init__(self):
         self.prs, self.comments, self.merged, self.closed, self.labels = {}, [], [], [], []
+        self.builds = {}
 
     def find_or_open_pr(self, repo, head, base, title, body):
         for n, pr in self.prs.items():
@@ -77,6 +80,9 @@ class FakeCodeHost:
     def review_comments(self, repo, number, reviewer):
         return ["src/orders.ts:4: keep the filter after reload"]
 
+    def build(self, repo, commit):
+        return self.builds.get(commit)
+
 
 class FakeExecutor:
     def __init__(self):
@@ -88,6 +94,20 @@ class FakeExecutor:
     def start(self, run):
         self.runs.setdefault(run.name, run)
         return "started"
+
+
+class FakePreviews:
+    """The threads' waits for their previews; the test says when a preview serves its commit."""
+
+    def __init__(self):
+        self.waits, self.forgotten = {}, []
+
+    def watch(self, thread_id, url, commit):
+        self.waits[thread_id] = (url, commit)
+
+    def forget(self, thread_id):
+        self.waits.pop(thread_id, None)
+        self.forgotten.append(thread_id)
 
 
 class FakeChat:
@@ -127,6 +147,7 @@ def world(pool, database_url):
             tracker=FakeTracker(),
             code_host=FakeCodeHost(),
             executor=FakeExecutor(),
+            previews=FakePreviews(),
             chat=FakeChat(),
             reply=FakeReply(),
             agent_model="llm/deepseek/deepseek-v4-flash-0731",
@@ -165,6 +186,15 @@ def world(pool, database_url):
                     {"job": run.name, "thread_id": run.thread_id, "succeeded": True, "result": result},
                 )
                 self.drain()
+
+            def preview(self, served, commit=None):
+                """The watcher's word on the thread's preview: it serves the commit, or the wait is over."""
+                thread_id = self.svc.links.thread_of(Link.parse(ITEM))
+                url, watched = self.svc.previews.waits.pop(thread_id)
+                delivery_id, payload = event(thread_id, commit or watched, served, since=str(self.n))
+                self.queue.put("preview", delivery_id, thread_id, payload)
+                self.drain()
+                return url
 
             def drain(self):
                 while self.queue.process(self.dispatch):
@@ -212,7 +242,11 @@ def test_from_assignment_to_a_merge_into_development(world):
     assert world.item.phase == "Implementing" and world.runs[-1] == "ewa-1-apply-2"
 
     world.finish({"result": "code_ready", "commit": "b2"})
-    assert world.item.phase == "Code review"
+    assert world.item.phase == "Deploying to QA" and world.svc.code_host.labels == [(3, "preview")]
+    assert "https://ewa-1.qa.example-webapp.sdlc.internal" in world.svc.code_host.comments[-1][2]
+    url = world.preview(served=True)
+    assert url == "http://ewa-1.example-webapp-preview.svc/version.json"
+    assert world.item.phase == "Code review" and "its preview is up" in world.svc.code_host.comments[-1][2]
 
     chat["@agent ok, merge it into dev"] = ("merge", 0.9)
     world.hook("gitea", "review_approved", sender__login="sergey")
@@ -220,7 +254,14 @@ def test_from_assignment_to_a_merge_into_development(world):
 
     world.finish({"result": "archived", "commit": "c3"})
     assert world.item.phase == "On dev" and world.svc.code_host.merged == [3]
-    assert world.svc.tracker.statuses == ["Drafting", "Spec review", "Implementing", "Code review", "On dev"]
+    assert world.svc.tracker.statuses == [
+        "Drafting",
+        "Spec review",
+        "Implementing",
+        "Deploying to QA",
+        "Code review",
+        "On dev",
+    ]
     chat["@agent looks good, go ahead"] = ("archive", 0.9)
     world.hook("plane", "comment_mention_agent")
     assert world.svc.tracker.comments[-1][1] == "The change of EWA-1 is archived already."
@@ -501,3 +542,62 @@ def test_an_event_recorded_under_its_object_after_the_thread_was_linked_waits_in
     world.drain()
     with world.svc.queue.pool.connection() as conn:
         assert conn.execute("SELECT processed_at IS NOT NULL FROM inbox WHERE delivery_id = 'late'").fetchone()[0]
+
+
+def to_deploying(world, commit="b2"):
+    assign(world)
+    world.finish({"result": "spec_ready"})
+    world.svc.chat.answers["@agent looks good, go ahead"] = ("approve", 0.95)
+    world.hook("plane", "comment_mention_agent")
+    world.finish({"result": "code_ready", "commit": commit})
+    assert world.item.phase == "Deploying to QA"
+
+
+def test_a_preview_that_does_not_come_up_sends_the_code_to_review_with_the_reason(world):
+    to_deploying(world)
+    world.svc.code_host.builds["b2"] = Build(
+        status="failure", url="https://gitea.sdlc.internal/sdlc/example-webapp/actions/runs/7"
+    )
+    world.preview(served=False)
+    said = world.svc.code_host.comments[-1][2]
+    assert world.item.phase == "Code review"
+    assert "did not serve b2 within 15 minutes" in said and "failure: https://gitea.sdlc.internal" in said
+
+
+def test_a_fix_waits_for_its_own_commit_in_the_preview_and_a_stale_check_is_dropped(world):
+    to_deploying(world)
+    world.preview(served=True)
+    world.svc.chat.answers["@agent please keep the filter after reload"] = ("request_changes", 0.9)
+    world.hook("gitea", "review_request_changes", sender__login="sergey")
+    world.finish({"result": "code_ready", "commit": "c3"})
+    assert world.item.phase == "Deploying to QA" and world.item.deploying.commit == "c3"
+    thread_id = world.svc.links.thread_of(Link.parse(ITEM))
+    delivery_id, payload = event(thread_id, "b2", True, since="late")
+    world.queue.put("preview", delivery_id, thread_id, payload)
+    world.drain()
+    assert world.item.phase == "Deploying to QA", "a check of the old commit does not count"
+    world.preview(served=True)
+    assert (
+        world.item.phase == "Code review"
+        and "The fix is ready, and its preview is up" in world.svc.code_host.comments[-1][2]
+    )
+
+
+def test_closing_an_item_that_waits_for_its_preview_ends_the_wait(world):
+    to_deploying(world)
+    world.hook("plane", "issue_state_closed")
+    thread_id = world.svc.links.thread_of(Link.parse(ITEM))
+    assert world.item.phase == "Closed" and world.item.deploying is None
+    assert world.svc.previews.forgotten == [thread_id] and thread_id not in world.svc.previews.waits
+
+
+def test_a_failed_lookup_of_the_build_does_not_keep_the_code_from_review(world):
+    to_deploying(world)
+
+    def down(repo, commit):
+        raise RuntimeError("gitea is down")
+
+    world.svc.code_host.build = down
+    world.preview(served=False)
+    assert world.item.phase == "Code review"
+    assert "CI's run of it could not be looked up" in world.svc.code_host.comments[-1][2]

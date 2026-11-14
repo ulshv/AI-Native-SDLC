@@ -883,12 +883,13 @@ create_agent_runner_token() {
   new_user_token agent-runner agent-runs write:repository | store_token sdlc-agents/gitea-agent-runner agent-runner
 }
 
-# Team memberships, "<org> <team> <member> <unit=access,...>". Packages belong to an
+# Team memberships, "<org> <team> <member> <unit=access,...>". reader reads sdlc's pull requests
+# too, for the preview generator (argocd_previews_token_works). Packages belong to an
 # organization, not to a repository, so pushing and pulling images needs a team. The platform's
 # repository and images live in their own organization, platform: the products' CI can reach sdlc
 # only, so a workflow an agent changed cannot touch the platform's code, releases or images.
 TEAMS=(
-  "sdlc readers reader repo.code=read,repo.packages=read"
+  "sdlc readers reader repo.code=read,repo.pulls=read,repo.packages=read"
   "platform readers reader repo.code=read,repo.packages=read"
   "sdlc ci ci repo.code=read,repo.packages=write,repo.releases=write"
   "platform ci ci-platform repo.packages=write"
@@ -1062,6 +1063,13 @@ create_argocd_creds() {
   kubectl delete secret -n argocd repo-ai-native-sdlc --ignore-not-found >/dev/null
 }
 
+# The preview ApplicationSet lists the target projects' labelled pull requests through Gitea's
+# API, with reader's token (design decision 11).
+argocd_previews_token_works() { token_is reader "$(cluster_secret argocd/gitea-previews token)"; }
+create_argocd_previews_token() {
+  new_user_token reader argocd-previews read:repository read:issue | store_token argocd/gitea-previews reader
+}
+
 origin_is_gitea() { [[ $(git remote get-url origin 2>/dev/null) == "$GITEA_REMOTE" ]]; }
 
 # The previous origin is kept as "github", so nothing it references is lost.
@@ -1153,6 +1161,7 @@ phase_repository() {
   step "service accounts ${SERVICE_ACCOUNTS[*]} exist" service_accounts_exist create_service_accounts
   step "teams: reader reads sdlc and platform, ci pushes to sdlc, ci-platform to platform" teams_current ensure_teams
   step "Argo CD reads every platform/ and sdlc/ repository with reader's token" argocd_creds_work create_argocd_creds
+  step "the preview generator lists sdlc's pull requests with reader's token (argocd/gitea-previews)" argocd_previews_token_works create_argocd_previews_token
   step "agent's token in sdlc/gitea-agent works" agent_token_works create_agent_token
   step "agent-runner's token in sdlc-agents/gitea-agent-runner works" agent_runner_token_works create_agent_runner_token
   step "CI push tokens are Actions secrets (sdlc: CI_REGISTRY_TOKEN, $GITEA_REPO: PLATFORM_REGISTRY_TOKEN)" ci_tokens_current create_ci_tokens

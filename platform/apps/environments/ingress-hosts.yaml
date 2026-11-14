@@ -1,0 +1,51 @@
+# An Ingress in a target project's namespace claims only that environment's hosts (design
+# decision 11): the namespace's sdlc.internal/host, or names under its sdlc.internal/host-suffix.
+# Traefik serves every namespace, so without this a chart an agent wrote could take over
+# gitea.sdlc.internal or another project's host. The platform makes the namespaces and their
+# annotations (project/templates/namespaces.yaml); the chart cannot change them.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: environment-ingress-hosts
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [networking.k8s.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [ingresses]
+  variables:
+    - name: annotations
+      expression: "has(namespaceObject.metadata.annotations) ? namespaceObject.metadata.annotations : {}"
+    - name: host
+      expression: "'sdlc.internal/host' in variables.annotations ? variables.annotations['sdlc.internal/host'] : ''"
+    - name: suffix
+      expression: "'sdlc.internal/host-suffix' in variables.annotations ? variables.annotations['sdlc.internal/host-suffix'] : ''"
+  validations:
+    - expression: "!has(object.spec.defaultBackend)"
+      message: an environment's Ingress names its hosts; a default backend would take any
+    - expression: >-
+        has(object.spec.rules) && object.spec.rules.all(r, has(r.host) &&
+        (r.host == variables.host || (variables.suffix != '' && r.host.endsWith('.' + variables.suffix))))
+      messageExpression: >-
+        'a rule claims a host this environment may not: allowed are ' +
+        (variables.host != '' ? variables.host : '*.' + variables.suffix)
+    - expression: >-
+        !has(object.spec.tls) || object.spec.tls.all(t, !has(t.hosts) || t.hosts.all(h,
+        h == variables.host || (variables.suffix != '' && h.endsWith('.' + variables.suffix))))
+      messageExpression: >-
+        'a TLS entry names a host this environment may not: allowed are ' +
+        (variables.host != '' ? variables.host : '*.' + variables.suffix)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: environment-ingress-hosts
+spec:
+  policyName: environment-ingress-hosts
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - {key: sdlc.internal/project, operator: Exists}

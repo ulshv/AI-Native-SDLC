@@ -23,6 +23,7 @@ from .model import (
     Command,
     Intake,
     PrChanged,
+    PreviewChecked,
     Request,
     RunFinished,
     RunResult,
@@ -78,6 +79,25 @@ def result_of(payload: dict[str, Any]) -> RunResult:
         return RunResult(result="failed", reason=f"the run's result has no usable shape: {error.errors()[0]['msg']}")
 
 
+def run_finished(delivery: Delivery) -> RunFinished:
+    return RunFinished(
+        delivery=f"job/{delivery.delivery_id}", job=delivery.payload.get("job", ""), result=result_of(delivery.payload)
+    )
+
+
+def preview_checked(delivery: Delivery) -> PreviewChecked:
+    return PreviewChecked(
+        delivery=f"preview/{delivery.delivery_id}",
+        commit=delivery.payload["commit"],
+        served=bool(delivery.payload["served"]),
+    )
+
+
+# The orchestrator's own events (an agent run's result, a preview's check) name their thread
+# themselves and need no reading.
+OWN: dict[str, Callable[[Delivery], Command]] = {"job": run_finished, "preview": preview_checked}
+
+
 class Threads(Protocol):
     def item(self, thread_id: str) -> WorkItem: ...
 
@@ -113,13 +133,8 @@ class Dispatcher:
         }
 
     def __call__(self, delivery: Delivery) -> None:
-        if delivery.source == "job":  # an agent run's result names its thread itself
-            result = RunFinished(
-                delivery=f"job/{delivery.delivery_id}",
-                job=delivery.payload.get("job", ""),
-                result=result_of(delivery.payload),
-            )
-            self.threads.run(delivery.payload["thread_id"], result)
+        if own := OWN.get(delivery.source):
+            self.threads.run(delivery.payload["thread_id"], own(delivery))
             return
         adapter = self.adapters.get(delivery.source)
         event = adapter(delivery) if adapter else None

@@ -29,6 +29,8 @@ from .model import (
     Mode,
     Paused,
     PrChanged,
+    Preview,
+    PreviewChecked,
     Request,
     RunFinished,
     RunResult,
@@ -40,7 +42,8 @@ from .model import (
     WorkItem,
 )
 from .policy import ENGINEERS, MEMBERS, OPEN, PEOPLE, Intent, Phase, Policy, Rule
-from .ports import CodeHost, RunStarter, Tracker
+from .ports import CodeHost, PreviewWatch, RunStarter, Tracker
+from .previews import MINUTES, preview_url, version_url
 from .projects import Project
 from .replies import Facts, Reply
 
@@ -57,6 +60,7 @@ class Ports:
     executor: RunStarter | None
     agent_model: str
     reply: Reply  # the agent's answers in its own words (replies.py)
+    previews: PreviewWatch
 
 
 @dataclass
@@ -171,11 +175,14 @@ class Step:
 
     def stop(self) -> None:
         """The item moved on: the run going on is cancelled (its result would no longer count),
-        and questions asked before wait for no answer."""
+        questions asked before wait for no answer, and no preview is waited for."""
         if self.item.running and self.ports.executor:
             self.ports.executor.cancel(self.item.running.name(self.key))
+        if self.item.deploying:
+            self.ports.previews.forget(self.thread_id)
         self.item.running = None
         self.item.paused = None
+        self.item.deploying = None
 
     def facts(self, r: Request, unclear: bool) -> Facts:
         """What a reply to this request may build on: the item as the code knows it, and what the
@@ -404,16 +411,25 @@ def spec_ready(s: Step, run: AgentRun, result: RunResult) -> None:
 
 
 READY = {Mode.APPLY: "The code is ready for review", Mode.FIX: "The fix is ready"}
+NEXT = "Approve it, or ask @agent to merge it into dev."
 
 
 def code_ready(s: Step, run: AgentRun, result: RunResult) -> None:
-    """The code goes to review; with previews on, through a preview deployment first."""
+    """The code goes to review; with previews on, after its preview serves the pushed commit
+    (design decision 11). The label makes Argo CD deploy the pull request; the watch tells the
+    thread when the preview serves the commit, or when the wait is over."""
     s.item.feedback = ""
-    if s.project.previews:
-        s.label("preview")
-    s.phase(Phase.DEPLOYING if s.project.previews else Phase.CODE_REVIEW)
+    ready = READY.get(run.mode, READY[Mode.APPLY])
     where = s.item.fix_reply if run.mode == Mode.FIX else Where.PR
-    s.say(READY.get(run.mode, READY[Mode.APPLY]) + ". Approve it, or ask @agent to merge it into dev.", where)
+    if not (s.project.previews and result.commit):
+        s.phase(Phase.CODE_REVIEW)
+        s.say(f"{ready}. {NEXT}", where)
+        return
+    s.label("preview")
+    s.item.deploying = Preview(commit=result.commit, mode=run.mode, where=where)
+    s.ports.previews.watch(s.thread_id, version_url(s.project, s.key), result.commit)
+    s.phase(Phase.DEPLOYING)
+    s.say(f"{ready}. Deploying its preview to {preview_url(s.project, s.key)}; review comes once it is up.", where)
 
 
 def archived(s: Step, run: AgentRun, result: RunResult) -> None:
@@ -447,6 +463,43 @@ def run_finished(s: Step, c: RunFinished) -> None:
         return
     s.item.running = None
     OUTCOMES.get(c.result.result, failed)(s, run, c.result)
+
+
+def preview_checked(s: Step, c: PreviewChecked) -> None:
+    """The preview serves the commit, or the wait is over: the code goes to review either way,
+    with the link, or with what kept the preview from coming up. A check of another commit than
+    the one waited for (the item moved on) is dropped."""
+    deploying = s.item.deploying
+    if s.item.phase != Phase.DEPLOYING or deploying is None or deploying.commit != c.commit:
+        log.info("preview check of %s dropped: the item waits for no preview of it", c.commit[:12])
+        return
+    s.item.deploying = None
+    s.phase(Phase.CODE_REVIEW)
+    ready, url = READY.get(deploying.mode, READY[Mode.APPLY]), preview_url(s.project, s.key)
+    if c.served:
+        s.say(f"{ready}, and its preview is up: {url}. {NEXT}", deploying.where)
+        return
+    why = why_no_preview(s, c.commit)
+    s.say(
+        f"{ready}, but its preview did not serve {c.commit[:7]} within {MINUTES} minutes: {why}. "
+        f"Review it without the preview, or ask @agent to fix it. {NEXT}",
+        deploying.where,
+    )
+
+
+def why_no_preview(s: Step, commit: str) -> str:
+    """CI builds the image a preview runs: its run of the commit says what went wrong. Only a
+    hint: a failed lookup must not keep the code from review, so it says so instead."""
+    try:
+        build = s.ports.code_host.build(s.repo, commit)
+    except Exception:
+        log.warning("CI's run of %s could not be looked up", commit[:12], exc_info=True)
+        return "CI's run of it could not be looked up"
+    if build is None:
+        return "CI has no run of it"
+    if build.status == "success":
+        return f"CI built it ({build.url}), so look at the preview's Application in Argo CD"
+    return f"CI's run of it is {build.status}: {build.url}"
 
 
 # --- what follows an archive ---------------------------------------------------------------------
@@ -520,6 +573,7 @@ STEPS: dict[type, Callable[[Step, Any], None]] = {
     RunFinished: run_finished,
     PrChanged: pr_changed,
     StatusSet: status_set,
+    PreviewChecked: preview_checked,
     StepFailed: step_failed,
 }
 

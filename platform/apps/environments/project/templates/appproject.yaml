@@ -1,7 +1,10 @@
 # What the project's own chart may deploy. The chart lives in the product's repository, which
-# agents write to, so it is not trusted as the platform's files are: it may come only from that
-# repository, go only into this project's environment namespaces, and hold nothing cluster-wide
-# (no ClusterRole, no CRD, no Namespace).
+# agents write to, and a preview runs a branch no person has reviewed, so it is not trusted as the
+# platform's files are: it may come only from that repository, go only into this project's
+# environment namespaces, hold nothing cluster-wide, and only the kinds below. Left out on
+# purpose: NetworkPolicy (one of its own would open what the platform's closes), RBAC, quotas,
+# Traefik's IngressRoutes and Gateway routes (hosts that ../ingress-hosts.yaml does not see), and
+# cert-manager's resources (a certificate for any name the local CA signs).
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -12,8 +15,21 @@ spec:
   sourceRepos:
     - http://gitea-http.gitea.svc:3000/{{ required "repository is required" .Values.repository }}.git
   destinations:
-  {{- range .Values.environments }}
+  {{- range include "project.environments" . | fromYamlArray }}
     - server: https://kubernetes.default.svc
-      namespace: {{ $.Values.name }}-{{ . }}
+      namespace: {{ $.Values.name }}-{{ .env }}
   {{- end }}
   clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - {group: "", kind: ConfigMap}
+    - {group: "", kind: Secret}
+    - {group: "", kind: Service}
+    - {group: "", kind: ServiceAccount}
+    - {group: "", kind: PersistentVolumeClaim}
+    - {group: apps, kind: Deployment}
+    - {group: apps, kind: StatefulSet}
+    - {group: batch, kind: Job}
+    - {group: batch, kind: CronJob}
+    - {group: autoscaling, kind: HorizontalPodAutoscaler}
+    - {group: policy, kind: PodDisruptionBudget}
+    - {group: networking.k8s.io, kind: Ingress}

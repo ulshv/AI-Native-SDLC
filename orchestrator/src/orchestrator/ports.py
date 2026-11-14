@@ -4,10 +4,19 @@ Gitea implement them today; another tracker, a chat or a tool behind MCP can imp
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from .executor import Run
 from .links import Link
+
+
+@dataclass(frozen=True)
+class Build:
+    """A CI run of a commit, as people see it: its status (running, success, failure...) and address."""
+
+    status: str
+    url: str
 
 
 class Tracker(Protocol):
@@ -55,6 +64,21 @@ class CodeHost(Protocol):
 
     def review_comments(self, repo: str, number: int, reviewer: str) -> list[str]:
         """The latest review's inline comments by that person, which the webhook leaves out."""
+        ...
+
+    def build(self, repo: str, commit: str) -> Build | None:
+        """The latest CI run of the commit, or None when there is none."""
+        ...
+
+
+class PreviewWatch(Protocol):
+    def watch(self, thread_id: str, url: str, commit: str) -> None:
+        """Waits for the address to serve the commit; the thread hears when it does, or when the
+        wait is over. Watching a thread again replaces its wait."""
+        ...
+
+    def forget(self, thread_id: str) -> None:
+        """The thread waits for no preview any more."""
         ...
 
 

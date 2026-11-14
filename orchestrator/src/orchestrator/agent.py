@@ -28,7 +28,7 @@ from .dispatch import Dispatcher
 from .links import Links
 from .logs import bound
 from .model import COMMANDS, Command, Intake, StepFailed, WorkItem
-from .ports import CodeHost, RunStarter, Tracker
+from .ports import CodeHost, PreviewWatch, RunStarter, Tracker
 from .projects import Projects
 from .queue import Delivery, Queue
 from .replies import Reply
@@ -72,6 +72,7 @@ class Agent:
         tracker: Tracker,
         code_host: CodeHost,
         executor: RunStarter | None,
+        previews: PreviewWatch,
         chat: BaseChatModel,
         reply: Reply,
         agent_model: str,
@@ -80,7 +81,7 @@ class Agent:
         max_attempts: int = 5,
     ) -> None:
         self.projects, self.max_attempts = projects, max_attempts
-        self.ports = machine.Ports(tracker, code_host, links, executor, agent_model, reply)
+        self.ports = machine.Ports(tracker, code_host, links, executor, agent_model, reply, previews)
         self.dispatcher = Dispatcher(projects, links, queue, tracker, code_host, chat, threshold, self)
         graph = StateGraph(State)
         graph.add_node("step", self._step)

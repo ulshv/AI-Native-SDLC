@@ -25,3 +25,6 @@ cainjector:
       memory: 64Mi
     limits:
       memory: 256Mi
+# A Certificate owns its Secret, so a preview's TLS Secret goes when Argo CD deletes the preview
+# (design decision 11): previews share a namespace, which stays.
+enableCertificateOwnerRef: true

@@ -35,6 +35,10 @@ spec:
               value: "{{ .name }}"
             - name: repository
               value: "{{ .repository.gitea }}"
+            - name: domain
+              value: "{{ .domain }}"
+            - name: previews
+              value: "{{ .previews }}"
       syncPolicy:
         automated:
           prune: true

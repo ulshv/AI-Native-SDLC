@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from .model import Message
+from .previews import MINUTES
 
 log = logging.getLogger(__name__)
 
@@ -46,8 +47,9 @@ Reply = Callable[[Facts], str]
 
 LOOP = """A ticket assigned to @agent goes: Drafting (the agent writes a spec) -> Spec review
 (people approve it or ask for changes) -> Implementing (the agent writes the code in the same pull
-request) -> Code review (people approve, ask for changes, or ask @agent to merge it into
-development) -> On dev (merged into development) -> Released. Needs info: the agent waits for
+request) -> Deploying to QA (in projects with previews: the pull request's preview is deployed,
+and its link posted; at most {minutes} minutes) -> Code review (people approve, ask for changes, or ask
+@agent to merge it into development) -> On dev (merged into development) -> Released. Needs info: the agent waits for
 answers. Closed: dropped. People act by writing to @agent in the ticket or the pull request, or by
 setting the ticket's status."""
 
@@ -88,7 +90,7 @@ def prompt(facts: Facts) -> str:
     conversation = "\n".join(f"{m.author}: {m.text[:500]}" for m in facts.conversation[-HISTORY:])
     return PROMPT.format(
         project=facts.project,
-        loop=LOOP,
+        loop=LOOP.format(minutes=MINUTES),
         key=facts.key or "(none yet)",
         title=facts.title,
         phase=facts.phase or "not in the loop",

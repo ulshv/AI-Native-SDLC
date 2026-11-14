@@ -11,6 +11,7 @@ import pytest
 from orchestrator.adapters.gitea import GiteaCodeHost
 from orchestrator.adapters.plane import PlaneTracker
 from orchestrator.http import MAX_WAIT, Api, ApiError, rate_limit_wait
+from orchestrator.ports import Build
 
 
 class FakePlane:
@@ -192,6 +193,26 @@ def test_a_closed_pull_request_of_the_branch_does_not_count():
     first = host.find_or_open_pr("sdlc/example-webapp", "feat/EWA-12_x", "development", "t", "b")
     host.close("sdlc/example-webapp", first)
     assert host.find_or_open_pr("sdlc/example-webapp", "feat/EWA-12_x", "development", "t", "b") == first + 1
+
+
+def test_a_commits_build_is_its_worst_workflow_run():
+    def runs(request):
+        assert request.url.path == "/api/v1/repos/sdlc/x/actions/runs"
+        sha = request.url.params["head_sha"]
+        listed = {
+            "b2": [
+                {"status": "completed", "conclusion": "success", "html_url": "u/1"},
+                {"status": "in_progress", "conclusion": "", "html_url": "u/2"},
+                {"status": "completed", "conclusion": "failure", "html_url": "u/3"},
+            ],
+            "c3": [{"status": "in_progress", "conclusion": "", "html_url": "u/4"}],
+        }
+        return httpx.Response(200, json={"workflow_runs": listed.get(sha, []), "total_count": 0})
+
+    host = gitea(runs)
+    assert host.build("sdlc/x", "b2") == Build(status="failure", url="u/3")
+    assert host.build("sdlc/x", "c3") == Build(status="in_progress", url="u/4")
+    assert host.build("sdlc/x", "d4") is None
 
 
 def answers(*statuses):

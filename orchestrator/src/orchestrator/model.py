@@ -72,6 +72,15 @@ class Paused(BaseModel):
     questions: list[str] = Field(default_factory=list)
 
 
+class Preview(BaseModel):
+    """Deploying to QA: the commit the item waits to see in its preview, and how the ready code is
+    announced once it does (or once the wait is over)."""
+
+    commit: str
+    mode: Mode
+    where: Where
+
+
 class Answer(BaseModel):
     question: str = ""
     answer: str
@@ -90,6 +99,7 @@ class WorkItem(BaseModel):
     runs: int = 0  # every run of the thread, so a run's name is never used twice
     running: AgentRun | None = None
     paused: Paused | None = None
+    deploying: Preview | None = None
     answers: list[Answer] = Field(default_factory=list[Answer])
     feedback: str = ""
     fix_reply: Where = Where.PR  # where the result of a fix is announced: where it was asked for
@@ -169,6 +179,7 @@ class RunResult(BaseModel):
     model_config = ConfigDict(extra="allow")
     result: str = "failed"
     reason: str = ""
+    commit: str = ""  # what the run pushed
     questions: list[str] = Field(default_factory=list)
 
 
@@ -192,6 +203,14 @@ class StatusSet(CommandBase):
     status: str
 
 
+class PreviewChecked(CommandBase):
+    """The preview of the item's pull request serves the commit (served), or the wait for it is over."""
+
+    kind: Literal["preview"] = "preview"
+    commit: str
+    served: bool
+
+
 class StepFailed(CommandBase):
     """A step of the thread failed every time it was tried, and its event was given up."""
 
@@ -199,5 +218,7 @@ class StepFailed(CommandBase):
     reason: str
 
 
-Command = Annotated[Intake | Request | RunFinished | PrChanged | StatusSet | StepFailed, Field(discriminator="kind")]
+Command = Annotated[
+    Intake | Request | RunFinished | PrChanged | StatusSet | PreviewChecked | StepFailed, Field(discriminator="kind")
+]
 COMMANDS: TypeAdapter[Command] = TypeAdapter(Command)

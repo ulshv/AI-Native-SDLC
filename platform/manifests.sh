@@ -37,7 +37,8 @@ render() {
   printf -- '---\n'
   helm template orchestrator platform/apps/orchestrator/chart --namespace sdlc --set image.tag=check
   printf -- '---\n'
-  helm template project platform/apps/environments/project --set name=check --set repository=sdlc/check
+  helm template project platform/apps/environments/project --set name=check --set repository=sdlc/check \
+    --set domain=check.sdlc.internal --set previews=true
   printf -- '---\n'
   "${KUSTOMIZE[@]}" platform/projects
 }
