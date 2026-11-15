@@ -70,6 +70,20 @@ class CodeHost(Protocol):
         """The latest CI run of the commit, or None when there is none."""
         ...
 
+    def branches_of(self, repo: str, number: int) -> tuple[str, str]:
+        """A pull request's head and base branch."""
+        ...
+
+    def tags(self, repo: str) -> list[str]: ...
+
+    def unreleased(self, repo: str, release: str, base: str) -> list[str]:
+        """The messages of the commits the base branch has and the release branch lacks."""
+        ...
+
+    def describe(self, repo: str, number: int, title: str, body: str) -> None:
+        """Sets a pull request's title and description."""
+        ...
+
 
 class PreviewWatch(Protocol):
     def watch(self, thread_id: str, url: str, commit: str) -> None:

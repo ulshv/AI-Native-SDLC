@@ -215,6 +215,37 @@ def test_a_commits_build_is_its_worst_workflow_run():
     assert host.build("sdlc/x", "d4") is None
 
 
+def test_gitea_reads_tags_unreleased_commits_and_branches_and_describes_a_pull_request():
+    calls = []
+
+    def fake(request):
+        calls.append((request.method, request.url.path, dict(request.url.params)))
+        path = request.url.path.removeprefix("/api/v1/repos/sdlc/x")
+        if path == "/tags":
+            return httpx.Response(200, json=[{"name": "v0.1.0"}, {"name": "v0.2.0"}])
+        if path == "/commits":
+            return httpx.Response(
+                200,
+                json=[{"commit": {"message": "Merge pull request 'EWA-1: a' (#3) from feat/EWA-1_a into development"}}],
+            )
+        if path == "/pulls/7" and request.method == "GET":
+            return httpx.Response(200, json={"head": {"ref": "development"}, "base": {"ref": "main"}})
+        if path == "/pulls/7" and request.method == "PATCH":
+            return httpx.Response(200, json={})
+        return httpx.Response(404)
+
+    host = gitea(fake)
+    assert host.tags("sdlc/x") == ["v0.1.0", "v0.2.0"]
+    assert host.unreleased("sdlc/x", "main", "development") == [
+        "Merge pull request 'EWA-1: a' (#3) from feat/EWA-1_a into development"
+    ]
+    commits = next(params for method, path, params in calls if path.endswith("/commits"))
+    assert commits["sha"] == "development" and commits["not"] == "main" and commits["files"] == "false"
+    assert host.branches_of("sdlc/x", 7) == ("development", "main")
+    host.describe("sdlc/x", 7, "Release 0.3.0", "- EWA-1")
+    assert calls[-1][:2] == ("PATCH", "/api/v1/repos/sdlc/x/pulls/7")
+
+
 def answers(*statuses):
     """A transport answering with these statuses in turn, and the calls it got."""
     calls, left = [], list(statuses)

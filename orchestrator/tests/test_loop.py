@@ -47,7 +47,7 @@ class FakeTracker:
 class FakeCodeHost:
     def __init__(self):
         self.prs, self.comments, self.merged, self.closed, self.labels = {}, [], [], [], []
-        self.builds = {}
+        self.builds, self.tag_names, self.unreleased_commits, self.descriptions = {}, [], [], {}
 
     def find_or_open_pr(self, repo, head, base, title, body):
         for n, pr in self.prs.items():
@@ -82,6 +82,18 @@ class FakeCodeHost:
 
     def build(self, repo, commit):
         return self.builds.get(commit)
+
+    def branches_of(self, repo, number):
+        return self.prs.get(number, ("feat/x", "development"))
+
+    def tags(self, repo):
+        return list(self.tag_names)
+
+    def unreleased(self, repo, release, base):
+        return list(self.unreleased_commits)
+
+    def describe(self, repo, number, title, body):
+        self.descriptions[number] = (title, body)
 
 
 class FakeExecutor:
@@ -617,3 +629,73 @@ def test_a_failed_lookup_of_the_build_does_not_keep_the_code_from_review(world):
     world.preview(served=False)
     assert world.item.phase == "Code review"
     assert "CI's run of it could not be looked up" in world.svc.code_host.comments[-1][2]
+
+
+MERGES = [
+    "Merge pull request 'EWA-1: Orders' (#3) from feat/EWA-1_orders-filter-by-status into development",
+    "feat(EWA-1): orders",
+    "Merge pull request 'EWA-4: Tooltip' (#8) from feat/EWA-4_tooltip into development",
+]
+
+
+def to_on_dev(world):
+    to_code_review(world)
+    world.svc.chat.answers["@agent ok, merge it into dev"] = ("merge", 0.9)
+    world.hook("gitea", "review_approved", sender__login="sergey")
+    world.finish({"result": "archived"})
+    assert world.item.phase == "On dev"
+
+
+def test_a_release_is_prepared_on_request_and_its_tickets_are_released_when_published(world):
+    to_on_dev(world)
+    host = world.svc.code_host
+    host.unreleased_commits = MERGES
+    world.svc.chat.answers["@agent looks good, go ahead"] = ("prepare_release", 0.9)
+    world.hook("plane", "comment_mention_agent")
+    number, (head, base) = list(host.prs.items())[-1]
+    assert (head, base) == ("development", "main")
+    said = world.svc.tracker.comments[-1][1]
+    assert f"Release 0.1.0 is ready for review: https://gitea.sdlc.internal/sdlc/example-webapp/pulls/{number}" in said
+    assert "EWA-1, EWA-4" in said and not host.merged[1:], "nothing merged but the item's own pull request"
+    assert host.descriptions[number][0] == "Release 0.1.0" and "- EWA-1\n- EWA-4" in host.descriptions[number][1]
+    host.unreleased_commits = [*MERGES, "Merge pull request 'EWA-6: x' (#9) from feat/EWA-6_x into development"]
+    world.hook("plane", "comment_mention_agent")  # asked again after another merge: the same pull request
+    assert list(host.prs)[-1] == number and "- EWA-6" in host.descriptions[number][1]
+
+    world.hook("gitea", "release_published", release__body="- EWA-1\n- EWA-4\n- OTHER-7")
+    assert world.item.phase == "Released" and world.svc.tracker.comments[-1][1] == "EWA-1 is released in v0.1.0."
+    world.hook("gitea", "release_published", release__body="- EWA-1")  # published again: once is enough
+    assert world.svc.tracker.statuses.count("Released") == 1
+
+
+def test_nothing_to_release_opens_no_pull_request(world):
+    to_on_dev(world)
+    prs = dict(world.svc.code_host.prs)
+    world.svc.chat.answers["@agent looks good, go ahead"] = ("prepare_release", 0.9)
+    world.hook("plane", "comment_mention_agent")
+    assert world.svc.code_host.prs == prs and "nothing to release" in world.svc.tracker.comments[-1][1]
+
+
+def test_asked_to_merge_a_release_the_agent_says_only_a_person_does(world):
+    to_on_dev(world)
+    host = world.svc.code_host
+    host.prs[9] = ("development", "main")
+    calls = world.svc.chat.calls
+    world.svc.chat.answers["@agent ok, merge it"] = ("merge", 0.9)
+    world.hook(
+        "gitea",
+        "comment_mention_agent",
+        issue__number=9,
+        pull_request__number=9,
+        pull_request__head__ref="development",
+        pull_request__base__ref="main",
+        comment__body="@agent ok, merge it",
+    )
+    assert host.comments[-1][1] == 9 and "Only a person merges a release into main" in host.comments[-1][2]
+    assert 9 not in host.merged and world.svc.chat.calls == calls, "no reading, no merge"
+
+
+def test_a_release_leaves_an_item_that_is_not_on_dev_as_it_is(world):
+    to_code_review(world)
+    world.hook("gitea", "release_published", release__body="- EWA-1")
+    assert world.item.phase == "Code review"

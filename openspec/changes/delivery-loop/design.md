@@ -632,6 +632,14 @@ the next minor version after the latest tag (`v0.1.0` when there is none), opens
 with the ticket list, and replies with the link. When Gitea sends `release` published, the
 orchestrator moves every listed ticket to Released and comments the version.
 
+Built in task 10.1 (`orchestrator/src/orchestrator/releases.py`): the commits come from Gitea's
+commits API (`development`, not `main`), and the tickets from the merge commits of `feat/<KEY>_…`
+branches, as the product's release workflow reads them; asked again, the open release pull
+request is found and its title and list brought up to date. Only an item On dev moves to
+Released. A mention of `@agent` on the release pull request gets "only a person merges a release
+into main" and nothing else. A pull request merged by squash or rebase leaves no merge commit, so
+its ticket is missing from the release; the loop's own merges are merge commits.
+
 ### 16. Secrets and configuration
 
 - `secrets.manifest` gains `LLM_API_KEY` (external, required: the model provider's key, RouterAI's

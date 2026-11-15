@@ -20,6 +20,7 @@ src/orchestrator/
   intents.py     reading a request with one model call
   replies.py     the agent's answers in its own words: to questions, and to what it could not read
   previews.py    Deploying to QA: the wait for a pull request's preview to serve the pushed commit
+  releases.py    the version (next minor, 0.1.0 first) and the tickets of a release pull request
   llm.py         the model provider's clients, chosen by the model's prefix
   logs.py        JSON logs through structlog, with the ids bound to a delivery, thread or run
   metrics.py     the Prometheus metrics at /metrics

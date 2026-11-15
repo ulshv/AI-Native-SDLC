@@ -211,6 +211,13 @@ class PreviewChecked(CommandBase):
     served: bool
 
 
+class Released(CommandBase):
+    """A release that lists the item's ticket was published."""
+
+    kind: Literal["released"] = "released"
+    version: str  # its tag, such as v0.1.0
+
+
 class StepFailed(CommandBase):
     """A step of the thread failed every time it was tried, and its event was given up."""
 
@@ -219,6 +226,7 @@ class StepFailed(CommandBase):
 
 
 Command = Annotated[
-    Intake | Request | RunFinished | PrChanged | StatusSet | PreviewChecked | StepFailed, Field(discriminator="kind")
+    Intake | Request | RunFinished | PrChanged | StatusSet | PreviewChecked | Released | StepFailed,
+    Field(discriminator="kind"),
 ]
 COMMANDS: TypeAdapter[Command] = TypeAdapter(Command)

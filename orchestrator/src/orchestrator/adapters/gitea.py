@@ -334,6 +334,24 @@ class GiteaCodeHost:
         ]
         return min(builds, key=lambda b: BUILD_ORDER.get(b.status, 1), default=None)
 
+    def branches_of(self, repo: str, number: int) -> tuple[str, str]:
+        pr = self.api.json("GET", f"/repos/{repo}/pulls/{number}")
+        return str(pr["head"]["ref"]), str(pr["base"]["ref"])
+
+    def tags(self, repo: str) -> list[str]:
+        return [str(tag["name"]) for tag in self.every(f"/repos/{repo}/tags")]
+
+    def unreleased(self, repo: str, release: str, base: str) -> list[str]:
+        # "not" is a keyword in Python, hence the dict.
+        commits = self.every(
+            f"/repos/{repo}/commits",
+            **{"sha": base, "not": release, "stat": "false", "verification": "false", "files": "false"},
+        )
+        return [str(cast(dict[str, Any], c.get("commit") or {}).get("message") or "") for c in commits]
+
+    def describe(self, repo: str, number: int, title: str, body: str) -> None:
+        self.api.call("PATCH", f"/repos/{repo}/pulls/{number}", json={"title": title, "body": body})
+
     def review_comments(self, repo: str, number: int, reviewer: str) -> list[str]:
         reviews = [
             r

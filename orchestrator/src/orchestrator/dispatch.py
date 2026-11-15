@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from . import intents
 from .adapters import gitea, plane
-from .events import Event, Kind, PullRequest, Source, TrackerItem
+from .events import Event, Kind, PullRequest, Release, Source, TrackerItem
 from .links import Link, Links
 from .model import (
     COMMANDS,
@@ -24,6 +24,7 @@ from .model import (
     Intake,
     PrChanged,
     PreviewChecked,
+    Released,
     Request,
     RunFinished,
     RunResult,
@@ -38,7 +39,10 @@ from .queue import Delivery, Queue, Requeue
 
 log = logging.getLogger(__name__)
 
-IGNORED = {Kind.RELEASE}  # releases come with group 10
+RELEASE_PR = (
+    "Only a person merges a release into {release}: approve it and merge it here. "
+    "I prepare releases when asked on a ticket."
+)
 VIA = {Source.PLANE: Where.TICKET, Source.GITEA: Where.PR}  # where a request was made, and its answer goes
 # A reading may make an explicit signal more precise, never turn it around: an approving review
 # that asks to merge is a merge request, a review requesting changes stays one.
@@ -96,9 +100,17 @@ def preview_checked(delivery: Delivery) -> PreviewChecked:
     )
 
 
-# The orchestrator's own events (an agent run's result, a preview's check) name their thread
-# themselves and need no reading.
-OWN: dict[str, Callable[[Delivery], Command]] = {"job": run_finished, "preview": preview_checked}
+def released(delivery: Delivery) -> Released:
+    return Released(delivery=f"released/{delivery.delivery_id}", version=delivery.payload["version"])
+
+
+# The orchestrator's own events (an agent run's result, a preview's check, a release told to a
+# ticket's thread) name their thread themselves and need no reading.
+OWN: dict[str, Callable[[Delivery], Command]] = {
+    "job": run_finished,
+    "preview": preview_checked,
+    "released": released,
+}
 
 
 class Threads(Protocol):
@@ -141,15 +153,18 @@ class Dispatcher:
             return
         adapter = self.adapters.get(delivery.source)
         event = adapter(delivery) if adapter else None
-        if event is None or event.kind in IGNORED:
+        if event is None:
             return
         project = self.projects.of_event(event, self.tracker.identifier)
         if project is None:
             log.info("%s event of an unconnected project or repository: left alone", delivery.source)
             return
+        if isinstance(event.about, Release):
+            self._released(delivery, event.about, project)
+            return
         thread_id = self._thread_of(event, project)
         if thread_id is None:
-            log.info("%s on %s, which no thread works on: left alone", event.kind, event.link)
+            self._release_pr(delivery, event, project)
             return
         if delivery.routing_key != thread_id:
             # The object got its thread after this event was recorded, so it may have been taken
@@ -163,6 +178,36 @@ class Dispatcher:
         command = self._command(delivery, key, event, project, item)
         if command is not None:
             self.threads.run(thread_id, command)
+
+    def _released(self, delivery: Delivery, release: Release, project: Project) -> None:
+        """A published release goes to the thread of each ticket it lists, as an event of that
+        thread, so each thread takes it in its own order."""
+        for key in release.tickets:
+            thread_id = self.links.thread_of(Link("ticket", f"{project.name}/{key}"))
+            if thread_id is None:
+                log.info("release %s lists %s, which no thread works on", release.tag, key)
+                continue
+            self.queue.put(
+                "released",
+                f"{delivery.delivery_id}/{key}",
+                thread_id,
+                {"thread_id": thread_id, "version": release.tag},
+            )
+
+    def _release_pr(self, delivery: Delivery, event: Event, project: Project) -> None:
+        """A pull request no thread works on is left alone, unless it is a release (the base branch
+        into the release branch) and someone asks @agent there: only a person merges it."""
+        about = event.about
+        if not (event.mentions_agent and isinstance(about, PullRequest)):
+            log.info("%s on %s, which no thread works on: left alone", event.kind, event.link)
+            return
+        # Gitea's events name the pull request's branches; the API is asked when one does not.
+        branches = (about.head, about.base) if about.base else self.code_host.branches_of(about.repo, about.number)
+        if branches != (project.base, project.release):
+            log.info("%s on %s, which no thread works on: left alone", event.kind, event.link)
+            return
+        text = RELEASE_PR.format(release=project.release)
+        self.code_host.comment(about.repo, about.number, text, f"{delivery.source}/{delivery.delivery_id}")
 
     def _command(self, delivery: Delivery, key: str, event: Event, project: Project, item: WorkItem) -> Command | None:
         """What the event means for the item, read once: a retry acts on the first attempt's

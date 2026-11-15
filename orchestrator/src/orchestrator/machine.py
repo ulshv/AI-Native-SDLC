@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import releases
 from .executor import Run
 from .links import Links
 from .model import (
@@ -31,6 +32,7 @@ from .model import (
     PrChanged,
     Preview,
     PreviewChecked,
+    Released,
     Request,
     RunFinished,
     RunResult,
@@ -341,8 +343,25 @@ def archive_in_own_pr(s: Step, r: Request) -> None:
     s.start(Mode.ARCHIVE, Then.ARCHIVE_PR, branch=f"archive/{s.key}")
 
 
-def release_later(s: Step, r: Request) -> None:
-    s.say("Releases come with the next part of the loop.", r.via)
+def prepare_release(s: Step, r: Request) -> None:
+    """A release pull request of what the base branch has and the release branch lacks (design
+    decision 15); a person approves and merges it. Asked again, it is found, not opened twice."""
+    project, host = s.project, s.ports.code_host
+    messages = host.unreleased(s.repo, project.release, project.base)
+    if not messages:
+        s.say(f"There is nothing to release: {project.base} has nothing that {project.release} lacks.", r.via)
+        return
+    version = releases.next_version(host.tags(s.repo))
+    keys = releases.tickets(messages, project.identifier)
+    title, notes = releases.title(version), releases.notes(version, keys, project.release)
+    number = host.find_or_open_pr(s.repo, project.base, project.release, title, notes)
+    host.describe(s.repo, number, title, notes)  # one opened before lists what was merged then
+    listed = ", ".join(keys) or "no tickets"
+    s.say(
+        f"Release {version} is ready for review: {host.pr_url(s.repo, number)}, with {listed}. "
+        f"A person approves it and merges it into {project.release}; I never do.",
+        r.via,
+    )
 
 
 def answer(s: Step, r: Request) -> None:
@@ -382,7 +401,7 @@ POLICY: Policy[Handler] = Policy(
         Rule(Intent.REJECT, "reject it", OPEN, PEOPLE, reject, while_running=True),
         Rule(Intent.ANSWER, "take an answer", frozenset({Phase.NEEDS_INFO}), MEMBERS, resume),
         Rule(Intent.ARCHIVE, "archive the change", frozenset({Phase.ON_DEV}), ENGINEERS, archive_in_own_pr),
-        Rule(Intent.PREPARE_RELEASE, "prepare a release", None, PEOPLE, release_later, while_running=True),
+        Rule(Intent.PREPARE_RELEASE, "prepare a release", None, PEOPLE, prepare_release, while_running=True),
         Rule(Intent.ASK, "answer a question", None, MEMBERS, answer, while_running=True),
         Rule(Intent.UNCLEAR, "read it", None, MEMBERS, clarify, while_running=True),
     ]
@@ -497,6 +516,16 @@ def preview_checked(s: Step, c: PreviewChecked) -> None:
     )
 
 
+def released(s: Step, c: Released) -> None:
+    """A published release lists the ticket: its work, merged into the base branch, has reached
+    production. An item elsewhere (closed, or at work again after being assigned anew) stays."""
+    if s.item.phase != Phase.ON_DEV:
+        log.info("release %s lists %s, which is %s: left as it is", c.version, s.key, s.item.phase)
+        return
+    s.phase(Phase.RELEASED)
+    s.say(f"{s.key} is released in {c.version}.")
+
+
 def why_no_preview(s: Step, commit: str) -> str:
     """CI builds the image a preview runs: its run of the commit says what went wrong. Only a
     hint: a failed lookup must not keep the code from review, so it says so instead."""
@@ -584,6 +613,7 @@ STEPS: dict[type, Callable[[Step, Any], None]] = {
     PrChanged: pr_changed,
     StatusSet: status_set,
     PreviewChecked: preview_checked,
+    Released: released,
     StepFailed: step_failed,
 }
 
