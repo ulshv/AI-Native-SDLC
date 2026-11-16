@@ -2,24 +2,38 @@
 
 > From ticket to deployed change: AI agents do the work, humans make the decisions.
 
-![status](https://img.shields.io/badge/status-platform%20core%20running-16a34a)
+![status](https://img.shields.io/badge/status-delivery%20loop%20running-16a34a)
 ![python](https://img.shields.io/badge/python-LangGraph%20%C2%B7%20deepagents-3776ab)
 ![platform](https://img.shields.io/badge/platform-k3s%20%C2%B7%20Argo%20CD-0f766e)
 ![specs](https://img.shields.io/badge/specs-OpenSpec-7c3aed)
 &nbsp;·&nbsp; **English** | [Русский](README_ru.md)
 
 **Ship changes at the speed of a ticket.**
-An AI-native software development pipeline for companies going all-in on AI: a bug report
-or feature request becomes a reviewed spec, a tested PR and a deployed change. Agents
-drive it, people gate it. Built to slot into enterprise SDLC workflows on a self-hosted
-stack.
+A self-hosted, AI-native delivery pipeline for companies going all-in on AI. A product owner
+assigns a ticket to `@agent`, and it comes back as a reviewed spec, a tested pull request with a
+live preview and, once a person ships the release, a change in production. Agents do the
+routine work; people make the decisions at two gates, and who may approve or merge what is
+enforced by code and by branch protection in Git, not by a prompt. Built to slot into
+enterprise SDLC workflows: people stay in their task tracker, code review and chat.
+
+**What's inside.** A LangGraph orchestrator that keeps every work item as a durable thread in
+Postgres and turns comments from the task tracker and code review into intents checked against
+a policy of roles and phases. Coding agents (OpenCode, an open-source alternative to Claude
+Code, with any OpenAI-compatible model) run in isolated Kubernetes Jobs and work through
+OpenSpec delta specs, the reviewable contract between people and agents. Argo CD deploys a
+preview of every pull request, dev and production. Under it all is a platform built as code on
+Kubernetes (k3s): a Jira-like task tracker (Plane), Git hosting with CI and a container registry
+(Gitea, a lightweight GitLab alternative) and Postgres (CloudNativePG), rebuilt from this
+repository with one command and run as GitOps.
 
 > [!NOTE]
-> **Status: the platform core runs, the loop is next.** Step 0 of the [roadmap](#roadmap)
-> is done: k3s, Argo CD, Postgres, Gitea and Plane run on a local machine and rebuild from
-> this repository with one command ([run it](#run-it)). Everything else below is the target
-> architecture, and nothing is deployed to the cloud yet. Every decision with its trade-offs
-> is in [docs/decisions.md](docs/decisions.md).
+> **Status: the delivery loop runs end to end on a demo app.** On one machine, a ticket in the
+> task tracker for `example-webapp` goes through spec, code, preview and dev to a release in production: the
+> first release, `v0.1.0`, carried three tickets that way. A small feature took under 9
+> minutes from the assignment to the merge into `development`, about 5 of them the agent's
+> work. Step 1 of the [roadmap](#roadmap) is down to hardening and docs; from step 2 on,
+> everything below is target architecture, and nothing runs in the cloud yet. Every decision
+> with its trade-offs is in [docs/decisions.md](docs/decisions.md).
 
 ---
 
@@ -48,17 +62,17 @@ recorded: who asked for what, which plan was approved, and who accepted the code
 It runs on the company's own servers, so code and data never leave them.
 
 > [!IMPORTANT]
-> This is the goal, not a proven result. The platform the pipeline runs on is built; the
-> loop itself is next on the [roadmap](#roadmap). Whether agents handle real products at
-> acceptable quality and cost is exactly what the [metrics](#how-well-know-it-works) will
-> show.
+> This is the goal, not a proven result. The loop runs end to end on a small demo app.
+> Whether agents handle real products at acceptable quality and cost is exactly what the
+> [metrics](#how-well-know-it-works) will show.
 
 ## How it works, by example
 
 ![How it works, by example](docs/diagrams/example.svg)
 
 A product owner wants to filter orders by status on the dashboard of `example-webapp`. This is
-the whole path as the people involved see it. *(It is the target flow of roadmap step 1.)*
+the whole path as the people involved see it. *(This is how it runs today, except the chat:
+Mattermost arrives with roadmap step 4, and until then the release is asked for in the ticket.)*
 Any of these messages could just as well come from Plane, Mattermost or a Gitea comment, and
 the agent answers where it was asked.
 
@@ -70,10 +84,12 @@ the agent answers where it was asked.
    `development` with only the spec in it. The ticket moves to Spec review.
 4. **Approval.** "@agent looks good, go ahead". A model reads this as an approval, and code
    checks that a product owner may approve a spec at this point. Implementation starts.
-5. **Code and preview.** The code lands in the same PR, CI passes, and the agent posts a link
-   to the preview. The engineer asks for an empty state in a Gitea review. The agent replies
+5. **Code and preview.** The code lands in the same PR, and the ticket shows Deploying to QA
+   until the preview serves it. Then it moves to Code review, and the agent posts a link to the
+   preview. The engineer asks for an empty state in a Gitea review. The agent replies
    "Implementing a fix", and a few minutes later "Fix is ready, have a look" with the updated
-   preview. The engineer writes "@agent ok, merge it into dev".
+   preview. The engineer writes "@agent ok, merge it into dev". The agent archives the OpenSpec
+   change with one last commit, so the merged diff also shows how the specs changed, and merges.
 6. **Release.** In the chat, the product owner asks the agent to prepare a release. The agent
    opens release PR #35 into `main` with draft notes. Only a person can merge it: the engineer
    does, CI tags v1.6.0, production updates, and EWA-12 becomes Released.
@@ -143,14 +159,17 @@ The system has three layers:
 
 Two parts of the control plane are kept deliberately separate:
 
-- **Orchestrator** (long-lived, ours): a LangGraph graph per work item with a Postgres
-  checkpointer. It can wait days for a human without holding anything open: every event (a
-  comment, a status change, a finished Job) runs the graph one step from the saved state. The
-  work item's phase is an explicit field, not something inferred from the conversation.
+- **Orchestrator** (long-lived, ours): a LangGraph state machine. Each work item is a thread
+  whose state (the phase, the ticket key, the branch, the OpenSpec change, the preview) lives
+  in Postgres through the checkpointer. The Plane ticket and its pull request are only links to
+  that thread, so routing an event is one lookup. Webhooks go into a queue in the same
+  database, and every event (a comment, a status change, a finished Job) runs the thread one
+  step from its saved state, so it can wait days for a human without holding anything open. The
+  phase is an explicit field, not something inferred from the conversation.
 - **Harness** (short-lived, swappable): the coding agent that does the actual work in a
-  Kubernetes Job. It starts as **OpenCode** with models reached through an OpenAI-compatible
-  router, behind an `Executor` interface, so it can later be replaced by a custom LangGraph
-  harness without touching the orchestrator.
+  Kubernetes Job. It is **OpenCode** with any OpenAI-compatible model provider, behind an
+  `Executor` interface, so it can later be replaced by a custom LangGraph harness without
+  touching the orchestrator.
 
 <details>
 <summary>Mermaid source</summary>
@@ -207,16 +226,18 @@ It lives in its own Gitea repository and is tracked as project `EWA` in Plane.
   to the ticket.
 - **One PR, two gates.** The agent opens a PR into `development` that holds only the
   OpenSpec change. Approving it (a comment to `@agent`, the ticket status, or a review in Gitea)
-  starts the implementation, and the code lands in the same PR. The agent archives the change
-  there too, so the merged diff also shows how the specs changed. An engineer reviews it and
-  merges it, or tells `@agent` to.
+  starts the implementation, and the code lands in the same PR. An engineer reviews it and
+  merges it, or tells `@agent` to. After the code is approved, the agent archives the change
+  with one last commit, so the merged diff also shows how the specs changed.
 - **Previews live as long as the PR.** An Argo CD ApplicationSet watches the repository's PRs
-  and deploys the ones the orchestrator has labelled. Closing the PR removes the environment.
+  and deploys the ones the orchestrator has labelled `preview`. The ticket shows Deploying to
+  QA until the preview serves the pushed commit, then Code review. Closing the PR removes the
+  environment.
 - **The agent prepares a release, a person ships it.** When asked, `@agent` opens a release PR
   from `development` into `main` with draft release notes (the tickets since the last tag) and
   posts the link to the ticket or the chat. A person approves and merges it in Gitea. CI then
-  tags the next minor version (1.5.0 → 1.6.0; a major bump is set by hand) and publishes the
-  release, and the orchestrator moves its tickets to Released.
+  tags the next minor version (1.5.0 → 1.6.0, `v0.1.0` for the first; a major bump is set by
+  hand) and publishes the release, and the orchestrator moves its tickets to Released.
 - **The image tag is the commit SHA, everywhere.** CI builds each pushed commit once, and Argo
   CD deploys the SHA it synced, so no bot commits image tags back to git. The version is a
   label on an image that already exists.
@@ -227,9 +248,10 @@ It lives in its own Gitea repository and is tracked as project `EWA` in Plane.
   cannot merge anything, even if a prompt injection tells it to.
 
 > [!NOTE]
-> This flow is the design for roadmap step 1 and is not built yet. Previews need wildcard
-> names on the host, which `/etc/hosts` can't provide; a spike decides how
-> ([open questions](docs/decisions.md#open)).
+> This runs on `example-webapp` today. Previews need every name under `sdlc.internal` to
+> resolve on the host, at any depth, which `/etc/hosts` can't do: a `dnsmasq` on `127.0.0.2`
+> answers that domain alone, and systemd-resolved sends it nothing else
+> ([host changes](platform/README.md#host-changes-and-removal)).
 
 <details>
 <summary>Mermaid source</summary>
@@ -300,7 +322,7 @@ and mirrors state back. That makes the following rules easy to enforce:
   Gitea, go through the same rules without the model.
 - **One source of truth.** A Plane comment, a Gitea review or a Mattermost reply reaches the same transition.
 - **No echo loops.** The agent never mentions itself, and events it wrote are dropped.
-- **Correlation.** One record links the Plane issue, the OpenSpec change, the branch and its PR, the preview, the Mattermost thread and the LangGraph thread.
+- **Threads first.** A work item is one orchestrator thread. The Plane ticket, its PR and later the Mattermost thread are links to it, and the branch, the OpenSpec change and the preview are in its state, so the thread can be found from any of them.
 - **Clarifications.** When the agent is unsure, it asks in the ticket (later also in the chat thread) and stops. The next comment that mentions it continues the work.
 - **No stale approvals** *(after step 1)*. An approval applies to the spec revision the agent reported (the PR head SHA). If the spec changed since, the approval is ignored and its author is told.
 
@@ -335,10 +357,12 @@ stateDiagram-v2
 
 | Concern | Choice | Why | Considered |
 |---|---|---|---|
-| Orchestrator and the agent app | **Python, LangGraph, deepagents** | Python-first agent ecosystem. Checkpointers keep each work item's state between events that can be days apart. | — |
-| Coding harness | **OpenCode** + models via RouterAI | Already wired to OpenSpec commands. Swappable behind an `Executor` interface. The model and the provider are configuration: DeepSeek V4 Flash for tests and first demos; GLM-5.3 or Kimi K3-class models for coding and review, aiming at frontier-level code at a fraction of the price, which the [metrics](#how-well-know-it-works) have to confirm. | custom LangGraph harness (later) |
+| Orchestrator | **Python, LangGraph** | A state machine, not an open-ended agent: one model call reads a request, code decides what is allowed. Checkpoints keep each work item's state between events that can be days apart. | LangChain DeepAgents, kept for triage and the agent app |
+| Event queue | **A table in Postgres** | Events and checkpoints in one database, deduplicated by delivery id, for a few dozen events a day. Behind an interface. | NATS JetStream, once several services consume the events |
+| Coding harness | **OpenCode** + any OpenAI-compatible provider | Already wired to OpenSpec commands. Swappable behind an `Executor` interface. The model and the provider are configuration (RouterAI by default): DeepSeek V4.1 Flash runs the loop today; GLM-5.3 or Kimi K3-class models for coding and review, aiming at frontier-level code at a fraction of the price, which the [metrics](#how-well-know-it-works) have to confirm. | custom LangGraph harness (later) |
 | Specs | **OpenSpec** | Delta specs are a reviewable contract between humans and agents. | plain prompts / tickets |
-| Git and CI | **Gitea** + Gitea Actions | ~200 MB RAM. Required approvals, approver allowlists and dismissal of stale approvals are free. GitHub Actions compatible. | GitLab CE (4–8 GB RAM, no required approvals in the free tier), Forgejo, OneDev |
+| Git, CI and images | **Gitea** + Gitea Actions + its container registry | ~200 MB RAM. Required approvals, approver allowlists and dismissal of stale approvals are free. GitHub Actions compatible. | GitLab CE (4–8 GB RAM, no required approvals in the free tier), Forgejo, OneDev |
+| Target agent app | **deepagents** | A business agent that calls LLMs, so the loop has real traces to triage (step 2). | — |
 | Tracker | **Plane CE** | Jira-like features, REST API and webhooks in the free edition. | GitLab Issues, OpenProject, Redmine, Taiga |
 | Chat | **Mattermost TE** | Interactive message buttons for quick approvals. | — |
 | Logs | **Loki + Grafana** | Lightweight, and LogQL is easy for an agent to query. | OpenSearch |
@@ -416,13 +440,17 @@ listening there, before bootstrapping.
 ### Run it
 
 ```bash
-platform/bootstrap.sh   # build or rebuild the platform: ~11 min from scratch, safe to re-run
-platform/smoke.sh       # 28 end-to-end checks
+platform/bootstrap.sh       # build or rebuild the platform: ~11 min from scratch, safe to re-run
+platform/accounts.sh        # people's accounts in Plane and Gitea, from accounts.yaml
+platform/seed-projects.sh   # connect the target projects, starting with example-webapp
+platform/smoke.sh           # 28 end-to-end checks
 ```
 
 Then the services are at <https://gitea.sdlc.internal>, <https://argocd.sdlc.internal> and
-<https://plane.sdlc.internal>, with certificates from a local CA that the bootstrap adds to
-the system and to Chrome. From here on, every change to the platform is a `git push`: Argo CD
+<https://plane.sdlc.internal>, and `example-webapp` at <https://dev.example-webapp.sdlc.internal>
+and <https://example-webapp.sdlc.internal>, with certificates from a local CA that the bootstrap
+adds to the system and to the browsers. To start the loop, assign a ticket in Plane's `EWA`
+project to `agent`. From here on, every change to the platform is a `git push`: Argo CD
 reconciles the cluster from `main` in Gitea, Argo CD itself included. Secret values live in
 `~/.config/ai-native-sdlc/secrets.env` and never enter git.
 
@@ -438,7 +466,7 @@ Logins, what the bootstrap changes on the host and how to undo it:
 Each step is one OpenSpec change: spec first, then implementation.
 
 - [x] **0. Platform core**: k3s, Argo CD app-of-apps, CloudNativePG, Gitea, Plane CE ([change](openspec/changes/archive/2026-11-01-platform-core/proposal.md))
-- [ ] **1. Delivery loop on `example-webapp`**: a Plane ticket assigned to `@agent` → spec in a PR → approval to `@agent` in Plane or Gitea → code from an OpenCode k8s Job in the same PR → merge into `development` by a person or at their request, with [previews, dev and production](#branches-and-environments), releases prepared by the agent, and CI on a Gitea runner
+- [ ] **1. Delivery loop on `example-webapp`** *(runs end to end; hardening and docs left, [change](openspec/changes/delivery-loop/proposal.md))*: a Plane ticket assigned to `@agent` → spec in a PR → approval to `@agent` in Plane or Gitea → code from an OpenCode k8s Job in the same PR → merge into `development` by a person or at their request, with [previews, dev and production](#branches-and-environments), releases prepared by the agent, and CI on a Gitea runner
 - [ ] **2. Target agent app**: a deepagents business agent with Langfuse tracing, in its own repository
 - [ ] **3. Triage**: logs (Loki) and traces (Langfuse) in the spec agent's context
 - [ ] **4. More channels**: Mattermost threads and buttons
@@ -464,8 +492,9 @@ orchestrator itself go through the orchestrator.
 ```
 openspec/        specs (source of truth), changes in flight and archived ones
 docs/            decisions and diagrams
-platform/        bootstrap, Argo CD apps, Helm values, smoke checks
-orchestrator/    the SDLC control plane                (planned)
+platform/        bootstrap, Argo CD apps, Helm values, target projects, smoke checks
+orchestrator/    the SDLC control plane: threads, policy, adapters, agent runs
+agent-runner/    the image of an agent run: OpenCode and OpenSpec in a Kubernetes Job
 ```
 
 Target apps live in their own repositories, starting with `example-webapp`, so the
