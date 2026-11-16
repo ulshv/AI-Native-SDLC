@@ -120,8 +120,8 @@ Tasks 7.12–7.27 bring the orchestrator and the platform's CI to the engineerin
 ## 10. Releases
 
 - [ ] 10.1 Implement `prepare_release` and the handling of Gitea's `release` event from design decision 15. Verify with tests the version rule (minor bump, `v0.1.0` first), the ticket list, the "nothing to release" reply, and the refusal to merge a release
-- [ ] 10.2 Run a release: "@agent let's prepare a release" in Plane, approve and merge it in Gitea as a person. Verify tag `v0.1.0` and its Gitea release, the image tagged `0.1.0`, production running it, and every listed ticket Released with a comment
-- [ ] 10.3 Verify that the `agent` account cannot merge the release PR even through the API, and document the release flow in `platform/README.md`
+- [x] 10.2 Run a release: "@agent let's prepare a release" in Plane, approve and merge it in Gitea as a person. Verify tag `v0.1.0` and its Gitea release, the image tagged `0.1.0`, production running it, and every listed ticket Released with a comment
+- [x] 10.3 Verify that the `agent` account cannot merge the release PR even through the API, and document the release flow in `platform/README.md`
 
 ## 11. Hardening
 

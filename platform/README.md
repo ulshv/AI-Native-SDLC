@@ -407,6 +407,30 @@ repository, with the image CI built from the very commit it deploys (design deci
 - **Watching:** `kubectl get applications -n argocd` lists `<project>-dev`, `<project>-prod`,
   `<project>-<id>` and `project-<project>`; Argo CD's UI shows the same.
 
+### Releases
+
+A release is prepared by the agent and shipped by a person (design decision 15 of
+`delivery-loop`):
+
+1. **Ask:** a person of the project writes "@agent let's prepare a release" on any ticket of the
+   loop. The orchestrator collects what `development` has and `main` lacks, takes the tickets
+   from the merge commits of `feat/<KEY>_…` branches, and opens (or brings up to date) the pull
+   request "Release X.Y.Z" from `development` into `main`, listing them. The version is the next
+   minor one after the latest `vX.Y.Z` tag, `0.1.0` first; a major version is a tag set by hand.
+   With nothing new on `development`, it says so and opens nothing.
+2. **Ship:** an engineer of the project approves the pull request in Gitea (Files changed →
+   Review → Approve) and merges it with a merge commit. `main` takes merges only from the
+   project's engineers after an approval; `agent` is on no list for `main`, so neither it nor a
+   prompt aimed at it can ship a release, and asked to, it answers that only a person merges.
+3. **Then, by itself:** the product's `release.yaml` waits for the commit's image (up to 15
+   minutes), tags it with the version, tags the commit `vX.Y.Z` and publishes the release with
+   the tickets; Argo CD moves prod to the merge commit; the orchestrator moves every listed
+   ticket from On dev to Released, with a comment naming the version.
+
+A feature merged by squash or rebase leaves no merge commit and is missing from the release; the
+loop's own merges are merge commits. If CI fails on `main`, `release.yaml` fails after its wait
+too: re-run CI's failed jobs, then the release workflow's (Gitea → Actions → the run → Re-run).
+
 ## Where to change what
 
 | To change | Edit | Takes effect |
